@@ -133,14 +133,15 @@ def load_user(user_id):
 
 
 @app.before_request
-def ensure_auth_tables():
-    # Create auth table on first request if missing (avoids blocking local dev).
-    if getattr(app, '_auth_tables_checked', False):
+def ensure_core_tables():
+    # Create core tables on first request if missing.
+    if getattr(app, '_core_tables_checked', False):
         return
     try:
-        User.__table__.create(bind=db.engine, checkfirst=True)
-    finally:
-        app._auth_tables_checked = True
+        db.create_all()
+        app._core_tables_checked = True
+    except Exception:
+        app.logger.exception('Failed creating core tables on startup.')
 #----------------------------------------------------------------------------#
 # Filters.
 #----------------------------------------------------------------------------#
