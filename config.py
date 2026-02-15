@@ -16,7 +16,18 @@ DEBUG = _bool_env('FLASK_DEBUG', False)
 # Never use a randomly generated key in production; set SECRET_KEY in env.
 SECRET_KEY = os.getenv('SECRET_KEY', 'dev-only-change-me')
 
-database_url = os.getenv('DATABASE_URL') or os.getenv('SQLALCHEMY_DATABASE_URI')
+def _clean_env_url(value):
+    """Trim whitespace and accidental surrounding quotes from env URLs."""
+    if not value:
+        return value
+    value = value.strip()
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        value = value[1:-1].strip()
+    return value
+
+
+# Prefer explicit SQLALCHEMY_DATABASE_URI when both are present.
+database_url = _clean_env_url(os.getenv('SQLALCHEMY_DATABASE_URI')) or _clean_env_url(os.getenv('DATABASE_URL'))
 if database_url and database_url.startswith('postgres://'):
     database_url = database_url.replace('postgres://', 'postgresql://', 1)
 
