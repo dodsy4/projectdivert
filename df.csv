@@ -1,0 +1,14 @@
+Material,Amount,Tonnage,Percentage chance of reuse or recycle
+chairs,28,0.42,80
+tables,2,0.05,5
+desks (not curved),4,0.14,20
+fridges,1,0.06,5
+microwaves,1,0.015,5
+Tambour units,4,0.14,20
+waste paper bins,2,n/a,5
+soap dispenser,1,n/a,5
+Glazed partitions,2,0.1,80
+Shelves,3,0.6,50
+Sets of Drawers,2,0.5,60
+Printer,1,0.1,80
+Lockers,12,0.5,50

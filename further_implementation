@@ -1,0 +1,239 @@
+class m(db.Model):
+    __tablename__ = 'm'
+
+    id = db.Column(db.Integer, primary_key=True)
+    waste_stream = db.Column(db.String)
+    amount = db.Column(db.Integer)
+    city = db.Column(db.String(120))
+    county = db.Column(db.String(120))
+    address = db.Column(db.String(120))
+    phone = db.Column(db.String(120))
+    image_link1 = db.Column(db.String(120))
+    image_link2 = db.Column(db.String(120))
+    image_link3 = db.Column(db.String(120))
+    project = db.Column(db.String(120))
+
+    # TODO: implement any missing fields, as a database migration using Flask-Migrate
+    def __repr__(self):
+        return '<Material {}>'.format(self.name)
+
+
+class request(db.Model):
+    __tablename__ = 'request'
+    id = db.Column(db.Integer, primary_key=True)
+    mat_id = db.Column(db.Integer, db.ForeignKey('m.id'), nullable=False)
+    a_id = db.Column(db.Integer, db.ForeignKey('a.id'), nullable=False)
+    message = db.Column(db.String(120), nullable=False)
+
+    def __repr__(self):
+        return '<Request {}{}>'.format(self.artist_id, self.venue_id)
+
+
+#  Create Request
+#  ----------------------------------------------------------------
+@app.route('/materials/request', methods=['GET'])
+
+def request_material_form():
+    form = RequestMaterialForm()
+    return render_template('forms/new_request.html', form=form)
+
+@app.route('/materials/request', methods=['POST'])
+
+def create_request_submission():
+    error=False
+    try:
+        name = request.form['name']
+        
+        
+        
+        request = r(name=name, city=city, county=county, address=address, phone=phone, genres=genres, facebook_link=facebook_link, image_link=image_link, website=website, seeking_description=seeking_description, seeking_venue=seeking_venue)
+        db.session.add(request)
+        db.session.commit()
+    
+    except:
+        error=True
+        db.session.rollback()
+        print(sys.exc_info())
+
+    finally:
+        db.session.close()
+    
+    if error:
+        flash('Error. Request was not sent.')
+
+    if not error:
+        flash('Request sent!')
+        
+    return render_template('pages/home.html')
+
+#----------------------------------------------------------------------------#
+#  Materials
+#----------------------------------------------------------------------------#
+@app.route('/materials')
+
+def materials():
+  # TODO: replace with real venues data.
+  # num_shows should be aggregated based on number of upcoming shows per venue.
+    
+    all_areas = m.query.with_entities(func.count(m.id), m.city, m.county).group_by(m.city, m.county).all()
+    data = []
+
+    for area in all_areas:
+        area_materials = m.query.filter_by(county=area.county).filter_by(city=area.city).all()
+    
+        material_data = []
+    
+        for material in area_materials:
+            material_data.append({
+                "id": m.id,
+                "name": m.name
+                })
+    
+    
+        data.append({
+            "city": area.city,
+            "state": area.county, 
+            "venues": material_data
+            })
+
+    
+    return render_template('pages/venues.html', areas=data)
+
+@app.route('/materials/search', methods=['POST'])
+
+def search_materials():
+  # TODO: implement search on artists with partial string search. Ensure it is case-insensitive.
+  # seach for Hop should return "The Musical Hop".
+  # search for "Music" should return "The Musical Hop" and "Park Square Live Music & Coffee"
+    search_term = request.form.get('search_term', '')
+    search_result = db.session.query(m).filter(m.name.ilike(f'%{search_term}%')).all()
+    data = []
+
+    for result in search_result:
+        data.append({
+            "id": result.id,
+            "name": result.name
+        })
+  
+    response={
+        "count": len(search_result),
+        "data": data
+    }
+  
+    return render_template('pages/search_materials.html', results=response, search_term=request.form.get('search_term', ''))
+
+@app.route('/materials/<int:material_id>')
+
+def show_material(material_id):
+  # shows the venue page with the given venue_id
+  # TODO: replace with real venue data from the venues table, using venue_id
+
+  
+    material = m.query.get(material_id)
+
+    if not material: 
+        return render_template('errors/404.html')
+
+    data = {
+        "id": material.id,
+        "material": material.waste_stream,
+        "city": material.city,
+        "county": material.county,
+        "address": material.address,
+    }
+
+    return render_template('pages/show_material.html', material=data)
+
+
+#  ----------------------------------------------------------------
+#  Edit Accounts Details
+#  ----------------------------------------------------------------
+@app.route('/account_details/<int:account_id>')
+
+def show_account(account_id):
+  # shows the venue page with the given venue_id
+  # TODO: replace with real venue data from the venues table, using venue_id
+
+  
+    account = c.query.get(account_id)
+
+    if not account: 
+        return render_template('errors/404.html')
+
+    data = {
+        "id": account.id,
+        "address1": account.address,
+        "city1": account.city,
+        "county1": account.county,
+        "address2": account.address,
+        "city2": account.city,
+        "county2": account.county,
+        "address3": account.address,
+        "city3": account.city,
+        "county3": account.county,
+        "phone": account.phone,
+        "facebook_link": account.facebook_link,
+        "linkedin_link": account.linkedin_link,
+        "website": account.website,
+        "interests": account.interests
+    }
+
+    return render_template('pages/show_account.html', material=data)
+
+
+# see: http://flask.pocoo.org/docs/1.0/patterns/flashing/
+
+@app.route('/account_details/<int:account_id>/edit', methods=['GET'])
+
+def edit_account(account_id):
+    form = CharityForm()
+    charity = c.query.get(account_id)
+    
+    if charity:
+        form.name.data = c.name
+        form.city.data = c.name
+
+  # TODO: populate form with fields for charity edit
+
+    return render_template('forms/edit_charity.html', form=form, artist=artist)
+
+@app.route('/account_details/<int:account_id>/edit', methods=['POST'])
+
+def edit_account_submission(account_id):
+  # TODO: take values from the form submitted, and update existing
+  # artist record with ID <artist_id> using the new attributes
+    error = False
+    charity = c.query.get(account_id)
+   
+    try:
+        charity.name = request.form['name']
+        charity.address1 = request.form['address']
+        charity.city1 = request.form['city']
+        charity.county1 = request.form['county']
+        charity.address2 = request.form['address']
+        charity.city2 = request.form['city']
+        charity.county2 = request.form['county']
+        charity.address3 = request.form['address']
+        charity.city3 = request.form['city']
+        charity.county3 = request.form['county']
+        charity.phone = request.form['phone']
+        charity.facebook_link = request.form['facebook_link']
+        charity.website = request.form['website']
+        db.session.commit()
+    
+    except:
+        error = True
+        db.session.rollback()
+        print(sys.exc_info())
+    
+    finally:
+        db.session.close()
+    
+    if error:
+        flash('An error occurred. Account details could not be changed.')
+
+    if not error:
+        flash('Account details were successfully successfully changed.')
+    
+
+    return redirect(url_for('show_account', account_id=account_id))
