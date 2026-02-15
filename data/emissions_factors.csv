@@ -1,0 +1,43 @@
+Activity,Waste type,PD waste type,Unit,Reuse,Open-loop,Closed-loop,Combustion,Anaerobic digestion,Composting,Landfill
+Construction,Aggregates,HAR01,tonnes,1.08010675,1.08010675,1.08010675,21.76,,,1.3532855000000001
+Construction,Average construction,MIX01,tonnes,1.08010675,1.37,1.08010675,21.76,,,136.521712204372
+Construction,Asbestos,HAZ01,tonnes,,,,21.76,,,75.5
+Construction,Asphalt,,tonnes,1.08010675,1.37,1.08010675,21.76,,,1.3532855000000001
+Construction,Bricks,BRI01,tonnes,,1.08010675,,21.76,,,1.3532855000000001
+Construction,Concrete,CON01,tonnes,1.1,1.08010675,1.08010675,21.76,,,1.3532855000000001
+Construction,Insulation,INS01,tonnes,,,1.08010675,21.76,,,1.3532855000000001
+Construction,Metals,MET01,tonnes,,,1.08010675,21.76,,,1.3532855000000001
+Construction,Soils,NHM01,tonnes,,,1.08010675,21.76,,,16.343381349286354
+Construction,Mineral oil,OIL01,tonnes,,,21.76,21.76,,,
+Construction,Plasterboard,PLA01,tonnes,1.1,1.4,21.76,21.76,,,71.95
+Construction,Tyres,,tonnes,21.76,21.76,21.76,21.76,,,
+Construction,Wood,TIM01,tonnes,64.50722573643411,21.76,21.76,21.76,,21.76,819.1302732262319
+Other,Books,PAP01,tonnes,,,21.76,21.76,,21.76,1042.2017012748975
+Other,Glass,GLA01,tonnes,,21.76,21.76,21.76,,,26.0
+Other,Clothing,,tonnes,21.76,,21.76,21.76,,,445.3414143989599
+Refuse,Municipal waste,MUN01,tonnes,,21.76,21.76,21.76,21.76,,588.9062577878318
+Refuse,Organic: food and drink waste,,tonnes,,,,21.76,21.76,6.0,627.2728739061154
+Refuse,Organic: garden waste,GARD01,tonnes,,,,21.76,21.76,6.0,579.357141463108
+Refuse,Organic: mixed food and garden waste,,tonnes,,,,21.76,21.76,6.0,587.7423946406343
+Refuse,Commercial and industrial waste,FURN01,tonnes,64.50722573643411,21.76,21.76,21.76,21.76,21.76,819.1302732262319
+Electrical items,WEEE - fridges and freezers,WEE01,tonnes,,21.76,,21.76,,,16.58
+Electrical items,WEEE - large,,tonnes,,21.76,,21.76,,,16.58
+Electrical items,WEEE - mixed,,tonnes,,21.76,,21.76,,,16.58
+Electrical items,WEEE - small,,tonnes,,21.76,,21.76,,,16.58
+Electrical items,Batteries,ELE01,tonnes,,64.63648816355176,,21.76,,,75.49186410176753
+Metal,Metal: aluminium cans and foil (excl. forming),NON01,tonnes,,,21.76,21.76,,,9.3
+Metal,Metal: mixed cans,,tonnes,,,21.76,21.76,,,9.3
+Metal,Metal: scrap metal,FER01,tonnes,,,21.76,21.76,,,9.3
+Metal,Metal: steel cans,,tonnes,,,21.76,21.76,,,9.3
+Plastic,Plastics: average plastics,PLA02,tonnes,,21.76,21.76,21.76,,,9.3
+Plastic,Plastics: average plastic film,,tonnes,,21.76,21.76,21.76,,,9.3
+Plastic,Plastics: average plastic rigid,,tonnes,,21.76,21.76,21.76,,,9.3
+Plastic,Plastics: HDPE (incl. forming),,tonnes,,21.76,21.76,21.76,,,9.3
+Plastic,Plastics: LDPE and LLDPE (incl. forming),,tonnes,,21.76,21.76,21.76,,,9.3
+Plastic,Plastics: PET (incl. forming),,tonnes,,21.76,21.76,21.76,,,9.3
+Plastic,Plastics: PP (incl. forming),,tonnes,,21.76,21.76,21.76,,,9.3
+Plastic,Plastics: PS (incl. forming),,tonnes,,21.76,21.76,21.76,,,9.3
+Plastic,Plastics: PVC (incl. forming),,tonnes,,21.76,21.76,21.76,,,9.3
+Paper,Paper and board: board,PAC01,tonnes,,,21.76,21.76,,21.76,1042.2017012748975
+Paper,Paper and board: mixed,,tonnes,,,21.76,21.76,,21.76,1042.2017012748975
+Paper,Paper and board: paper,,tonnes,,,21.76,21.76,,21.76,1042.2017012748975

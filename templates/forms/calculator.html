@@ -1,0 +1,160 @@
+{% extends 'layouts/main.html' %}
+{% block title %}Carbon Calculator{% endblock %}
+{% block content %}
+<style>
+  .calc-shell {
+    max-width: 980px;
+    margin: 12px auto 30px;
+  }
+
+  .calc-head {
+    background: linear-gradient(135deg, #0e6fae, #4ca3d7);
+    color: #fff;
+    border-radius: 12px;
+    padding: 18px;
+    margin-bottom: 14px;
+  }
+
+  .calc-head h2 {
+    margin: 0 0 6px;
+    font-size: 30px;
+  }
+
+  .calc-head p {
+    margin: 0;
+    opacity: 0.95;
+  }
+
+  .calc-form {
+    background: #fff;
+    border: 1px solid #d9e7f2;
+    border-radius: 12px;
+    box-shadow: 0 4px 14px rgba(10, 40, 66, 0.08);
+    padding: 16px;
+  }
+
+  .calc-section {
+    border: 1px solid #e3edf6;
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 14px;
+    background: #fbfdff;
+  }
+
+  .calc-title {
+    margin: 0 0 10px;
+    font-size: 18px;
+    color: #184468;
+  }
+
+  .calc-help {
+    margin-top: 5px;
+    font-size: 12px;
+    color: #5e748b;
+  }
+</style>
+
+<div class="calc-shell">
+  <div class="calc-head">
+    <h2>Carbon & Cost Calculator</h2>
+    <p>Estimate savings by comparing traditional disposal against diverting materials.</p>
+  </div>
+
+  <form method="post" class="calc-form">
+    <section class="calc-section">
+      <h3 class="calc-title">1. Material and Quantity</h3>
+
+      <div class="row">
+        <div class="col-sm-6">
+          <div class="form-group">
+            <label for="material">Material</label>
+            {{ form.material(class_='form-control', autofocus=true) }}
+          </div>
+        </div>
+        <div class="col-sm-6">
+          <div id="custom-material-wrap" class="form-group" style="display:none;">
+            <label for="custom_output_material">If Other, enter material</label>
+            <input id="custom_output_material" name="custom_output_material" type="text" class="form-control" placeholder="e.g. Acoustic wall panel">
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-sm-6">
+          <div class="form-group">
+            <label for="amount">Amount</label>
+            {{ form.amount(class_='form-control', placeholder='e.g. 12') }}
+          </div>
+        </div>
+        <div class="col-sm-6">
+          <div class="form-group">
+            <label for="unit">Unit</label>
+            {{ form.unit(class_='form-control') }}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="calc-section">
+      <h3 class="calc-title">2. Cost Inputs</h3>
+
+      <div class="row">
+        <div class="col-sm-6">
+          <div class="form-group">
+            <label for="traditional_cost">Traditional Cost</label>
+            {{ form.traditional_cost(class_='form-control', placeholder='e.g. 850') }}
+          </div>
+        </div>
+        <div class="col-sm-6">
+          <div class="form-group">
+            <label for="divert_cost">Divert Cost</label>
+            {{ form.divert_cost(class_='form-control', placeholder='e.g. 400') }}
+          </div>
+        </div>
+      </div>
+      <p class="calc-help">Use the same currency for both cost fields.</p>
+    </section>
+
+    <section class="calc-section">
+      <h3 class="calc-title">3. Address Inputs</h3>
+
+      <div class="form-group">
+        <label for="site_address">Site Address</label>
+        {{ form.site_address(class_='form-control', placeholder='Collection site address') }}
+      </div>
+      <div class="form-group">
+        <label for="traditional_address">Traditional Route Address</label>
+        {{ form.traditional_address(class_='form-control', placeholder='Landfill / traditional destination') }}
+      </div>
+      <div class="form-group" style="margin-bottom:0;">
+        <label for="divert_address">Divert Route Address</label>
+        {{ form.divert_address(class_='form-control', placeholder='Reuse / recycle destination') }}
+      </div>
+    </section>
+
+    <input type="submit" value="Calculate Impact" class="btn btn-primary btn-lg btn-block">
+  </form>
+</div>
+
+<script>
+  (function () {
+    var materialSelect = document.getElementById('material');
+    var customWrap = document.getElementById('custom-material-wrap');
+    var customInput = document.getElementById('custom_output_material');
+
+    function toggleCustomMaterial() {
+      var show = materialSelect && materialSelect.value === 'Other';
+      customWrap.style.display = show ? 'block' : 'none';
+      customInput.required = show;
+      if (!show) {
+        customInput.value = '';
+      }
+    }
+
+    if (materialSelect) {
+      materialSelect.addEventListener('change', toggleCustomMaterial);
+      toggleCustomMaterial();
+    }
+  })();
+</script>
+{% endblock %}

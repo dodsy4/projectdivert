@@ -1,0 +1,22 @@
+{% extends 'layouts/main.html' %}
+{% block title %}Request Material{% endblock %}
+{% block content %}
+  <div class="form-wrapper">
+    <form method="post" class="form">
+      <h3 class="form-heading">Send Material Request</h3>
+      <p class="text-muted">Share your contact details and a short message so the material owner can respond.</p>
+      <div class="form-group">
+        <label for="email">Email</label>
+        {{ form.email(class_ = 'form-control', autofocus = true, placeholder='you@example.com') }}
+      </div>
+      <div class="form-group">
+        <label for="name">Message</label>
+        {{ form.message(class_ = 'form-control', autofocus = true, placeholder='Tell us how you will use this material...') }}
+      </div>
+      <input type="submit" value="Send Request" class="btn btn-primary btn-lg btn-block">
+      <div style="margin-top:10px;">
+        <a href="/materials">Back to materials</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

@@ -1,0 +1,89 @@
+{% extends 'layouts/main.html' %}
+{% block title %}Project Divert | Register{% endblock %}
+{% block content %}
+<style>
+  .register-shell {
+    max-width: 500px;
+    margin: 24px auto 34px;
+  }
+
+  .register-card {
+    background: #fff;
+    border: 1px solid #d8e3ef;
+    border-radius: 12px;
+    box-shadow: 0 4px 14px rgba(9, 36, 62, 0.08);
+    overflow: hidden;
+  }
+
+  .register-head {
+    background: linear-gradient(135deg, #0c6cae, #2f8fd4);
+    color: #fff;
+    padding: 18px;
+  }
+
+  .register-head h2 {
+    margin: 0 0 6px;
+    font-size: 28px;
+  }
+
+  .register-head p {
+    margin: 0;
+    opacity: 0.95;
+  }
+
+  .register-body {
+    padding: 18px;
+  }
+
+  .register-body .form-group {
+    margin-bottom: 12px;
+  }
+
+  .register-foot {
+    margin-top: 14px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+</style>
+
+<div class="register-shell">
+  <div class="register-card">
+    <div class="register-head">
+      <h2>Create Login</h2>
+      <p>Create an account to manage and submit requests.</p>
+    </div>
+
+    <div class="register-body">
+      <form method="post" action="/register">
+        <div class="form-group">
+          <label for="name">Name</label>
+          <input id="name" name="name" type="text" class="form-control" required>
+        </div>
+
+        <div class="form-group">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" class="form-control" required>
+        </div>
+
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" class="form-control" minlength="8" required>
+        </div>
+
+        <div class="form-group">
+          <label for="confirm_password">Confirm Password</label>
+          <input id="confirm_password" name="confirm_password" type="password" class="form-control" minlength="8" required>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block">Create Account</button>
+      </form>
+
+      <div class="register-foot">
+        <a href="/login" class="btn btn-default">Back to Login</a>
+        <a href="/submit_details1" class="btn btn-link">Full Account Setup</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

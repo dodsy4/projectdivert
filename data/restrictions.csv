@@ -1,0 +1,22 @@
+Restrictions,capacity t,type
+Weight limit 3.5t ,1.5,3.50 (cage/rigid)
+Weight limit 7.5t,3.5,7.50 (cage/rigid)
+Weight limit 18t,8.0,18.00 (12yd)
+Axle limit,12.0,18.00 (8yd)
+Height limit,12.0,18.00 (rigid)
+Width limit,1.5,3.50 (cage/rigid)
+Time limit,8.0,18.00 (8yd)
+Tipping ,4.2,25
+Loading,4.2,25
+Emissions zone,12.0,18.00 (12yd)
+Tail lift required,8.0,18.00 (rigid)
+HIAB required,12.0,18.00 (12yd)
+Side loading only,12.0,18.00 (rigid)
+None (bulk),28.0,44.00 LF
+None (20yd RoRO MR),10.0,32.00 (20yd MR)
+None (20yd RoRO Hd),10.0,32.00 (20yd Hd)
+None (40yd RoRO),10.0,32.00 (40 yd)
+Volume 11m3,1.5,3.50 (cage/rigid)
+Volume 23m3,3.5,7.50 (cage/rigid)
+Volume 46m3,8.0,18.00 (rigid)
+Volume 92m3,28.0,44.00 RCY

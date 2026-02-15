@@ -1,0 +1,470 @@
+{% extends 'layouts/main.html' %}
+{% block title %}Project Divert | Available Materials{% endblock %}
+{% block content %}
+<style>
+  body {
+    background: #f3f5f7;
+  }
+
+  .rm-shell {
+    max-width: 1160px;
+    margin: 0 auto;
+  }
+
+  .rm-top {
+    border: 1px solid #d6e2ef;
+    border-radius: 10px;
+    background: #fff;
+    padding: 14px;
+    margin-bottom: 14px;
+  }
+
+  .rm-title {
+    margin: 0 0 4px;
+    font-size: 26px;
+    color: #1b3550;
+  }
+
+  .rm-sub {
+    margin: 0;
+    color: #5a7088;
+    font-size: 14px;
+  }
+
+  .view-switch {
+    display: inline-flex;
+    border: 1px solid #c8d6e5;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-top: 10px;
+  }
+
+  .view-switch .btn {
+    border: 0;
+    border-radius: 0;
+    font-weight: 600;
+  }
+
+  .view-switch .btn + .btn {
+    border-left: 1px solid #c8d6e5;
+  }
+
+  .view-switch .active-view {
+    background: #0f6eb9;
+    color: #fff;
+  }
+
+  .rm-layout {
+    display: block;
+  }
+
+  .rm-filter {
+    width: 100%;
+    border: 1px solid #d6e2ef;
+    border-radius: 10px;
+    background: #fff;
+    padding: 14px;
+    position: static;
+    margin-bottom: 14px;
+  }
+
+  .rm-filter h4 {
+    margin: 0 0 10px;
+    color: #193c5d;
+  }
+
+  .rm-filter .form-group {
+    margin-bottom: 10px;
+  }
+
+  .rm-filter .btn {
+    margin-top: 4px;
+  }
+
+  .search-inline {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+  }
+
+  .search-inline .form-group {
+    flex: 1 1 0;
+    margin-bottom: 0;
+  }
+
+  .search-inline .form-group.radius-group {
+    flex: 0 0 150px;
+  }
+
+  .search-inline .btn {
+    margin-top: 0;
+    white-space: nowrap;
+  }
+
+  .rm-results {
+    width: 100%;
+  }
+
+  .rm-results-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .rm-count {
+    font-size: 14px;
+    color: #2f4b66;
+    margin: 0;
+  }
+
+  .rm-chip {
+    display: inline-block;
+    background: #edf5ff;
+    border: 1px solid #d5e6fa;
+    color: #2b5a87;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+
+  .rm-card {
+    border: 1px solid #d6e2ef;
+    border-radius: 10px;
+    background: #fff;
+    margin-bottom: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(9, 33, 58, 0.08);
+  }
+
+  .rm-card-inner {
+    display: flex;
+    min-height: 210px;
+  }
+
+  .rm-thumb {
+    width: 320px;
+    background: transparent;
+    color: #5f6d7b;
+    display: flex;
+    flex-direction: column;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .rm-carousel {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+  }
+
+  .rm-thumb-main {
+    height: 166px;
+    overflow: hidden;
+    width: 100%;
+    line-height: 0;
+  }
+
+  .rm-carousel-track {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    transition: transform 0.25s ease;
+  }
+
+  .rm-slide {
+    min-width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .rm-slide-fallback {
+    text-align: center;
+    padding: 10px;
+  }
+
+  .rm-slide img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 0;
+    display: block;
+  }
+
+  .rm-dots {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    background: transparent;
+    border-top: 0;
+    padding: 8px 0;
+    margin: 0;
+  }
+
+  .rm-dot {
+    width: 10px;
+    height: 8px;
+    border-radius: 999px;
+    background: #aebdcd;
+    border: 0;
+    padding: 0;
+  }
+
+  .rm-dot.active {
+    width: 18px;
+    background: #7b8fa4;
+  }
+
+  .rm-nav {
+    position: absolute;
+    top: 66px;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    border: 0;
+    background: rgba(18, 40, 60, 0.75);
+    color: #fff;
+    line-height: 28px;
+    text-align: center;
+    font-size: 18px;
+    padding: 0;
+    z-index: 2;
+  }
+
+  .rm-nav-prev {
+    left: 8px;
+  }
+
+  .rm-nav-next {
+    right: 8px;
+  }
+
+  .rm-body {
+    flex: 1;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .rm-body h3 {
+    margin: 0 0 8px;
+    font-size: 22px;
+    color: #0e3556;
+  }
+
+  .rm-meta {
+    margin: 0 0 5px;
+    color: #516a82;
+    font-size: 14px;
+  }
+
+  .rm-actions {
+    margin-top: auto;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .rm-actions .btn {
+    min-width: 130px;
+  }
+
+  @media (max-width: 991px) {
+    .rm-layout {
+      flex-direction: column;
+    }
+
+    .rm-filter {
+      width: 100%;
+      position: static;
+    }
+
+    .rm-card-inner {
+      flex-direction: column;
+    }
+
+    .rm-thumb {
+      width: 100%;
+      min-height: 84px;
+    }
+
+    .rm-nav {
+      top: 70px;
+    }
+  }
+</style>
+
+<div class="rm-shell">
+  <section class="rm-top">
+    <h2 class="rm-title">Browse All Materials</h2>
+    <p class="rm-sub">Property-search style results: filter on the left, compare listings on the right.</p>
+
+    <div class="view-switch" role="group" aria-label="View mode toggle">
+      <a href="/materials{% if filter_applied %}?postcode={{ filter_postcode|urlencode }}&radius={{ filter_radius|urlencode }}{% endif %}" class="btn btn-default active-view">List View</a>
+      <a href="/map{% if filter_applied %}?postcode={{ filter_postcode|urlencode }}&radius={{ filter_radius|urlencode }}{% endif %}" class="btn btn-default">Map View</a>
+    </div>
+  </section>
+
+  <div class="rm-layout">
+    <aside class="rm-filter">
+      <h4>Search & Filters</h4>
+
+      <form method="get" action="/materials" class="search-inline">
+        <div class="form-group">
+          <label for="search_term">Material Type</label>
+          <input id="search_term" class="form-control" type="search" name="search_term" value="{{ search_term or '' }}" placeholder="e.g. Desk, Carpet Tiles">
+        </div>
+        <div class="form-group">
+          <label for="postcode">Postcode</label>
+          <input id="postcode" class="form-control" type="text" name="postcode" value="{{ filter_postcode or '' }}" placeholder="e.g. SW1A 1AA">
+        </div>
+        <div class="form-group radius-group">
+          <label for="radius">Radius</label>
+          <select id="radius" class="form-control" name="radius">
+            {% for r in ['10', '20', '30', '40', '50'] %}
+              <option value="{{ r }}" {% if (filter_radius or '') == r %}selected{% endif %}>{{ r }} miles</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary">Apply Filters</button>
+        <a href="/materials" class="btn btn-link">Clear</a>
+      </form>
+
+    </aside>
+
+    <section class="rm-results">
+      <div class="rm-results-head">
+        <p class="rm-count">{{ materials|length if materials else 0 }} listing(s) found</p>
+        {% if filter_applied %}
+          <span class="rm-chip">Filtered: {{ filter_postcode }} within {{ filter_radius }} miles</span>
+        {% endif %}
+      </div>
+
+      {% if materials %}
+        {% for material in materials %}
+          <article class="rm-card">
+            <div class="rm-card-inner">
+              <div class="rm-thumb">
+                <div class="rm-carousel" data-index="0">
+                  <button type="button" class="rm-nav rm-nav-prev" aria-label="Previous image">&#8249;</button>
+                  <button type="button" class="rm-nav rm-nav-next" aria-label="Next image">&#8250;</button>
+                  <div class="rm-thumb-main">
+                    <div class="rm-carousel-track">
+                      {% for image_name in material.image_links %}
+                        <div class="rm-slide">
+                          <img src="{{ url_for('static', filename='img/' ~ (image_name|image_file)) }}" alt="{{ material.material }} image {{ loop.index }}">
+                        </div>
+                      {% endfor %}
+                      {% if not material.image_links %}
+                        <div class="rm-slide rm-slide-fallback">Material Listing</div>
+                      {% endif %}
+                    </div>
+                  </div>
+                </div>
+                <div class="rm-dots">
+                  {% for image_name in material.image_links %}
+                    <button type="button" class="rm-dot {% if loop.first %}active{% endif %}" aria-label="Image {{ loop.index }}"></button>
+                  {% endfor %}
+                  {% if not material.image_links %}
+                    <button type="button" class="rm-dot active" aria-label="No image"></button>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="rm-body">
+                <h3>{{ material.material }}</h3>
+                <p class="rm-meta"><strong>Amount:</strong> {{ material.amount if material.amount else 'N/A' }}</p>
+                <p class="rm-meta"><strong>Condition:</strong> {{ material.condition if material.condition else 'Not specified' }}</p>
+                <p class="rm-meta"><strong>Postcode:</strong> {{ material.postcode if material.postcode else 'N/A' }}</p>
+
+                <div class="rm-actions">
+                  <a class="btn btn-primary" href="/materials/{{ material.id }}">View Listing</a>
+                </div>
+              </div>
+            </div>
+          </article>
+        {% endfor %}
+      {% else %}
+        <div class="rm-card">
+          <div class="rm-body" style="padding:16px;">
+            <h3 style="font-size:20px; margin-bottom:6px;">No materials found</h3>
+            <p class="rm-meta" style="margin:0;">Try widening the radius or clearing filters.</p>
+          </div>
+        </div>
+      {% endif %}
+    </section>
+  </div>
+</div>
+<script>
+  (function () {
+    function setSlide(carousel, index) {
+      var track = carousel.querySelector('.rm-carousel-track');
+      var slides = carousel.querySelectorAll('.rm-slide');
+      var dots = carousel.closest('.rm-thumb').querySelectorAll('.rm-dot');
+      var count = slides.length;
+      if (!count) return;
+
+      var nextIndex = index;
+      if (nextIndex < 0) nextIndex = count - 1;
+      if (nextIndex >= count) nextIndex = 0;
+
+      carousel.dataset.index = String(nextIndex);
+      track.style.transform = 'translateX(' + (nextIndex * -100) + '%)';
+
+      dots.forEach(function (dot, i) {
+        dot.classList.toggle('active', i === nextIndex);
+      });
+    }
+
+    document.querySelectorAll('.rm-carousel').forEach(function (carousel) {
+      var thumb = carousel.closest('.rm-thumb');
+      var prev = carousel.querySelector('.rm-nav-prev');
+      var next = carousel.querySelector('.rm-nav-next');
+      var dots = thumb.querySelectorAll('.rm-dot');
+      var slides = carousel.querySelectorAll('.rm-slide');
+      var startX = 0;
+      var endX = 0;
+
+      if (slides.length <= 1) {
+        prev.style.display = 'none';
+        next.style.display = 'none';
+      }
+
+      prev.addEventListener('click', function () {
+        setSlide(carousel, Number(carousel.dataset.index || 0) - 1);
+      });
+
+      next.addEventListener('click', function () {
+        setSlide(carousel, Number(carousel.dataset.index || 0) + 1);
+      });
+
+      dots.forEach(function (dot, idx) {
+        dot.addEventListener('click', function () {
+          setSlide(carousel, idx);
+        });
+      });
+
+      carousel.addEventListener('touchstart', function (event) {
+        startX = event.changedTouches[0].clientX;
+      }, { passive: true });
+
+      carousel.addEventListener('touchend', function (event) {
+        endX = event.changedTouches[0].clientX;
+        var diff = endX - startX;
+        if (Math.abs(diff) < 35) return;
+        if (diff < 0) {
+          setSlide(carousel, Number(carousel.dataset.index || 0) + 1);
+        } else {
+          setSlide(carousel, Number(carousel.dataset.index || 0) - 1);
+        }
+      }, { passive: true });
+    });
+  })();
+</script>
+{% endblock %}

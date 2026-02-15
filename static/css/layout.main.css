@@ -1,0 +1,142 @@
+/* Sticky footer styles
+-------------------------------------------------- */
+
+html,
+body {
+  height: 100%;
+  /* The html and body elements cannot have any padding or margin. */
+}
+
+/* Wrapper for page content to push down footer */
+#wrap {
+  min-height: 100%;
+  height: auto !important;
+  height: 100%;
+  /* Negative indent footer by its height */
+  margin: 0 auto -60px;
+  /* Pad bottom by footer height */
+  padding: 0 0 60px;
+}
+
+/* Set the fixed height of the footer here */
+#footer {
+  height: 60px;
+}
+
+
+/* Custom page CSS
+-------------------------------------------------- */
+/* Not required for template or sticky footer method. */
+
+#wrap > .container {
+  padding: 140px 15px 0;
+}
+.container .credit {
+  margin: 20px 0;
+}
+
+#footer > .container {
+  padding-left: 15px;
+  padding-right: 15px;
+}
+
+code {
+  font-size: 80%;
+}
+
+h1 {
+  margin-bottom: 16px;
+}
+
+h3 {
+  margin: 12px 0;
+}
+
+h3 > span.orange {
+  color: #FF9C44;
+}
+
+.column {
+  float: left;
+  width: 50%;
+}
+
+/* Clear floats after the columns */
+.row:after {
+  content: "";
+  display: table;
+  clear: both;
+}
+
+.navbar-brand {
+  padding: 8px 15px;
+  height: 110px;
+  display: flex;
+  align-items: center;
+}
+
+.brand-logo {
+  height: 90px;
+  width: auto;
+  display: block;
+}
+
+.navbar.navbar-fixed-top {
+  min-height: 110px;
+  padding-top: 0;
+}
+
+.navbar-header {
+  min-height: 110px;
+}
+
+.navbar-nav > li > a {
+  padding-top: 44px;
+  padding-bottom: 44px;
+}
+
+.navbar-cta-item,
+.account-setup-cta {
+  padding-top: 32px;
+  margin-left: 8px;
+}
+
+.navbar-cta-item .btn,
+.account-setup-cta .btn {
+  border-radius: 999px;
+  padding: 8px 16px;
+}
+
+@media (max-width: 767px) {
+  #wrap > .container {
+    padding-top: 100px;
+  }
+
+  .navbar.navbar-fixed-top {
+    min-height: 78px;
+  }
+
+  .navbar-header {
+    min-height: 78px;
+  }
+
+  .navbar-brand {
+    height: 78px;
+    padding: 8px 12px;
+  }
+
+  .brand-logo {
+    height: 60px;
+  }
+
+  .navbar-nav > li > a {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .navbar-cta-item,
+  .account-setup-cta {
+    padding-top: 0;
+    margin-left: 0;
+  }
+}

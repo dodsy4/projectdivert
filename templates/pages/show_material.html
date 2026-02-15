@@ -1,0 +1,203 @@
+{% extends 'layouts/main.html' %}
+{% block title %}Listing Details{% endblock %}
+{% block content %}
+<style>
+  .listing-wrap {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 18px;
+  }
+
+  .gallery-panel,
+  .facts-panel,
+  .desc-panel {
+    border: 1px solid #d7e1ec;
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  }
+
+  .gallery-head {
+    padding: 10px 14px;
+    border-bottom: 1px solid #e7eef6;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #52708f;
+    background: #f7fbff;
+    border-radius: 10px 10px 0 0;
+  }
+
+  .gallery-main {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 320px;
+    background: #f9fcff;
+    border-bottom: 1px solid #e7eef6;
+  }
+
+  .gallery-main img {
+    max-width: 100%;
+    max-height: 320px;
+    object-fit: contain;
+  }
+
+  .gallery-actions {
+    padding: 10px 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .listing-title {
+    margin: 0;
+    font-size: 28px;
+    line-height: 1.2;
+  }
+
+  .listing-sub {
+    margin: 6px 0 0;
+    color: #58718b;
+  }
+
+  .facts-panel {
+    padding: 14px;
+  }
+
+  .facts-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  .fact-box {
+    border: 1px solid #dce7f2;
+    border-radius: 8px;
+    background: #f8fbff;
+    padding: 10px;
+  }
+
+  .fact-label {
+    margin: 0;
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #6a839d;
+  }
+
+  .fact-value {
+    margin: 4px 0 0;
+    font-size: 15px;
+    color: #1f3f5f;
+    word-break: break-word;
+  }
+
+  .desc-panel {
+    margin-top: 14px;
+    padding: 14px;
+  }
+
+  @media (max-width: 900px) {
+    .listing-wrap {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<div class="row">
+  <div class="col-sm-12">
+    <h1 class="listing-title">{{ material.material }}</h1>
+    <p class="listing-sub">Listing ID {{ material.id }} | {{ material.city }}, {{ material.county }}</p>
+  </div>
+</div>
+
+<div class="listing-wrap">
+  <section class="gallery-panel">
+    <div class="gallery-head">Photo Gallery</div>
+    <div class="gallery-main">
+      {% if material.image_links %}
+        {% for image_name in material.image_links %}
+          <img class="mySlides" src="{{ url_for('static', filename='img/' ~ (image_name|image_file)) }}" alt="Material image {{ loop.index }}">
+        {% endfor %}
+      {% else %}
+        <div class="text-muted">No images available for this listing.</div>
+      {% endif %}
+    </div>
+    <div class="gallery-actions">
+      <button class="btn btn-default btn-sm" onclick="plusDivs(-1)">&#10094; Previous</button>
+      <span class="text-muted" id="slideInfo"></span>
+      <button class="btn btn-default btn-sm" onclick="plusDivs(1)">Next &#10095;</button>
+    </div>
+  </section>
+
+  <aside>
+    <section class="facts-panel">
+      <h3 style="margin-top:0;">Key Facts</h3>
+      <div class="facts-grid">
+        <div class="fact-box">
+          <p class="fact-label">Material</p>
+          <p class="fact-value">{{ material.material }}</p>
+        </div>
+        <div class="fact-box">
+          <p class="fact-label">Amount</p>
+          <p class="fact-value">{{ material.amount if material.amount else 'N/A' }}</p>
+        </div>
+        <div class="fact-box">
+          <p class="fact-label">Condition</p>
+          <p class="fact-value">{{ material.condition if material.condition else 'Not specified' }}</p>
+        </div>
+        <div class="fact-box">
+          <p class="fact-label">Dimensions</p>
+          <p class="fact-value">{{ material.dimensions if material.dimensions else 'Not specified' }}</p>
+        </div>
+        <div class="fact-box" style="grid-column: 1 / -1;">
+          <p class="fact-label">Address</p>
+          <p class="fact-value">{{ material.address if material.address else 'N/A' }}, {{ material.city }}, {{ material.county }}</p>
+        </div>
+      </div>
+
+      <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
+        <a href="/material/{{ material.id }}/request" class="btn btn-primary">Request Material</a>
+        <a href="/materials" class="btn btn-default">Back to Listings</a>
+      </div>
+    </section>
+  </aside>
+</div>
+
+<section class="desc-panel">
+  <h4 style="margin-top:0;">Listing Description</h4>
+  <p style="margin-bottom:0; color:#4f667e;">Use the request button to contact the owner with your intended use and preferred collection details.</p>
+</section>
+
+<script>
+  var slideIndex = 1;
+  showDivs(slideIndex);
+
+  function plusDivs(n) {
+    showDivs(slideIndex += n);
+  }
+
+  function showDivs(n) {
+    var i;
+    var x = document.getElementsByClassName('mySlides');
+    var info = document.getElementById('slideInfo');
+    if (x.length === 0) {
+      if (info) {
+        info.innerText = 'No images';
+      }
+      return;
+    }
+    if (n > x.length) { slideIndex = 1; }
+    if (n < 1) { slideIndex = x.length; }
+    for (i = 0; i < x.length; i++) {
+      x[i].style.display = 'none';
+    }
+    x[slideIndex - 1].style.display = 'block';
+    if (info) {
+      info.innerText = 'Photo ' + slideIndex + ' of ' + x.length;
+    }
+  }
+</script>
+{% endblock %}

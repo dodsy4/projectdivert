@@ -1,0 +1,28 @@
+{% extends 'layouts/main.html' %}
+{% block title %}Output{% endblock %}
+{% block content %}
+<div class="row">
+  <div class="col-sm-8">
+    <h2>Carbon and Cost Comparison</h2>
+    <p class="text-muted">Estimated impact comparing traditional disposal vs divert routes.</p>
+
+    <p class="subtitle">Landfill Monetary Cost: {{ output.landfill_monetary_cost }}</p>
+    <p class="subtitle">Landfill Carbon: {{ output.landfill_transport_carbon }}</p>
+
+    <p class="subtitle">MRF Monetary Cost: {{ output.traditional_cost}}</p>
+    <p class="subtitle">MRF Carbon: {{ output.traditional_carbon }}</p>
+
+    <p class="subtitle">MRF to Reprocessor Monetary Cost: {{ output.mrf_to_reprocessor_cost }}</p>
+    <p class="subtitle">MRF to Reprocessor Carbon: {{ output.mrf_to_reprocessor_carbon }}</p>
+
+    <p class="subtitle">Divert Monetary Cost: {{ output.divert_cost }}</p>
+    <p class="subtitle">Divert Carbon (Reuse): {{ output.divert_reuse_total_carbon }}</p>
+    <p class="subtitle">Divert Carbon (Recycle): {{ output.divert_recycle_total_carbon }}</p>
+
+    <div style="margin-top:16px;">
+      <a href="/output" class="btn btn-primary">Run Another Calculation</a>
+      <a href="/materials" class="btn btn-default">View Materials</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
