@@ -52,6 +52,11 @@ class output(db.Model):
         return '<Output {}>'.format(self.name)
 
 
+@app.route('/')
+def index():
+    return redirect('/output')
+
+
 @app.route('/output', methods=['GET'])
 def create_venue_form():
     form = OutputForm()
