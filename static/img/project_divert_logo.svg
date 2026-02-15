@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-labelledby="title desc">
+  <title id="title">Project Divert Icon</title>
+  <desc id="desc">Project Divert coloured symbol without text.</desc>
+
+  <g transform="translate(14 4)">
+    <rect x="58" y="18" width="52" height="122" rx="18" fill="#0084D8" transform="rotate(45 84 79)"/>
+    <rect x="128" y="18" width="52" height="122" rx="18" fill="#B6D400" transform="rotate(-45 154 79)"/>
+    <rect x="22" y="98" width="52" height="122" rx="18" fill="#B0138F" transform="rotate(45 48 159)"/>
+  </g>
+</svg>

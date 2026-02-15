@@ -1,0 +1,49 @@
+{% extends 'layouts/main.html' %}
+{% block title %}Account Details{% endblock %}
+{% block content %}
+  <div class="form-wrapper">
+    <form method="post" class="form">
+      <h3 class="form-heading">Account Details</h3>
+      <div class="form-group">
+        <label for="name">Name of Charity</label>
+        {{ form.name(class_ = 'form-control', autofocus = true) }}
+      </div>
+      <div class="form-group">
+          <label>City & County</label>
+          <div class="form-inline">
+            <div class="form-group">
+              {{ form.city(class_ = 'form-control', placeholder='City', autofocus = true) }}
+            </div>
+            <div class="form-group">
+              {{ form.county(class_ = 'form-control', placeholder='State', autofocus = true) }}
+            </div>
+          </div>
+      </div>
+      <div class="form-group">
+        <label for="address">Address</label>
+        {{ form.address(class_ = 'form-control', autofocus = true) }}
+      </div>
+      <div class="form-group">
+          <label for="phone">Phone</label>
+          {{ form.phone(class_ = 'form-control', placeholder='xxx-xxx-xxxx', autofocus = true) }}
+        </div>
+      <div class="form-group">
+          <label for="facebook_link">Facebook Link</label>
+          {{ form.facebook_link(class_ = 'form-control', placeholder='http://', autofocus = true) }}
+        </div>
+        <div class="form-group">
+          <label for="linkedin_link">LinkedIn Link</label>
+          {{ form.linkedin_link(class_ = 'form-control', placeholder='http://', autofocus = true) }}
+        </div>
+        <div class="form-group">
+          <label for="website">Website</label>
+          {{ form.website(class_ = 'form-control', placeholder='http://', autofocus = true) }}
+        </div>
+        <div class="form-group">
+          <label for="material">Interests</label>
+          {{ form.interests(class_ = 'form-control', autofocus = true) }}
+        </div>
+      <input type="submit" value="Edit Account Details" class="btn btn-primary btn-lg btn-block">
+    </form>
+  </div>
+{% endblock %}

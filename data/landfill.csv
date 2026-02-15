@@ -1,0 +1,122 @@
+,sup_type,name,address_street,city,postcode,lat,long,website,email,telephone,supplier_contact,supplier_contact_email,supplier_contact_telephone,percent_recyclablenum,percent_efwnum,provides_a_rebateyn,supplier_auditislist_yes_no_na,supplier_audit_date_completed,notes,hierarchy,origin
+350,Landfill,Beddington Corner Landfill,"Beddington Corner, London Road",Mitcham,CR0 4TD,51.3845855,-0.1389927,,enquiries@viridor.co.uk,01823 721400,,,,,,0,,,,,df2
+351,Landfill,Tripcock Point Landill,"Licenced Facility 3, Tripcock Point",Thamesmead,SE28 0AB,51.4955383,0.100467,,,,,,,,,0,,,,,df2
+354,Landfill,Kingscliffe Landfill,"Augean, Old Leicester Road, Wansford",Peterborough,PE8 6NH,52.585767,-0.4361955,,info@augeanplc.com,01780 444900,,,,,,0,,,Hazardous Waste Landfill,,df2
+365,Landfill,Rainham Landfill,"Ferry Lane, Phase 4, Rainham Landfill",Wennington Marshes  Ferry Lane  Rainham,RM13 9BJ,51.4890017,0.1927471,,veolia.rainhamlandfill@veolia.com,,,,,,,0,,,,,df2
+367,Landfill,"Aveley No2,2a,3 Clay Pit","Aveley Landfill, Sandy Lane, Aveley",South Ockendon,RM15 4XP,51.503331,0.2373123,,,,,,,,,0,,,,,df2
+368,Landfill,Gerpins Lane Landfill Site,Gerpins Lane,Upminster,RM14 2XR,51.5347847,0.2365618,,enquries@eastlondonwaste.gov.uk,,,,,,,0,,,,,df2
+369,Landfill,Ockendon Area 2 & 3 Landfill,Medebridge Road,Grays,RM16 5TZ,51.5181258,0.3264412,,keith.crawley@veolia.com,01708857203,,,,,,0,,,,,df2
+370,Landfill,Old Mill Farm,"Darenth Hill, Darenth",Dartford,DA2 7QZ,51.4197576,0.2378308,,keith.crawley@veolia.com,01708857203,,,,,,0,,,,,df2
+371,Landfill,Egglesey Farm Area C,"Egglesey Farm, Colnbrook Bypass Area C, Colnbrook",,SL3 0EB,51.4851322,-0.5019156,,info@crestwoodenvironmental.co.uk,,,,,,,0,,,,,df2
+372,Landfill,Harmondsworth Landfill Site,"Holloway Lane, Sipson",,UB7 0AE,51.4900239,-0.4740129,,enquires@environment-agency.gov.uk,,,,,,,0,,,,,df2
+373,Landfill,Imperial College Harlington,Off Sipson Lane,Harlington,UB7 0JG,51.4901394,-0.456047,,w.hollyer@imperial.ac.uk,02075948962.,,,,,,0,,,,,df2
+374,Landfill,Kingsmead Landfill,"Stanwell Road, Thorpe",Horton,SL3 9PA,51.4731172,-0.5403075,,services@cemexglobalsolutions.com,01788 517000,,,,,,0,,,,,df2
+375,Landfill,Wraysbury Landfill Site,"Land/Premises at Staines Road, Wraysbury",Staines,TW19 5NH,51.4581184,-0.544658,,,01784 482613 council,,,,,,0,,,,,df2
+376,Landfill,Burghfield Landfill Site,Island Road,Reading,RG2 0RR,51.4344926,-0.9682365,,biffa-award@wildlifetrusts.org,,,,,,,0,,,,,df2
+377,Landfill,Smallmead Farm,Burghfield,Reading,RG30 3UR,51.4251047,-0.9961641,,help@archaeologydataservice.ac.uk,+44 (0)1904 323 954,,,,,,0,,,,,df2
+378,Landfill,Star Works Landfill Site,"Star Lane, Knowle Hill",,RG10 9XY,51.509762,-0.8193411,,,0118 940 6084 (council),,,,,,0,,,,,df2
+379,Landfill,Park Lodge Farm,Iver Heath,,SL0 0NE,51.5445113,-0.5314049,,trevor@parklodgefarm.co.uk,,,,,,,0,,,,,df2
+380,Landfill,Springfield Farm Landfill,Broad Lane,Beaconsfield,HP9 1XD,51.5941928,-0.6631426,www.veoliaenvironmentalservices.co.uk,,01494 672651,,,,,,0,,,,,df2
+381,Landfill,Gerrads Cross Landfill,"Wapseys Wood, Oxford Road",,SL9 8TE,51.5881665,-0.596731,,james.barnes@veolia.com,,,,,,,0,,,,,df2
+382,Landfill,Tyttenhanger Quarry,"Coursers Road, London Colney, St Albans",,AL4 0RZ,51.7364145,-0.2751086,,,0845 602 2022,,,,,,0,,,,,df2
+383,Landfill,Netherhall Landfill,,Roydon,CM19 5JX,51.7514388,0.0185666,,enquiries@roydon.com,01617282901,,,,,,0,,,,,df2
+384,Landfill,Pitsea Landfill,Pitsea Hall Lane,Pitsea,SS16 4UH,51.5564391,0.504909,,SHAUN.TAYLOR@VEOLIA.COM,,,,,,,0,,,,,df2
+385,Landfill,Allington Landfill,"Land/Premises at A20, London Road, Allington",Maidstone,ME16 0LE,51.292639,0.4932605,,allington@fccenvironment.co.uk,01622761027,,,,,,0,,,,,df2
+386,Landfill,Offham Landfill,"White Ladies, Teston Road, Offham",West Malling,ME19 5PF,51.2929859,0.3607257,,julian.moat@kent.gov.uk,0800807060,,,,,,0,,,,,df2
+387,Landfill,Stangate Landfill,"Quarry Hill Road, Borough Green",,TN15 8RW,51.2885285,0.3027686,,enquries@powersystemsuk.com,01732 884483,,,,,,0,,,,,df2
+388,Landfill,Greatness Quarry Integrated Waste Management Facility,"Farm Road, Greatness",Sevenoaks,TN14 5BP,51.2969192,0.197983,,logistics-services@tarmac.com,,,,,,,0,,,,,df2
+389,Landfill,Clacket Lane Sand Pit,Clacket Lane,Westerham,TN16 2EP,51.264245,0.0493951,,enquiries@environment-agency.gov.uk,,,,,,,0,,,,,df2
+390,Landfill,Redhill Landfill,"Cormongers Lane, Nutfield",Redhill,RH1 4ER,51.2454462,-0.1438982,,enquiries@environment-agency.gov.uk,,,,,,,0,,,,,df2
+391,Landfill,Albury Landfill Site,"Shere Road, Albury",Guildford,GU5 9BW,51.2254569,-0.4835376,,na,01483 202411,,,,,,0,,,,,df2
+906,Landfill,Coleshill Landfill,"Gorsey Lane, Off Station Road, Coleshill",,B46 1JN,52.5094571,-1.6685267,https://www.taronisofbirmingham.co.uk/,,0167 546 5911,,,,,,0,,,,,df2
+2633,Landfill,Amey Cespa (East) Ltd,,Cambridge,CB25 9PQ,52.29572,0.1823,,,,,,,,,,,,,Landfill,df_shell
+2636,Landfill,Augean South Ltd,,Kingscliffe,PE8 6XX,52.58725,-0.50707,,,,,,,,,,,,,Landfill,df_shell
+2639,Landfill,Aughrim Landfill Ltd,,Lisburn,BT28 3TE,54.570809999999994,-6.0875900000000005,,,,,,,,,,,,,Landfill,df_shell
+2642,Landfill,Biffa Waste Services Ltd,,Tamworth,B77 1LT,52.58886999999999,-1.67903,,,,,,,,,,,,,Landfill,df_shell
+2645,Landfill,Biffa Waste Services Ltd,,Ballyclare,BT39 9PJ,54.749719999999996,-5.9901,,,,,,,,,,,,,Landfill,df_shell
+2648,Landfill,Biffa Waste Services Ltd,,Bromborough,CH62 4SQ,53.347840000000005,-2.9809200000000002,,,,,,,,,,,,,Landfill,df_shell
+2651,Landfill,Biffa Waste Services Ltd,,Bishops Stortford,CM22 6HT,51.928540000000005,0.20137,,,,,,,,,,,,,Landfill,df_shell
+2654,Landfill,Biffa Waste Services Ltd,,Kilsby,CV23 8XF,52.33271,-1.17598,,,,,,,,,,,,,Landfill,df_shell
+2657,Landfill,Biffa Waste Services Ltd,,Dudley  ,DY3 4DA,52.515119999999996,-2.15243,,,,,,,,,,,,,Landfill,df_shell
+2660,Landfill,Biffa Waste Services Ltd,,Attlebridge,NR9 5TD,52.70029,1.17876,,,,,,,,,,,,,Landfill,df_shell
+2663,Landfill,Biffa Waste Services Ltd,,Eye,PE6 7TH,52.600359999999995,-0.18285,,,,,,,,,,,,,Landfill,df_shell
+2666,Landfill,Biffa Waste Services Ltd,,Newport,PO30 2PD,50.69076,-1.24633,,,,,,,,,,,,,Landfill,df_shell
+2669,Landfill,Biffa Waste Services Ltd,,Reading,RG2 0RR,51.44769,-0.9751200000000001,,,,,,,,,,,,,Landfill,df_shell
+2672,Landfill,Biffa Waste Services Ltd,,Pulborough,RH20 3DA,50.9139,-0.40189,,,,,,,,,,,,,Landfill,df_shell
+2675,Landfill,Biffa Waste Services Ltd,,Salisbury,SP5 2QF,51.01491,-1.6711799999999999,,,,,,,,,,,,,Landfill,df_shell
+2678,Landfill,City of Plymouth (Unitary),,Plymouth,PL9 7JA,50.37205,-4.10116,,,,,,,,,,,,,Landfill,df_shell
+2681,Landfill,Cory Enviromental (Gloucestershire) Ltd,,Bristol,BS16 9NW,51.49116,-2.45037,,,,,,,,,,,,,Landfill,df_shell
+2684,Landfill,Cory Environmental (Central) Ltd,,Wrexham,LL14 6ET,53.00881999999999,-3.02703,,,,,,,,,,,,,Landfill,df_shell
+2687,Landfill,Cory Environmental (Central) Ltd,,Walsall,WS9 9AH,52.6234,-1.9362599999999999,,,,,,,,,,,,,Landfill,df_shell
+2690,Landfill,Cumbria Waste Management Ltd,,Workington,CA14 4JP,54.60745,-3.51939,,,,,,,,,,,,,Landfill,df_shell
+2693,Landfill,Cumbria Waste Management Ltd,,Carlisle,CA6 4BJ,54.95296,-2.99288,,,,,,,,,,,,,Landfill,df_shell
+2696,Landfill,Cumbria Waste Management Ltd,,Barrow In Furness,LA1 4QH,54.02661,-2.7968,,,,,,,,,,,,,Landfill,df_shell
+2699,Landfill,FCC Recycling (UK) Ltd,,Nuneaton,CV10 9JQ,52.524680000000004,-1.5187700000000002,,,,,,,,,,,,,Landfill,df_shell
+2702,Landfill,FCC Recycling (UK) Ltd,,Doncaster,DN6 8LY,53.601040000000005,-1.23151,,,,,,,,,,,,,Landfill,df_shell
+2705,Landfill,FCC Recycling (UK) Ltd,,Barrow-In-Furness,LA14 4QH,54.16041,-3.20266,,,,,,,,,,,,,Landfill,df_shell
+2708,Landfill,FCC Recycling (UK) Ltd,,Wrexham,LL12 0AE,53.106359999999995,-2.99607,,,,,,,,,,,,,Landfill,df_shell
+2711,Landfill,FCC Recycling (UK) Ltd,,Louth,LN11 9QP,53.35804,-0.00528,,,,,,,,,,,,,Landfill,df_shell
+2714,Landfill,FCC Recycling (UK) Ltd,,Isle Of Sheppey,ME12 3AJ,51.40914,0.82821,,,,,,,,,,,,,Landfill,df_shell
+2717,Landfill,FCC Recycling (UK) Ltd,,Milton Keynes,MK17 0BA,51.97429,-0.76842,,,,,,,,,,,,,Landfill,df_shell
+2720,Landfill,FCC Recycling (UK) Ltd,,Langar,NG13 9JN,52.90011,-0.8940100000000001,,,,,,,,,,,,,Landfill,df_shell
+2723,Landfill,FCC Recycling (UK) Ltd,,Beccles,NR34 0BL,52.48157,1.62531,,,,,,,,,,,,,Landfill,df_shell
+2726,Landfill,FCC Recycling (UK) Ltd,,Peterborough,PE1 3TD,52.60332,-0.22353,,,,,,,,,,,,,Landfill,df_shell
+2729,Landfill,FCC Recycling (UK) Ltd,,Aveley,RM15 4HL,51.49521,0.25196,,,,,,,,,,,,,Landfill,df_shell
+2732,Landfill,FCC Recycling (UK) Ltd,,Staveley,S43 3TP,53.27004,-1.35032,,,,,,,,,,,,,Landfill,df_shell
+2735,Landfill,FCC Recycling (UK) Ltd,,Swansea,SA8 4RX,51.76365,-3.8929099999999996,,,,,,,,,,,,,Landfill,df_shell
+2738,Landfill,FCC Recycling (UK) Ltd,,Arlesey,SG15 6RF,52.004940000000005,-0.27135,,,,,,,,,,,,,Landfill,df_shell
+2741,Landfill,FCC Recycling (UK) Ltd,,Knottingley,WF11 0AH,53.6862,-1.2328,,,,,,,,,,,,,Landfill,df_shell
+2744,Landfill,FCC Recycling (UK) Ltd,,Wigan,WN1 2XJ,53.60079,-2.6333599999999997,,,,,,,,,,,,,Landfill,df_shell
+2747,Landfill,FCC Recycling (UK) Ltd,,Bridlington,YO16 4UU,54.069869999999995,-0.24756999999999998,,,,,,,,,,,,,Landfill,df_shell
+2753,Landfill,Grundon Waste Management Ltd,,Wallingford,OX10 6PJ,51.60771,-1.0697,,,,,,,,,,,,,Landfill,df_shell
+2756,Landfill,Lakeland Waste Management Ltd,,Penrith,CA11 0JB,54.655390000000004,-2.8415,,,,,,,,,,,,,Landfill,df_shell
+2759,Landfill,Lafarge Tarmac Trading,,Syston,LE6 0FA,52.67338,-1.25072,,,,,,,,,,,,,Landfill,df_shell
+2762,Landfill,Lidsey Landfill Ltd,,Bognor Regis,PO22 9PL,50.82354,-0.67033,,,,,,,,,,,,,Landfill,df_shell
+2765,Landfill,Resources Management UK Ltd,,Welshpoool,SY21 7YE,52.6575,-3.13845,,,,,,,,,,,,,Landfill,df_shell
+2768,Landfill,Saint-Gobain PAM UK Ltd,,Melton Mowbray,LE14 3RE,52.77393000000001,-0.9227200000000001,,,,,,,,,,,,,Landfill,df_shell
+2771,Landfill,Singleton Birch Ltd,,Barnetby,DN38 6AE,53.58648,-0.36446,,,,,,,,,,,,,Landfill,df_shell
+2774,Landfill,Suez Recycling and Recovery UK Ltd,,Accrington,BB5 5UU,53.7674,-2.35977,,,,,,,,,,,,,Landfill,df_shell
+2777,Landfill,Suez Recycling and Recovery UK Ltd,,Wimbourne,BH21 3RX,50.75427,-2.03233,,,,,,,,,,,,,Landfill,df_shell
+2780,Landfill,Suez Recycling and Recovery UK Ltd,,Runfold,GU10 1PB,51.220040000000004,-0.7602800000000001,,,,,,,,,,,,,Landfill,df_shell
+2783,Landfill,Suez Recycling and Recovery UK Ltd,,Liskeard,PL14 4NP,50.42905,-4.5593,,,,,,,,,,,,,Landfill,df_shell
+2786,Landfill,Suez Recycling and Recovery UK Ltd,,Telford,TF2 9PB,52.701519999999995,-2.4129099999999997,,,,,,,,,,,,,Landfill,df_shell
+2789,Landfill,Sundorne Products Ltd,,Llanidloes,SY18 6JJ,52.42864,-3.5205599999999997,,,,,,,,,,,,,Landfill,df_shell
+2792,Landfill,Thompsons of Prudhoe Ltd,,Darlington,DL1 3HB,54.54354,-1.51589,,,,,,,,,,,,,Landfill,df_shell
+2795,Landfill,Veolia ES Landfill Ltd,,Bromsgove,B61 0QT,52.382709999999996,-2.07068,,,,,,,,,,,,,Landfill,df_shell
+2798,Landfill,Veolia ES Landfill Ltd,,Ringwood,BH24 3QE,50.86075,-1.8289799999999998,,,,,,,,,,,,,Landfill,df_shell
+2801,Landfill,Veolia ES Landfill Ltd,,Rugby,CV23 9HN,52.35886,-1.40381,,,,,,,,,,,,,Landfill,df_shell
+2804,Landfill,Veolia ES Landfill Ltd,,Swadlincote,DE11 8HD,52.7549,-1.55661,,,,,,,,,,,,,Landfill,df_shell
+2807,Landfill,Veolia ES Landfill Ltd,,Doncaster,DN6 8DE,53.58132,-1.1765299999999999,,,,,,,,,,,,,Landfill,df_shell
+2810,Landfill,Veolia ES Landfill Ltd,,Beaconsfield,HP9 1XD,51.594190000000005,-0.66314,,,,,,,,,,,,,Landfill,df_shell
+2813,Landfill,Veolia ES Landfill Ltd,,Oldham,OL4 3SA,53.55279,-2.0501,,,,,,,,,,,,,Landfill,df_shell
+2816,Landfill,Veolia ES Landfill Ltd,,Gerrards Cross,SL9 8TE,51.58817,-0.59673,,,,,,,,,,,,,Landfill,df_shell
+2819,Landfill,Viridor Waste Management Ltd.,,Bury,BL9 8QZ,53.57946,-2.2654900000000002,,,,,,,,,,,,,Landfill,df_shell
+2822,Landfill,Viridor Waste Management Ltd.,,Newton Abbot,TQ12 3GP,50.5741,-3.60638,,,,,,,,,,,,,Landfill,df_shell
+2825,Landfill,Whitemoss Landfill Ltd,,Skelmersdale,WN8 9TH,53.542640000000006,-2.79957,,,,,,,,,,,,,Landfill,df_shell
+2828,Landfill,Yorwaste Ltd,,York,YO23 3RR,53.95916,-1.1801,,,,,,,,,,,,,Landfill,df_shell
+2831,Landfill,Biffa Waste Services Ltd,,Merthyr Tydfil,CF48 4AB,51.76746,-3.32099,,,,,,,,,,,,,Landfill,df_shell
+2834,Landfill,Biffa Waste Services Ltd,,Shardlow,DE72 3FF,52.87848,-1.3717,,,,,,,,,,,,,Landfill,df_shell
+2837,Landfill,Biffa Waste Services Ltd,,Houghton-Le-Spring,DH4 4AU,54.84825,-1.47484,,,,,,,,,,,,,Landfill,df_shell
+2840,Landfill,Biffa Waste Services Ltd,,Withnell,PR6 8BP,53.71205,-2.55606,,,,,,,,,,,,,Landfill,df_shell
+2843,Landfill,Biffa Waste Services Ltd,,Cannock,WS11 8NQ,52.685230000000004,-2.01379,,,,,,,,,,,,,Landfill,df_shell
+2846,Landfill,Cory Environmental (Central) Ltd,,Colchester,CO3 0NN,51.866009999999996,0.8274799999999999,,,,,,,,,,,,,Landfill,df_shell
+2849,Landfill,Cory Environmental (Central) Ltd,,Warrington,WA11  0RN,53.46399,-2.6453599999999997,,,,,,,,,,,,,Landfill,df_shell
+2852,Landfill,Cory Environmental (Central) Ltd,,Sevenoaks,TN14 5SR,51.293659999999996,0.19897,,,,,,,,,,,,,Landfill,df_shell
+2855,Landfill,Drax Power Ltd,,Selby,YO8 8PH,53.73058,-0.99467,,,,,,,,,,,,,Landfill,df_shell
+2858,Landfill,FCC Recycling (UK) Ltd,,Warley,B65 9DS,52.489630000000005,-2.0480400000000003,,,,,,,,,,,,,Landfill,df_shell
+2861,Landfill,FCC Recycling (UK) Ltd,,Bishop Auckland,DL13 2TA,54.707330000000006,-2.00616,,,,,,,,,,,,,Landfill,df_shell
+2864,Landfill,FCC Recycling (UK) Ltd,,Tadcaster,LS24 9SG,53.882490000000004,-1.26833,,,,,,,,,,,,,Landfill,df_shell
+2867,Landfill,FCC Recycling (UK) Ltd,,Stewartby,MK43 9LY,52.07328,-0.52541,,,,,,,,,,,,,Landfill,df_shell
+2870,Landfill,FCC Recycling (UK) Ltd,,Wallingford,OX10 6PW,51.59599,-1.07912,,,,,,,,,,,,,Landfill,df_shell
+2873,Landfill,FCC Recycling (UK) Ltd,,Skegness,PE25 2JS,53.14816999999999,0.31165,,,,,,,,,,,,,Landfill,df_shell
+2879,Landfill,Mick George Ltd.,,Kettering,NN14 1QT,52.44968000000001,-0.74339,,,,,,,,,,,,,Landfill,df_shell
+2882,Landfill,Silent Valley Waste Services Ltd,,Ebbw Vale,NP23 6PZ,51.751740000000005,-3.18262,,,,,,,,,,,,,Landfill,df_shell
+2885,Landfill,Suez Recycling and Recovery UK Ltd,,Preston,PR4 0XE,53.75798,-2.81796,,,,,,,,,,,,,Landfill,df_shell
+2888,Landfill,Veolia ES Landfill Ltd,,Rainham,RM13 9YB,51.50671,0.18005,,,,,,,,,,,,,Landfill,df_shell
+2891,Landfill,Veolia ES Landfill Ltd,,Grays,RM16 5TZ,51.51812,0.32644,,,,,,,,,,,,,Landfill,df_shell
+2894,Landfill,Veolia ES Landfill Ltd,,Basildon,SS16 4UH,51.55644,0.5049100000000001,,,,,,,,,,,,,Landfill,df_shell
+2897,Landfill,Viridor Waste Management Ltd.,,Beddingham,BN8 6JX,50.84329,0.05237000000000001,,,,,,,,,,,,,Landfill,df_shell
+2900,Landfill,Viridor Waste Management Ltd.,,Ardley,OX27 7AA,51.92423,-1.21312,,,,,,,,,,,,,Landfill,df_shell
+2903,Landfill,Viridor Waste Management Ltd.,,Calne,SN11 8RB,51.43543,-1.9705599999999999,,,,,,,,,,,,,Landfill,df_shell
+2909,Landfill,Enovert South Ltd,,Swansea,SA1 8PA,51.62148,-3.9089,,,,,,,,,,,,,Landfill,df_shell
+2915,Landfill,Enovert South Ltd,,Bristol,BS16 9NN,51.49058,-2.46595,,,,,,,,,,,,,Landfill,df_shell

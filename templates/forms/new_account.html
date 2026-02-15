@@ -1,0 +1,273 @@
+{% extends 'layouts/login_template.html' %}
+{% block title %}Account Setup{% endblock %}
+{% block content %}
+<style>
+  .account-shell {
+    max-width: 920px;
+    margin: 12px auto 30px;
+  }
+
+  .account-header {
+    background: linear-gradient(135deg, #0b6fb8, #57a4d6);
+    color: #fff;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 14px;
+  }
+
+  .account-header h2 {
+    margin: 0 0 6px;
+    font-size: 30px;
+  }
+
+  .account-header p {
+    margin: 0;
+    opacity: 0.95;
+  }
+
+  .account-form {
+    background: #fff;
+    border: 1px solid #dbe7f2;
+    border-radius: 12px;
+    padding: 18px;
+    box-shadow: 0 3px 12px rgba(14, 47, 79, 0.08);
+  }
+
+  .section-card {
+    border: 1px solid #e3ebf4;
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 14px;
+    background: #fbfdff;
+  }
+
+  .section-title {
+    margin: 0 0 10px;
+    color: #174466;
+    font-size: 18px;
+  }
+
+  .helper-text {
+    display: block;
+    margin-top: 4px;
+    color: #5a6d81;
+    font-size: 12px;
+  }
+
+  .optional-tag {
+    font-size: 11px;
+    color: #46627d;
+    background: #eaf2fb;
+    border: 1px solid #d4e2f0;
+    border-radius: 999px;
+    padding: 2px 8px;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+
+  .submit-wrap {
+    margin-top: 6px;
+  }
+
+  .submit-wrap .btn {
+    height: 48px;
+    font-size: 17px;
+  }
+</style>
+
+<div class="account-shell">
+  <div class="account-header">
+    <h2>Create Your Account</h2>
+    <p>Complete the key details below. Required fields are in the first two sections.</p>
+  </div>
+
+  <form method="post" class="account-form">
+    <section class="section-card">
+      <h3 class="section-title">1. Organization Details</h3>
+      <div class="row">
+        <div class="col-sm-6">
+          <div class="form-group">
+            <label for="account_type">Account Type</label>
+            <select id="account_type" name="account_type" class="form-control">
+              <option value="Charity">Charity</option>
+              <option value="Community Group">Community Group</option>
+              <option value="Education">Education</option>
+              <option value="Social Enterprise">Social Enterprise</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+        </div>
+        <div class="col-sm-6">
+          <div class="form-group" id="other-type-wrap" style="display:none;">
+            <label for="other_description">If Other, describe your organization</label>
+            <textarea id="other_description" name="other_description" class="form-control" rows="3" placeholder="Describe your organization type (e.g. repair collective, local resident initiative, arts network)"></textarea>
+            <small class="helper-text">This description will be used as your account type label.</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-sm-6">
+          <div class="form-group">
+            <label for="name">Organization Name</label>
+            {{ form.name(class_='form-control', placeholder='Enter your organization name', autofocus=true) }}
+          </div>
+        </div>
+        <div class="col-sm-6">
+          <div class="form-group">
+            <label for="reg_num">Registration Number <span class="optional-tag">Optional</span></label>
+            {{ form.reg_num(class_='form-control', placeholder='If applicable') }}
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-bottom:0;">
+        <label for="email">Contact Email</label>
+        {{ form.email(class_='form-control', placeholder='name@organization.org') }}
+        <small class="helper-text">We will use this email for material notifications and responses.</small>
+      </div>
+    </section>
+
+    <section class="section-card">
+      <h3 class="section-title">2. Primary Location</h3>
+      <div class="form-group">
+        <label for="address1">Address 1</label>
+        {{ form.address1(class_='form-control', placeholder='Building and street') }}
+      </div>
+      <div class="row">
+        <div class="col-sm-4">
+          <div class="form-group">
+            <label for="city1">City</label>
+            {{ form.city1(class_='form-control', placeholder='City') }}
+          </div>
+        </div>
+        <div class="col-sm-4">
+          <div class="form-group">
+            <label for="county1">County</label>
+            {{ form.county1(class_='form-control') }}
+          </div>
+        </div>
+        <div class="col-sm-4">
+          <div class="form-group" style="margin-bottom:0;">
+            <label for="postcode1">Postcode</label>
+            {{ form.postcode1(class_='form-control', placeholder='e.g. SW1A 1AA') }}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-card">
+      <h3 class="section-title">3. Additional Locations <span class="optional-tag">Optional</span></h3>
+      <small class="helper-text" style="margin-bottom:10px;">Add up to two extra sites if you operate from multiple locations.</small>
+
+      <div class="form-group">
+        <label for="address2">Address 2</label>
+        {{ form.address2(class_='form-control', placeholder='Second address (optional)') }}
+      </div>
+      <div class="row">
+        <div class="col-sm-4">
+          <div class="form-group">
+            <label for="city2">City</label>
+            {{ form.city2(class_='form-control', placeholder='City') }}
+          </div>
+        </div>
+        <div class="col-sm-4">
+          <div class="form-group">
+            <label for="county2">County</label>
+            {{ form.county2(class_='form-control') }}
+          </div>
+        </div>
+        <div class="col-sm-4">
+          <div class="form-group">
+            <label for="postcode2">Postcode</label>
+            {{ form.postcode2(class_='form-control', placeholder='Postcode') }}
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="address3">Address 3</label>
+        {{ form.address3(class_='form-control', placeholder='Third address (optional)') }}
+      </div>
+      <div class="row">
+        <div class="col-sm-4">
+          <div class="form-group">
+            <label for="city3">City</label>
+            {{ form.city3(class_='form-control', placeholder='City') }}
+          </div>
+        </div>
+        <div class="col-sm-4">
+          <div class="form-group">
+            <label for="county3">County</label>
+            {{ form.county3(class_='form-control') }}
+          </div>
+        </div>
+        <div class="col-sm-4">
+          <div class="form-group" style="margin-bottom:0;">
+            <label for="postcode3">Postcode</label>
+            {{ form.postcode3(class_='form-control', placeholder='Postcode') }}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-card">
+      <h3 class="section-title">4. Contact Links <span class="optional-tag">Optional</span></h3>
+      <div class="row">
+        <div class="col-sm-6">
+          <div class="form-group">
+            <label for="phone">Phone</label>
+            {{ form.phone(class_='form-control', placeholder='e.g. 0207 123 4567') }}
+          </div>
+        </div>
+        <div class="col-sm-6">
+          <div class="form-group">
+            <label for="website">Website</label>
+            {{ form.website(class_='form-control', placeholder='https://') }}
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-sm-6">
+          <div class="form-group">
+            <label for="facebook_link">Facebook URL</label>
+            {{ form.facebook_link(class_='form-control', placeholder='https://facebook.com/...') }}
+          </div>
+        </div>
+        <div class="col-sm-6">
+          <div class="form-group" style="margin-bottom:0;">
+            <label for="linkedin_link">LinkedIn URL</label>
+            {{ form.linkedin_link(class_='form-control', placeholder='https://linkedin.com/...') }}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="submit-wrap">
+      <input type="submit" value="Create Account" class="btn btn-primary btn-lg btn-block">
+    </div>
+  </form>
+</div>
+
+<script>
+  (function () {
+    var accountType = document.getElementById('account_type');
+    var otherTypeWrap = document.getElementById('other-type-wrap');
+    var otherDescription = document.getElementById('other_description');
+
+    function toggleOtherType() {
+      var showOther = accountType.value === 'Other';
+      otherTypeWrap.style.display = showOther ? 'block' : 'none';
+      otherDescription.required = showOther;
+
+      if (!showOther) {
+        otherDescription.value = '';
+      }
+    }
+
+    accountType.addEventListener('change', toggleOtherType);
+    toggleOtherType();
+  })();
+</script>
+{% endblock %}

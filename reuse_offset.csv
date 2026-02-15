@@ -1,0 +1,15 @@
+material,Emission Factor (kg CO2 equivalents/ tonne),Source,Explanation
+Paper and card,496,defra jan 2006 (p.38),
+Textiles,7869,,
+Ferrous metals,434,,
+Non-ferrous metals,11634,,
+Glass,762,,
+Plastic (dense),2324,,
+Plastic (film),1586,,
+Gravel,2.74,,
+Compost,16.2,,
+Sand,190,(warm) tires may 19 (p.10),
+Correx,1586,,comes under plastic (film). better number ma be found
+Carpet Tiles,229.39,"https://envirocyclelondon.com/blog/environmental-benefits-buying-recycled-carpet-tiles/#:~:text=a%20standard%20sized%20carpet%20tile,create%2013.33kg%20of%20co2.&text=in%20the%20uk%20each%20year,easy%20way%20to%20recycle%20these. ",i have converted their sq m numer to a tonnage number.
+Pallets,8.2,,
+Task Chair,72,,

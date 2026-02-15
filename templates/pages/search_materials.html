@@ -1,0 +1,26 @@
+{% extends 'layouts/main.html' %}
+{% block title %}Materials Search{% endblock %}
+{% block content %}
+<h3>Search results for "{{ search_term }}": {{ results.count }}</h3>
+
+<div style="margin: 10px 0 16px;">
+  <a href="/materials" class="btn btn-default">Back to Materials</a>
+</div>
+
+{% if results.count > 0 %}
+<ul class="items">
+	{% for item in results.data %}
+	<li>
+		<a href="/materials/{{ item.id }}">
+			<i class="fas fa-leaf"></i>
+			<div class="item">
+				<h5>{{ item.name }}</h5>
+			</div>
+		</a>
+	</li>
+	{% endfor %}
+</ul>
+{% else %}
+<p>No materials matched your search term.</p>
+{% endif %}
+{% endblock %}

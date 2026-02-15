@@ -1,0 +1,28 @@
+<div class="col-sm-6">
+    <section ng-app data-ng-controller="myCtrl">
+        <img  ng-src="{{s3url}}" id="myimg">
+    </section>
+    <script>
+        
+    function myCtrl($scope, $timeout) {    
+        AWS.config.update({
+    accessKeyId: 'YOUR_ACCESS_TOKEN', secretAccessKey: 'YOUR_SECRET'});
+        AWS.config.region = "YOUR_REGION";
+        
+    var bucket = new AWS.S3({params: {Bucket: 'YOUR_BUCKET'}});
+        
+        bucket.getObject({Key: 'happy-face.jpg'},function(err,file){
+            
+        $timeout(function(){
+            $scope.s3url = "data:image/jpeg;base64," + encode(file.Body);
+        },1);
+    });
+    }
+
+    function encode(data)
+    {
+        var str = data.reduce(function(a,b){ return a+String.fromCharCode(b) },'');
+        return btoa(str).replace(/.{76}(?=.)/g,'$&\n');
+    }
+    </script>
+</div>

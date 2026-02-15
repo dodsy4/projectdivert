@@ -1,0 +1,21 @@
+Process,Release,Paper/Card,Kitchen Waste,Garden Waste,Textiles,Fines,Misc. Combustible,Misc. Non-Combustible,Ferrous Metals,Non-Ferrous Metals,Glass,Plastic Dense,Plastic Film
+Transfer Station,Direct UK,2.1,2.1,2.1,2.1,2.1,2.1,2.1,2.1,2.1,2.1,2.1,2.1
+Transfer Station,Non-UK,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25
+MRF,Direct UK,15.0,,,15.0,,,15.0,15.0,15.0,15.0,15.0,15.0
+MRF,Non-UK,-392.0,,,-7868.0,,,-1.2,-433.0,-11632.0,-761.0,-2322.0,-1585.0
+EfW,Direct UK,-392.0,-124.0,-124.0,219.0,132.0,202.0,41.0,15.0,15.0,-46.0,1119.0,991.0
+EfW,Non-UK,-0.18,0.41,0.41,-0.44,0.42,-0.42,0.49,-429.0,-11629.0,0.58,-1.28,-0.99
+Gasification,Direct UK,-360.0,-76.0,-76.0,244.0,180.0,228.0,91.0,70.0,70.0,6.6,1121.0,1001.0
+Gasification,Non-UK,5.1,5.8,5.8,4.9,5.8,4.9,5.9,-424.0,-11623.0,5.9,4.0,4.3
+Anaerobic Digestion,Direct UK,6.9,6.9,6.9,,,,,,,,,
+Anaerobic Digestion,Non-UK,-2.3,-2.3,-2.3,,,,,,,,,
+Windrow Composting,Direct UK,16.0,,16.0,,,,,,,,,
+Windrow Composting,Non-UK,-3.2,,-3.2,,,,,,,,,
+In-Vessel Composting,Direct UK,18.0,18.0,18.0,,,,,,,,,
+In-Vessel Composting,Non-UK,-6.2,-6.2,-6.2,,,,,,,,,
+MBT with RDF combustion,Direct UK,-388.0,-75.0,-75.0,94.0,119.0,83.0,56.0,59.0,59.0,-1.8,678.0,598.0
+MBT with RDF combustion,Non-UK,3.3,3.9,3.9,3.0,3.9,3.0,4.0,-425.0,-11625.0,4.1,2.2,2.4
+MBT with stabilisation,Direct UK,116.0,79.0,79.0,91.0,64.0,89.0,57.0,59.0,59.0,50.0,49.0,49.0
+MBT with stabilisation,Non-UK,4.1,4.1,4.1,4.1,4.1,4.1,4.12,-425.0,-11625.0,4.1,2.2,2.4
+Landfill,Direct UK,272.0,121.0,121.0,171.0,61.0,165.0,32.0,2.9,2.9,6.0,2.9,2.9
+Landfill,Non-UK,0.25,0.36,0.36,0.32,0.41,0.33,0.46,0.46,0.46,0.46,0.46,0.46

@@ -1,0 +1,10 @@
+Acceptance (receivers),MIX01,PLA01,HAR01,MET01,PAP01,TIM01,DMR01,CEIL01,HAZ01,GLA01,MUN01,CON01,BRI01,FURN01,FLO01,INS01,GARD01,TIL01,NON01,NHM01,Other
+Charity,0,0,0,0,0,0,0,0,0,0,0,0,0,Reuse,Reuse,0,0,0,0,0,Reuse
+Community,0,0,0,0,0,0,0,0,0,0,0,0,0,Reuse,Reuse,0,0,0,0,0,Reuse
+Education,0,0,0,0,0,0,0,0,0,0,0,0,0,Reuse,Reuse,0,0,0,0,0,Reuse
+Landfill,0,0,0,0,0,0,0,0,Landfill,0,0,0,0,0,0,Landfill,0,0,0,Landfill,0
+Recycling facility,MRF,0,0,MRF,MRF,0,MRF,0,0,0,MRF,0,0,0,0,0,MRF,0,MRF,0,0
+Other,0,0,0,0,0,EFW,0,EFW,0,0,0,0,0,0,0,0,0,0,0,0,0
+Manufacturer,0,Reprocessor,0,0,0,0,0,0,0,Reprocessor,0,0,0,0,0,0,0,0,0,0,0
+Reprocessor,0,Reprocessor,Reprocessor,0,0,0,0,0,0,Reprocessor,0,Reprocessor,Reprocessor,0,0,0,0,Reprocessor,0,0,0
+Social enterprise,0,0,0,0,0,0,0,0,0,0,0,0,0,Reuse,Reuse,0,0,0,0,0,Reuse

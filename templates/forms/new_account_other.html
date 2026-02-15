@@ -1,0 +1,102 @@
+{% extends 'layouts/login_template.html' %}
+{% block title %}Account Details{% endblock %}
+{% block content %}
+  <div class="form-wrapper">
+    <form method="post" class="form">
+      <h3 class="form-heading">Account Details</h3>
+      <div class="form-group">
+        <label for="name">Name of Organization</label>
+        {{ form.name(class_ = 'form-control', autofocus = true) }}
+      </div>
+      <div class="form-group">
+        <label for="other">Type of Organization</label>
+        {{ form.other(class_ = 'form-control', autofocus = true) }}
+      </div>
+      <div class="form-group">
+        <label for="reg_num">Charity Registration Number</label>
+        <small>If applicable:</small>
+        {{ form.reg_num(class_ = 'form-control', autofocus = true) }}
+      </div>
+      <div class="form-group">
+        <label for="email">Contact Email</label>
+        <small>Please use the email that you want to be contacted on</small>
+        {{ form.email(class_ = 'form-control', autofocus = true) }}
+      </div>
+      <div class="form-group">
+        <label for="address1">Address 1</label>
+        {{ form.address1(class_ = 'form-control', autofocus = true) }}
+      </div>
+      <div class="form-group">
+          <label>City & County 1</label>
+          <div class="form-inline">
+            <div class="form-group">
+              {{ form.city1(class_ = 'form-control', placeholder='City', autofocus = true) }}
+            </div>
+            <div class="form-group">
+              {{ form.county1(class_ = 'form-control', placeholder='State', autofocus = true) }}
+            </div>
+          </div>
+      <div class="form-group">
+        <label for="postcode1">Postcode 1</label>
+        {{ form.postcode1(class_ = 'form-control', autofocus = true) }}
+      </div>
+      <small>The second and third address inputs are optional and if you have more than three then please email louis@encore-environemnt.com and we will input these details for you. </small>
+      <div class="form-group">
+        
+        <label for="address2">Address 2</label>
+          {{ form.address2(class_ = 'form-control', autofocus = true) }}
+      </div>
+      <div class="form-group">
+          <label>City & County 2</label>
+          <div class="form-inline">
+            <div class="form-group">
+              {{ form.city2(class_ = 'form-control', placeholder='City', autofocus = true) }}
+            </div>
+            <div class="form-group">
+              {{ form.county2(class_ = 'form-control', placeholder='State', autofocus = true) }}
+            </div>
+          </div>
+      <div class="form-group">
+        <label for="postcode2">Postcode 2</label>
+        {{ form.postcode2(class_ = 'form-control', autofocus = true) }}
+      </div>
+      <div class="form-group">
+        <label for="address3">Address 3</label>
+        {{ form.address3(class_ = 'form-control', autofocus = true) }}
+      </div>
+      <div class="form-group">
+          <label>City & County 3</label>
+          <div class="form-inline">
+            <div class="form-group">
+              {{ form.city3(class_ = 'form-control', placeholder='City', autofocus = true) }}
+            </div>
+            <div class="form-group">
+              {{ form.county3(class_ = 'form-control', placeholder='State', autofocus = true) }}
+            </div>
+          </div>
+      </div>
+      <div class="form-group">
+        <label for="postcode3">Postcode 3</label>
+        {{ form.postcode3(class_ = 'form-control', autofocus = true) }}
+      </div>
+      <small>The below are all optional</small>
+      <div class="form-group">
+          <label for="phone">Phone</label>
+          {{ form.phone(class_ = 'form-control', placeholder='xxx-xxx-xxxx', autofocus = true) }}
+        </div>
+      <div class="form-group">
+          <label for="facebook_link">Facebook Link</label>
+          {{ form.facebook_link(class_ = 'form-control', placeholder='http://', autofocus = true) }}
+        </div>
+        <div class="form-group">
+          <label for="linkedin_link">LinkedIn Link</label>
+          {{ form.linkedin_link(class_ = 'form-control', placeholder='http://', autofocus = true) }}
+        </div>
+        <div class="form-group">
+          <label for="website">Website</label>
+          {{ form.website(class_ = 'form-control', placeholder='http://', autofocus = true) }}
+        </div>
+      <input type="submit" value="Submit" class="btn btn-primary btn-lg btn-block">
+    </form>
+  </div>
+{% endblock %}

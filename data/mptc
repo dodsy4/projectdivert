@@ -1,0 +1,3 @@
+UID_Row,Code,Client Name,Address1,Address2,City,County,Postcode,Long,Lat,Type,Tonnage,Restrictions,v_type,capacity,Cost
+CL-1,ADL001,ADL Drywall Group,Unit 2,218 New Road,Ascot,Berkshire,SL5 8PS,51.4226,-0.68629,PLA01,32,None (20yd RoRO MR),32.00 (20yd MR),10.0,276
+CL-2,ARE01,Area,5th Floor,Counting House,Southwark,London,SE1 2QN,51.50544,-0.08446,HAR01,25,Weight limit 3.5t ,3.50 (cage/rigid),1.5,220

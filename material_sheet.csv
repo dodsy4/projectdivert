@@ -1,0 +1,10 @@
+,id,waste_stream,amount,address,city,county,postcode,condition,dimensions,image_link1,image_link2,image_link3,longitude,latitude
+0,14,Cycle Stands,14,54 Havil Street,Southwark,Greater London,SE5 7RS,Will have to be removed and some damage may be caused in this process.,,1,2,,-0.083447,51.475315
+1,17,Glazed Partitions,8,54 Havil Street,Southwark,Greater London,SE5 7RS,Will have to be removed very efficiently to avoid damage.,,5,6,7,-0.083447,51.475315
+2,18,Kitchen Set,2,1 Home Farm,Sywell,Northamptonshire,NN6 0BQ,,,8,9,,-0.795324,52.297066
+3,19,Tambour Unit,3,1 Home Farm,Sywell,Northamptonshire,NN6 0BQ,Undamaged,,10,11,12,-0.795324,52.297066
+4,20,Task Chair,3,1 Home Farm,Sywell,Northamptonshire,NN6 0BQ,Undamaged,,13,14,15,-0.795324,52.297066
+5,21,Paving Slabs,250,College Street,Rotherham,South Yorkshire,S65 1AF,Will depend on amount ordered,,20,21,22,-1.354823,53.43108
+6,22,Desk,2,College Street,Rotherham,South Yorkshire,S65 1AF,Will depend on amount ordered,,16,17,,-1.354823,53.43108
+7,23,Shelving,2,College Street,Rotherham,South Yorkshire,S65 1AF,Used,,25,26,,-1.354823,53.43108
+8,24,Ceiling Tiles,50,54 Havil Street,Southwark,Greater London,SE5 7RS,Used,,3,4,27,-0.083447,51.475315
