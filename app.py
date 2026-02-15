@@ -4,6 +4,7 @@
 import sys
 import json
 import os
+import csv
 import uuid
 import dateutil.parser
 import babel
@@ -132,6 +133,74 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 
+def _to_int_or_none(value):
+    if value is None:
+        return None
+    value = str(value).strip()
+    if not value:
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_float_or_none(value):
+    if value is None:
+        return None
+    value = str(value).strip()
+    if not value:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _seed_materials_if_empty():
+    try:
+        if m.query.first() is not None:
+            return
+
+        csv_path = os.path.join(app.root_path, 'material_sheet.csv')
+        if not os.path.exists(csv_path):
+            app.logger.warning('No material seed file found at %s', csv_path)
+            return
+
+        seeded_count = 0
+        with open(csv_path, newline='', encoding='utf-8-sig') as handle:
+            for row in csv.DictReader(handle):
+                waste_stream = (row.get('waste_stream') or '').strip()
+                if not waste_stream:
+                    continue
+
+                db.session.add(
+                    m(
+                        waste_stream=waste_stream,
+                        amount=_to_int_or_none(row.get('amount')),
+                        address=(row.get('address') or '').strip() or None,
+                        city=(row.get('city') or '').strip() or None,
+                        county=(row.get('county') or '').strip() or None,
+                        postcode=(row.get('postcode') or '').strip() or None,
+                        condition=(row.get('condition') or '').strip() or None,
+                        dimensions=(row.get('dimensions') or '').strip() or None,
+                        image_link1=(row.get('image_link1') or '').strip() or None,
+                        image_link2=(row.get('image_link2') or '').strip() or None,
+                        image_link3=(row.get('image_link3') or '').strip() or None,
+                        longitude=_to_float_or_none(row.get('longitude')),
+                        latitude=_to_float_or_none(row.get('latitude')),
+                    )
+                )
+                seeded_count += 1
+
+        if seeded_count:
+            db.session.commit()
+            app.logger.info('Seeded %s materials from material_sheet.csv', seeded_count)
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Failed to seed materials from material_sheet.csv.')
+
+
 @app.before_request
 def ensure_core_tables():
     # Create core tables on first request if missing.
@@ -139,6 +208,7 @@ def ensure_core_tables():
         return
     try:
         db.create_all()
+        _seed_materials_if_empty()
         app._core_tables_checked = True
     except Exception:
         app.logger.exception('Failed creating core tables on startup.')
