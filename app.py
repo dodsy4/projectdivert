@@ -54,7 +54,12 @@ class output(db.Model):
 
 @app.route('/')
 def index():
-    return redirect('/output')
+    return redirect('/materials')
+
+
+@app.route('/materials')
+def materials():
+    return render_template('materials.html')
 
 
 @app.route('/output', methods=['GET'])
