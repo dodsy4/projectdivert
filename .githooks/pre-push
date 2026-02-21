@@ -22,7 +22,7 @@ do
   [ -z "${added_lines}" ] && continue
 
   if command -v rg >/dev/null 2>&1; then
-    if printf '%s\n' "${added_lines}" | rg -n --pcre2 "${SECRET_PATTERN}" >/tmp/pre_push_secret_hits.$$; then
+    if printf '%s\n' "${added_lines}" | rg -n -e "${SECRET_PATTERN}" >/tmp/pre_push_secret_hits.$$; then
       found=1
       echo "Potential secret detected in commits being pushed:" >&2
       cat /tmp/pre_push_secret_hits.$$ >&2
