@@ -11,7 +11,7 @@ from datetime import datetime
 import dateutil.parser
 import babel
 import requests
-from flask import Flask, render_template, request, flash, redirect, url_for
+from flask import Flask, jsonify, render_template, request, flash, redirect, url_for
 from flask_moment import Moment
 from forms import *
 import logging
@@ -179,6 +179,32 @@ class WasteRemovalMatch(db.Model):
         )
 
 
+class WasteRemovalVehicleLocation(db.Model):
+    __tablename__ = 'waste_removal_vehicle_locations'
+
+    id = db.Column(db.Integer, primary_key=True)
+    waste_removal_request_id = db.Column(
+        db.Integer,
+        db.ForeignKey('waste_removal_requests.id'),
+        nullable=False,
+        index=True,
+    )
+    driver_id = db.Column(db.String(120))
+    vehicle_id = db.Column(db.String(120))
+    latitude = db.Column(db.Float, nullable=False)
+    longitude = db.Column(db.Float, nullable=False)
+    recorded_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    source = db.Column(db.String(32), nullable=False, default='mobile')
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    def __repr__(self):
+        return '<WasteRemovalVehicleLocation request={} lat={} lon={}>'.format(
+            self.waste_removal_request_id,
+            self.latitude,
+            self.longitude,
+        )
+
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
@@ -278,6 +304,42 @@ def _pick_random_provider_within_radius(pickup_latitude, pickup_longitude, radiu
     return random.choice(candidates)
 
 
+def _drive_time_between_points(origin_latitude, origin_longitude, dest_latitude, dest_longitude):
+    api_key = (app.config.get('GOOGLE_MAPS_API_KEY') or globals().get('API_KEY', '')).strip()
+    if not api_key:
+        return None
+
+    endpoint = 'https://maps.googleapis.com/maps/api/distancematrix/json'
+    params = {
+        'units': 'imperial',
+        'key': api_key,
+        'origins': '{},{}'.format(origin_latitude, origin_longitude),
+        'destinations': '{},{}'.format(dest_latitude, dest_longitude),
+    }
+    try:
+        response = requests.get(endpoint, params=params, timeout=10)
+        payload = response.json()
+        if payload.get('status') != 'OK':
+            return None
+        rows = payload.get('rows') or []
+        if not rows:
+            return None
+        elements = rows[0].get('elements') or []
+        if not elements or elements[0].get('status') != 'OK':
+            return None
+        duration = elements[0].get('duration') or {}
+        seconds = _to_int_or_none(duration.get('value'))
+        text = (duration.get('text') or '').strip() or None
+        if seconds is None:
+            return None
+        return {
+            'minutes': round(seconds / 60.0, 1),
+            'text': text or '{} mins'.format(round(seconds / 60.0)),
+        }
+    except Exception:
+        return None
+
+
 def _require_form_fields(form_data, required_fields):
     """Return stripped field values and raise ValueError for missing required fields."""
     cleaned = {}
@@ -290,6 +352,70 @@ def _require_form_fields(form_data, required_fields):
     if missing:
         raise ValueError('Missing required field(s): {}.'.format(', '.join(missing)))
     return cleaned
+
+
+def _parse_datetime_or_error(value, label):
+    try:
+        parsed = dateutil.parser.parse(str(value).strip())
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError('Please provide a valid {}.'.format(label))
+
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone().replace(tzinfo=None)
+    return parsed
+
+
+def _serialize_waste_request(booking):
+    return {
+        'id': booking.id,
+        'requester_name': booking.requester_name,
+        'requester_email': booking.requester_email,
+        'material_type': booking.material_type,
+        'waste_amount': booking.waste_amount,
+        'waste_unit': booking.waste_unit,
+        'pickup_address': booking.pickup_address,
+        'pickup_city': booking.pickup_city,
+        'pickup_county': booking.pickup_county,
+        'pickup_postcode': booking.pickup_postcode,
+        'scheduled_pickup_at': booking.scheduled_pickup_at.isoformat() if booking.scheduled_pickup_at else None,
+        'notes': booking.notes,
+        'status': booking.status,
+        'created_at': booking.created_at.isoformat() if booking.created_at else None,
+    }
+
+
+def _serialize_waste_match(match):
+    if not match:
+        return None
+    return {
+        'id': match.id,
+        'waste_removal_request_id': match.waste_removal_request_id,
+        'provider_name': match.provider_name,
+        'provider_type': match.provider_type,
+        'provider_city': match.provider_city,
+        'provider_postcode': match.provider_postcode,
+        'provider_latitude': match.provider_latitude,
+        'provider_longitude': match.provider_longitude,
+        'distance_miles': match.distance_miles,
+        'match_radius_miles': match.match_radius_miles,
+        'created_at': match.created_at.isoformat() if match.created_at else None,
+    }
+
+
+def _serialize_vehicle_location(location):
+    if not location:
+        return None
+    return {
+        'id': location.id,
+        'waste_removal_request_id': location.waste_removal_request_id,
+        'driver_id': location.driver_id,
+        'vehicle_id': location.vehicle_id,
+        'latitude': location.latitude,
+        'longitude': location.longitude,
+        'recorded_at': location.recorded_at.isoformat() if location.recorded_at else None,
+        'source': location.source,
+        'created_at': location.created_at.isoformat() if location.created_at else None,
+    }
 
 
 def _normalize_material_name(value):
@@ -1308,6 +1434,9 @@ def create_waste_removal_request_submission():
     email_configured = False
     provider_match = None
     match_radius_miles = None
+    pickup_latitude = None
+    pickup_longitude = None
+    drive_time_info = None
     try:
         form = _require_form_fields(
             request.form,
@@ -1355,6 +1484,13 @@ def create_waste_removal_request_submission():
             pickup_longitude,
             match_radius_miles,
         )
+        if provider_match:
+            drive_time_info = _drive_time_between_points(
+                pickup_latitude,
+                pickup_longitude,
+                provider_match['provider_latitude'],
+                provider_match['provider_longitude'],
+            )
 
         booking = WasteRemovalRequest(
             requester_name=form['requester_name'][:120],
@@ -1409,6 +1545,7 @@ def create_waste_removal_request_submission():
                 'Scheduled Pickup: {scheduled_pickup}\n'
                 'Match Radius (miles): {match_radius_miles}\n'
                 'Matched Provider: {matched_provider}\n'
+                'Estimated Drive Time: {drive_time}\n'
                 'Notes: {notes}\n'
                 'Status: {status}\n'
             ).format(
@@ -1431,6 +1568,15 @@ def create_waste_removal_request_submission():
                     )
                     if provider_match
                     else 'No provider found within radius'
+                ),
+                drive_time=(
+                    drive_time_info['text']
+                    if drive_time_info
+                    else (
+                        'Unable to calculate (Google Maps API unavailable)'
+                        if provider_match
+                        else 'N/A'
+                    )
                 ),
                 notes=booking.notes or '(none)',
                 status=booking.status,
@@ -1475,6 +1621,227 @@ def create_waste_removal_request_submission():
             flash('Request saved. Email notification is not configured yet.')
 
     return redirect('/waste-removal/request')
+
+
+@app.route('/api/v1/waste-requests', methods=['POST'])
+def api_create_waste_request():
+    data = request.get_json(silent=True) or {}
+    try:
+        required_fields = [
+            'requester_name',
+            'requester_email',
+            'material_type',
+            'waste_amount',
+            'waste_unit',
+            'match_radius_miles',
+            'pickup_address',
+            'pickup_postcode',
+            'scheduled_pickup_at',
+        ]
+        cleaned = {}
+        missing = []
+        for field in required_fields:
+            value = str(data.get(field) or '').strip()
+            cleaned[field] = value
+            if not value:
+                missing.append(field)
+        if missing:
+            return jsonify({'error': 'Missing required field(s)', 'fields': missing}), 400
+
+        material_type = cleaned['material_type']
+        if material_type == 'Other':
+            custom_material_type = str(data.get('custom_material_type') or '').strip()
+            if not custom_material_type:
+                return jsonify({'error': 'custom_material_type is required when material_type is Other'}), 400
+            material_type = custom_material_type[:120]
+
+        waste_amount = _to_float_or_none(cleaned['waste_amount'])
+        if waste_amount is None or waste_amount <= 0:
+            return jsonify({'error': 'waste_amount must be a positive number'}), 400
+
+        match_radius_miles = _to_float_or_none(cleaned['match_radius_miles'])
+        if match_radius_miles is None or match_radius_miles <= 0:
+            return jsonify({'error': 'match_radius_miles must be a positive number'}), 400
+
+        scheduled_pickup_at = _parse_datetime_or_error(cleaned['scheduled_pickup_at'], 'scheduled_pickup_at')
+        if scheduled_pickup_at <= datetime.now():
+            return jsonify({'error': 'scheduled_pickup_at must be in the future'}), 400
+
+        pickup_latitude, pickup_longitude = _postcode_coordinates(cleaned['pickup_postcode'])
+        provider_match = _pick_random_provider_within_radius(
+            pickup_latitude,
+            pickup_longitude,
+            match_radius_miles,
+        )
+        drive_time_info = None
+        if provider_match:
+            drive_time_info = _drive_time_between_points(
+                pickup_latitude,
+                pickup_longitude,
+                provider_match['provider_latitude'],
+                provider_match['provider_longitude'],
+            )
+
+        booking = WasteRemovalRequest(
+            requester_name=cleaned['requester_name'][:120],
+            requester_email=cleaned['requester_email'][:255],
+            material_type=material_type,
+            waste_amount=waste_amount,
+            waste_unit=cleaned['waste_unit'][:32],
+            pickup_address=cleaned['pickup_address'][:255],
+            pickup_city=(str(data.get('pickup_city') or '').strip()[:120] or None),
+            pickup_county=(str(data.get('pickup_county') or '').strip()[:120] or None),
+            pickup_postcode=cleaned['pickup_postcode'][:32],
+            scheduled_pickup_at=scheduled_pickup_at,
+            notes=(str(data.get('notes') or '').strip() or None),
+            status='matched' if provider_match else 'pending_match',
+        )
+        db.session.add(booking)
+        db.session.flush()
+
+        match_row = None
+        if provider_match:
+            match_row = WasteRemovalMatch(
+                waste_removal_request_id=booking.id,
+                provider_name=provider_match['provider_name'],
+                provider_type=provider_match['provider_type'],
+                provider_city=provider_match['provider_city'],
+                provider_postcode=provider_match['provider_postcode'],
+                provider_latitude=provider_match['provider_latitude'],
+                provider_longitude=provider_match['provider_longitude'],
+                distance_miles=provider_match['distance_miles'],
+                match_radius_miles=match_radius_miles,
+            )
+            db.session.add(match_row)
+
+        db.session.commit()
+        return (
+            jsonify(
+                {
+                    'request': _serialize_waste_request(booking),
+                    'match': _serialize_waste_match(match_row),
+                    'drive_time': drive_time_info,
+                }
+            ),
+            201,
+        )
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('API waste request creation failed.')
+        return jsonify({'error': 'Failed to create waste request'}), 500
+
+
+@app.route('/api/v1/waste-requests/<int:request_id>', methods=['GET'])
+def api_get_waste_request(request_id):
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        return jsonify({'error': 'Waste request not found'}), 404
+
+    match_row = (
+        WasteRemovalMatch.query.filter_by(waste_removal_request_id=booking.id)
+        .order_by(WasteRemovalMatch.created_at.desc(), WasteRemovalMatch.id.desc())
+        .first()
+    )
+    latest_location = (
+        WasteRemovalVehicleLocation.query.filter_by(waste_removal_request_id=booking.id)
+        .order_by(WasteRemovalVehicleLocation.recorded_at.desc(), WasteRemovalVehicleLocation.id.desc())
+        .first()
+    )
+    return jsonify(
+        {
+            'request': _serialize_waste_request(booking),
+            'match': _serialize_waste_match(match_row),
+            'latest_location': _serialize_vehicle_location(latest_location),
+        }
+    )
+
+
+@app.route('/api/v1/waste-requests/<int:request_id>/status', methods=['POST'])
+def api_update_waste_request_status(request_id):
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        return jsonify({'error': 'Waste request not found'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    new_status = str(payload.get('status') or '').strip().lower()
+    allowed_statuses = {
+        'pending_match',
+        'matched',
+        'accepted',
+        'rejected',
+        'en_route',
+        'arrived',
+        'collected',
+        'completed',
+        'cancelled',
+    }
+    if new_status not in allowed_statuses:
+        return jsonify({'error': 'Invalid status', 'allowed_statuses': sorted(allowed_statuses)}), 400
+
+    booking.status = new_status
+    db.session.commit()
+    return jsonify({'request': _serialize_waste_request(booking)})
+
+
+@app.route('/api/v1/waste-requests/<int:request_id>/location', methods=['POST'])
+def api_create_vehicle_location(request_id):
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        return jsonify({'error': 'Waste request not found'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    latitude = _to_float_or_none(payload.get('latitude'))
+    longitude = _to_float_or_none(payload.get('longitude'))
+    if latitude is None or longitude is None:
+        return jsonify({'error': 'latitude and longitude are required numeric values'}), 400
+
+    recorded_raw = payload.get('recorded_at')
+    if recorded_raw:
+        try:
+            recorded_at = _parse_datetime_or_error(recorded_raw, 'recorded_at')
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+    else:
+        recorded_at = datetime.utcnow()
+
+    location_row = WasteRemovalVehicleLocation(
+        waste_removal_request_id=booking.id,
+        driver_id=(str(payload.get('driver_id') or '').strip()[:120] or None),
+        vehicle_id=(str(payload.get('vehicle_id') or '').strip()[:120] or None),
+        latitude=latitude,
+        longitude=longitude,
+        recorded_at=recorded_at,
+        source=(str(payload.get('source') or 'mobile').strip()[:32] or 'mobile'),
+    )
+    db.session.add(location_row)
+    db.session.commit()
+    return jsonify({'location': _serialize_vehicle_location(location_row)}), 201
+
+
+@app.route('/api/v1/waste-requests/<int:request_id>/location/latest', methods=['GET'])
+def api_get_latest_vehicle_location(request_id):
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        return jsonify({'error': 'Waste request not found'}), 404
+
+    location_row = (
+        WasteRemovalVehicleLocation.query.filter_by(waste_removal_request_id=booking.id)
+        .order_by(WasteRemovalVehicleLocation.recorded_at.desc(), WasteRemovalVehicleLocation.id.desc())
+        .first()
+    )
+    if not location_row:
+        return jsonify({'error': 'No location updates for this request yet'}), 404
+
+    return jsonify(
+        {
+            'request_id': booking.id,
+            'request_status': booking.status,
+            'latest_location': _serialize_vehicle_location(location_row),
+        }
+    )
 
 #  Error Handling and Initializing
 #  ----------------------------------------------------------------

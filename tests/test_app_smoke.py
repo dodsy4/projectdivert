@@ -325,6 +325,11 @@ def test_waste_removal_request_no_provider_in_radius_sets_pending(client, app_co
 def test_waste_removal_request_sends_notification_email(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
     monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(
+        app_context,
+        '_drive_time_between_points',
+        lambda *args, **kwargs: {'minutes': 32.0, 'text': '32 mins'},
+    )
 
     scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
     payload = {
@@ -360,3 +365,90 @@ def test_waste_removal_request_sends_notification_email(client, app_context, mon
     assert 'New waste removal request' in captured['subject']
     assert 'Waste Amount: 2.5 Tonnes' in captured['text_body']
     assert 'Matched Provider: Provider Alpha' in captured['text_body']
+    assert 'Estimated Drive Time: 32 mins' in captured['text_body']
+
+
+def test_api_create_waste_request_returns_match_and_drive_time(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(
+        app_context,
+        '_drive_time_between_points',
+        lambda *args, **kwargs: {'minutes': 18.0, 'text': '18 mins'},
+    )
+
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+    payload = {
+        'requester_name': 'Mobile User',
+        'requester_email': 'mobile@example.com',
+        'material_type': 'Glass',
+        'waste_amount': 2.0,
+        'waste_unit': 'Tonnes',
+        'match_radius_miles': 25,
+        'pickup_address': '1 Example Road',
+        'pickup_city': 'London',
+        'pickup_county': 'Greater London',
+        'pickup_postcode': 'SW1A1AA',
+        'scheduled_pickup_at': scheduled_time,
+        'notes': 'Ring bell',
+    }
+
+    response = client.post('/api/v1/waste-requests', json=payload)
+    body = response.get_json()
+
+    assert response.status_code == 201
+    assert body['request']['status'] == 'matched'
+    assert body['match']['provider_name'] == 'Provider Alpha'
+    assert body['drive_time']['text'] == '18 mins'
+
+
+def test_api_status_and_location_flow(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(
+        app_context,
+        '_drive_time_between_points',
+        lambda *args, **kwargs: {'minutes': 12.0, 'text': '12 mins'},
+    )
+
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+    create_payload = {
+        'requester_name': 'Driver Test',
+        'requester_email': 'driver@example.com',
+        'material_type': 'Glass',
+        'waste_amount': 1.0,
+        'waste_unit': 'Tonnes',
+        'match_radius_miles': 25,
+        'pickup_address': '1 Example Road',
+        'pickup_postcode': 'SW1A1AA',
+        'scheduled_pickup_at': scheduled_time,
+    }
+
+    create_response = client.post('/api/v1/waste-requests', json=create_payload)
+    request_id = create_response.get_json()['request']['id']
+
+    status_response = client.post(
+        f'/api/v1/waste-requests/{request_id}/status',
+        json={'status': 'en_route'},
+    )
+    assert status_response.status_code == 200
+    assert status_response.get_json()['request']['status'] == 'en_route'
+
+    location_response = client.post(
+        f'/api/v1/waste-requests/{request_id}/location',
+        json={
+            'latitude': 51.509,
+            'longitude': -0.128,
+            'driver_id': 'driver-1',
+            'vehicle_id': 'van-42',
+        },
+    )
+    assert location_response.status_code == 201
+
+    latest_response = client.get(f'/api/v1/waste-requests/{request_id}/location/latest')
+    latest_body = latest_response.get_json()
+
+    assert latest_response.status_code == 200
+    assert latest_body['request_status'] == 'en_route'
+    assert latest_body['latest_location']['driver_id'] == 'driver-1'
+    assert latest_body['latest_location']['vehicle_id'] == 'van-42'
