@@ -171,6 +171,30 @@ def _require_form_fields(form_data, required_fields):
     return cleaned
 
 
+def _normalize_material_name(value):
+    if value is None:
+        return ''
+    cleaned = str(value).replace('\xa0', ' ').strip().lower()
+    return ' '.join(cleaned.split())
+
+
+def _material_factor_key(frame, material_name):
+    target = _normalize_material_name(material_name)
+    if not target:
+        return None
+    for key in frame.index.to_list():
+        if _normalize_material_name(key) == target:
+            return key
+    return None
+
+
+def _factor_value(frame, row_key, column_name):
+    value = frame.loc[row_key, column_name]
+    if hasattr(value, 'iloc'):
+        value = value.iloc[0]
+    return float(value)
+
+
 def _seed_materials_if_empty():
     try:
         if m.query.first() is not None:
@@ -633,35 +657,48 @@ def create_output_submission():
 
 def fun(material, amount, unit, site_address, traditional_address, divert_address, traditional_cost):
     
-    if material == 'carpet tiles':
+    if _normalize_material_name(material) == 'carpet tiles':
         if unit == 'Square Meters':
             amount=(amount*4.3)/1000
 
-    mrf_transport_carbon  = numeric_distance(traditional_address, site_address) * 0.85
+    reuse_key = _material_factor_key(reuse_offset, material)
+    if reuse_key is None:
+        raise ValueError('No reuse factor configured for material "{}".'.format(material))
+    reuse_factor = _factor_value(reuse_offset, reuse_key, 'Emission Factor (kg CO2 equivalents/ tonne)')
+    reuse_embodied_carbon = amount * reuse_factor
+
+    recycle_key = _material_factor_key(recycle_offset, material)
+    if recycle_key is not None:
+        recycle_column = 'Emission Factor (kg CO2 equivalents/ tonne or sq m)'
+        if recycle_column not in recycle_offset.columns:
+            recycle_column = 'Emission Factor (kg CO2 equivalents/ tonne)'
+        recycle_factor = _factor_value(recycle_offset, recycle_key, recycle_column)
+        recycle_embodied_carbon = amount * recycle_factor
+    else:
+        recycle_embodied_carbon = reuse_embodied_carbon * 0.85
+
+    traditional_distance = numeric_distance(
+        traditional_address,
+        site_address,
+        return_none_on_failure=True,
+    )
+    divert_distance = numeric_distance(
+        divert_address,
+        site_address,
+        return_none_on_failure=True,
+    )
+    if traditional_distance is None or divert_distance is None:
+        raise ValueError(
+            'Could not calculate transport distance because the Google Maps API is unavailable. '
+            'Please check API key and billing.'
+        )
+
+    mrf_transport_carbon  = traditional_distance * 0.85
     landfill_transport_carbon = mrf_transport_carbon * 1.2
     landfill_monetary_cost = traditional_cost + 114
     mrf_to_reprocessor_cost = traditional_cost
     mrf_to_reprocessor_transport_carbon = mrf_transport_carbon * 1.2
-    divert_transport_carbon  = numeric_distance(divert_address, site_address) * 0.85
-
-    g=reuse_offset.index
-    g=g.to_list()
-    error=False
-    
-    if material in g:
-        reuse_embodied_carbon = amount * reuse_offset.loc[f'{material}', 'Emission Factor (kg CO2 equivalents/ tonne)']
-    else:
-        error=True
-        print('Error!')
-        
-    g=recycle_offset.index
-    g=g.to_list()
-    
-    if material in g:
-        recycle_embodied_carbon = amount * recycle_offset.loc[f'{material}', 'Emission Factor (kg CO2 equivalents/ tonne or sq m)']
-    
-    else:
-        recycle_embodied_carbon = (amount * reuse_offset.loc[f'{material}', 'Emission Factor (kg CO2 equivalents/ tonne)'])*0.85
+    divert_transport_carbon  = divert_distance * 0.85
         
     return mrf_transport_carbon, landfill_transport_carbon, landfill_monetary_cost, mrf_to_reprocessor_cost, mrf_to_reprocessor_transport_carbon, divert_transport_carbon, reuse_embodied_carbon, recycle_embodied_carbon
 
@@ -674,8 +711,19 @@ def show_output():
   if not output_query: 
     return render_template('errors/404.html')
 
-
-  g = fun(output_query.material, float(output_query.amount), output_query.unit, output_query.site_address, output_query.traditional_address, output_query.divert_address, float(output_query.traditional_cost))
+  try:
+    g = fun(
+      output_query.material,
+      float(output_query.amount),
+      output_query.unit,
+      output_query.site_address,
+      output_query.traditional_address,
+      output_query.divert_address,
+      float(output_query.traditional_cost),
+    )
+  except ValueError as exc:
+    flash(str(exc))
+    return redirect('/output')
   
   mrf_transport_carbon = g[0]
   landfill_transport_carbon = g[1]

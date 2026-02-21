@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 
 class FakeResponse:
     def __init__(self, payload):
@@ -111,3 +113,55 @@ def test_material_post_valid_creates_record(client, app_context, monkeypatch):
     assert response.status_code == 302
     assert response.headers['Location'].endswith('/materials')
     assert count_after == count_before + 1
+
+
+def test_fun_uses_specific_recycle_factor_for_glass(app_context, monkeypatch):
+    monkeypatch.setattr(app_context, 'numeric_distance', lambda *args, **kwargs: 10.0)
+
+    result = app_context.fun('Glass', 1.0, 'Tonnes', 'London', 'Birmingham', 'Manchester', 100.0)
+
+    assert result[7] == pytest.approx(670.0)
+
+
+def test_fun_carpet_tiles_square_meters_conversion_is_case_insensitive(app_context, monkeypatch):
+    monkeypatch.setattr(app_context, 'numeric_distance', lambda *args, **kwargs: 0.0)
+
+    reuse_key = app_context._material_factor_key(app_context.reuse_offset, 'Carpet Tiles')
+    reuse_factor = app_context._factor_value(
+        app_context.reuse_offset,
+        reuse_key,
+        'Emission Factor (kg CO2 equivalents/ tonne)',
+    )
+    expected_reuse = (1000.0 * 4.3 / 1000.0) * reuse_factor
+
+    result = app_context.fun('Carpet Tiles', 1000.0, 'Square Meters', 'A', 'B', 'C', 100.0)
+
+    assert result[6] == pytest.approx(expected_reuse)
+
+
+def test_fun_distance_api_failure_raises_error(app_context, monkeypatch):
+    monkeypatch.setattr(app_context, 'numeric_distance', lambda *args, **kwargs: None)
+
+    with pytest.raises(ValueError, match='Google Maps API'):
+        app_context.fun('Paper and card', 1.0, 'Tonnes', 'A', 'B', 'C', 100.0)
+
+
+def test_result_redirects_to_output_when_distance_api_fails(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context, 'numeric_distance', lambda *args, **kwargs: None)
+
+    payload = {
+        'material': 'Paper and card',
+        'amount': '1',
+        'unit': 'Tonnes',
+        'site_address': 'London',
+        'traditional_address': 'Birmingham',
+        'divert_address': 'Manchester',
+        'traditional_cost': '100',
+        'divert_cost': '80',
+    }
+    client.post('/output', data=payload)
+
+    response = client.get('/result', follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/output')
