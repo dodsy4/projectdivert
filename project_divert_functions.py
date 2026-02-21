@@ -12,11 +12,25 @@ import pandas as pd
 import numpy as np
 import math
 
+
+def _normalize_material_column(frame):
+    if 'material' not in frame.columns:
+        return frame
+    normalized = frame.copy()
+    normalized['material'] = (
+        normalized['material']
+        .astype(str)
+        .str.replace('\xa0', ' ', regex=False)
+        .str.strip()
+    )
+    return normalized
+
+
 suppliers = pd.read_csv('data/df3.csv')
 sites = pd.read_excel('sites.xlsx')
 divert_output = pd.read_csv('divert_db.csv')
-reuse_offset = pd.read_csv('reuse_offset.csv')
-recycle_offset = pd.read_excel('recycle_offset.csv')
+reuse_offset = _normalize_material_column(pd.read_csv('reuse_offset.csv'))
+recycle_offset = _normalize_material_column(pd.read_excel('recycle_offset.csv'))
 carbon_equivalencies = pd.read_excel('carbon_equivalencies.csv')
 
 divert_output['reuse_offset'] = ''
@@ -24,6 +38,7 @@ divert_output['recycle_offset'] = ''
 divert_output['reuse_offset'] = pd.to_numeric(divert_output['reuse_offset'])
 divert_output['recycle_offset'] = pd.to_numeric(divert_output['recycle_offset'])
 reuse_offset.set_index(keys='material', inplace=True)
+recycle_offset.set_index(keys='material', inplace=True)
 
 API_KEY = 'REMOVED_GOOGLE_MAPS_API_KEY'
 
@@ -371,10 +386,12 @@ def equivalency_calculator(carbon_offset, carbon_equivalencies):
         print(carbon_equivalencies.equivalency[i], ':', math.floor(carbon_offset/carbon_equivalencies['emission factor (kg co2 equivalents/ tonne)'][i]))
         
         
-def numeric_distance(origin, destination):
+def numeric_distance(origin, destination, return_none_on_failure=False):
     try:
         values = google_maps_distance(destination, origin)
         if not values:
+            if return_none_on_failure:
+                return None
             return 0.0
         d = str(values[0]).strip().lower().replace(',', '')
         if d.endswith('mi'):
@@ -386,4 +403,6 @@ def numeric_distance(origin, destination):
         return float(d)
     except Exception:
         # Fail safe for API/rate-limit/format issues so calculator still renders.
+        if return_none_on_failure:
+            return None
         return 0.0
