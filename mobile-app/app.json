@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "Project Divert",
+    "slug": "project-divert-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
