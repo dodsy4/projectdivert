@@ -157,6 +157,20 @@ def _to_float_or_none(value):
         return None
 
 
+def _require_form_fields(form_data, required_fields):
+    """Return stripped field values and raise ValueError for missing required fields."""
+    cleaned = {}
+    missing = []
+    for field in required_fields:
+        value = (form_data.get(field) or '').strip()
+        cleaned[field] = value
+        if not value:
+            missing.append(field)
+    if missing:
+        raise ValueError('Missing required field(s): {}.'.format(', '.join(missing)))
+    return cleaned
+
+
 def _seed_materials_if_empty():
     try:
         if m.query.first() is not None:
@@ -564,19 +578,33 @@ def create_output_submission():
     # TODO: modify data to be the data object returned from db insertion
     error=False
     try:
-        material = request.form['material']
+        form = _require_form_fields(
+            request.form,
+            [
+                'material',
+                'amount',
+                'unit',
+                'site_address',
+                'traditional_address',
+                'divert_address',
+                'traditional_cost',
+                'divert_cost',
+            ],
+        )
+
+        material = form['material']
         if material == 'Other':
             custom_material = request.form.get('custom_output_material', '').strip()
             if not custom_material:
                 raise ValueError('Please enter a material when selecting Other.')
             material = custom_material[:120]
-        amount = request.form['amount']
-        unit = request.form['unit']
-        site_address = request.form['site_address']
-        traditional_address = request.form['traditional_address']
-        divert_address = request.form['divert_address']
-        traditional_cost= request.form['traditional_cost']
-        divert_cost = request.form['divert_cost']
+        amount = form['amount']
+        unit = form['unit']
+        site_address = form['site_address']
+        traditional_address = form['traditional_address']
+        divert_address = form['divert_address']
+        traditional_cost = form['traditional_cost']
+        divert_cost = form['divert_cost']
 
         g = output(material=material, amount=amount, unit=unit, site_address=site_address, traditional_address=traditional_address, 
                         divert_address=divert_address, traditional_cost=traditional_cost, divert_cost=divert_cost)
@@ -808,25 +836,34 @@ def create_material_submission():
     
     error=False
     try:
-        waste_stream = request.form['waste_stream']
+        form = _require_form_fields(
+            request.form,
+            ['waste_stream', 'amount', 'county', 'postcode'],
+        )
+
+        waste_stream = form['waste_stream']
         if waste_stream == 'Other':
             custom_waste_stream = request.form.get('custom_waste_stream', '').strip()
             if not custom_waste_stream:
                 raise ValueError('Please enter a custom material type when selecting Other.')
             waste_stream = custom_waste_stream[:120]
-        amount = request.form['amount']
-        address = request.form['address']
-        city = request.form['city']
-        county = request.form['county']
-        postcode = request.form['postcode']
+        amount = form['amount']
+        address = request.form.get('address', '').strip()
+        city = request.form.get('city', '').strip()
+        county = form['county']
+        postcode = form['postcode']
         endpoint = "http://api.postcodes.io/postcodes/{}".format(postcode)
-        r = requests.get(endpoint)
-        r = r.text
-        y = json.loads(r) 
-        longitude = (y.get('result')).get('longitude')
-        latitude = (y.get('result')).get('latitude')
-        dimensions = request.form['dimensions']
-        condition = request.form['condition']
+        response = requests.get(endpoint, timeout=10)
+        payload = response.json()
+        result = payload.get('result') if isinstance(payload, dict) else None
+        if not result:
+            raise ValueError('Please enter a valid postcode.')
+        longitude = result.get('longitude')
+        latitude = result.get('latitude')
+        if longitude is None or latitude is None:
+            raise ValueError('Please enter a valid postcode.')
+        dimensions = request.form.get('dimensions', '').strip()
+        condition = request.form.get('condition', '').strip()
         uploaded_images = request.files.getlist('image_files')
         if uploaded_images:
             image_refs = _save_material_images(uploaded_images, limit=MAX_MATERIAL_IMAGES)
