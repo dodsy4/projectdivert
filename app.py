@@ -7,11 +7,13 @@ import os
 import csv
 import uuid
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
+from functools import wraps
 import dateutil.parser
 import babel
+import jwt
 import requests
-from flask import Flask, jsonify, render_template, request, flash, redirect, url_for
+from flask import Flask, g, jsonify, render_template, request, flash, redirect, url_for
 from flask_moment import Moment
 from forms import *
 import logging
@@ -72,6 +74,7 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
     name = db.Column(db.String(120))
+    role = db.Column(db.String(32), nullable=False, default='customer')
     is_active_user = db.Column(db.Boolean, nullable=False, default=True)
 
     def __repr__(self):
@@ -208,6 +211,96 @@ class WasteRemovalVehicleLocation(db.Model):
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
+
+
+def _jwt_secret():
+    return app.config.get('JWT_SECRET_KEY') or app.config.get('SECRET_KEY')
+
+
+def _jwt_exp_hours():
+    value = app.config.get('JWT_EXP_HOURS', 24)
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return 24
+
+
+def _issue_access_token(user):
+    now = datetime.utcnow()
+    payload = {
+        'sub': str(user.id),
+        'email': (user.email or '').strip().lower(),
+        'name': (user.name or '').strip(),
+        'role': (user.role or 'customer').strip().lower(),
+        'iat': int(now.timestamp()),
+        'exp': int((now + timedelta(hours=_jwt_exp_hours())).timestamp()),
+    }
+    return jwt.encode(payload, _jwt_secret(), algorithm='HS256')
+
+
+def _decode_access_token(token):
+    return jwt.decode(token, _jwt_secret(), algorithms=['HS256'])
+
+
+def _current_jwt_claims():
+    return getattr(g, 'jwt_claims', None)
+
+
+def _current_jwt_role():
+    claims = _current_jwt_claims() or {}
+    return str(claims.get('role') or '').strip().lower()
+
+
+def _current_jwt_email():
+    claims = _current_jwt_claims() or {}
+    return str(claims.get('email') or '').strip().lower()
+
+
+def _extract_bearer_token():
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header:
+        return ''
+    parts = auth_header.strip().split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != 'bearer':
+        return ''
+    return parts[1].strip()
+
+
+def _request_access_allowed(booking):
+    role = _current_jwt_role()
+    if role in {'admin', 'driver'}:
+        return True
+    if role == 'customer':
+        return (booking.requester_email or '').strip().lower() == _current_jwt_email()
+    return False
+
+
+def jwt_required(roles=None):
+    roles = {str(role).strip().lower() for role in (roles or set()) if str(role).strip()}
+
+    def _decorator(fn):
+        @wraps(fn)
+        def _wrapped(*args, **kwargs):
+            token = _extract_bearer_token()
+            if not token:
+                return jsonify({'error': 'Missing Bearer token'}), 401
+            try:
+                claims = _decode_access_token(token)
+            except jwt.ExpiredSignatureError:
+                return jsonify({'error': 'Token expired'}), 401
+            except jwt.InvalidTokenError:
+                return jsonify({'error': 'Invalid token'}), 401
+
+            role = str(claims.get('role') or '').strip().lower()
+            if roles and role not in roles:
+                return jsonify({'error': 'Forbidden'}), 403
+
+            g.jwt_claims = claims
+            return fn(*args, **kwargs)
+
+        return _wrapped
+
+    return _decorator
 
 
 def _to_int_or_none(value):
@@ -816,6 +909,7 @@ def register_page():
                 name=name[:120],
                 email=email,
                 password_hash=generate_password_hash(password, method='pbkdf2:sha256'),
+                role='customer',
             )
             db.session.add(user)
             db.session.commit()
@@ -1623,10 +1717,40 @@ def create_waste_removal_request_submission():
     return redirect('/waste-removal/request')
 
 
+@app.route('/api/v1/auth/login', methods=['POST'])
+def api_auth_login():
+    payload = request.get_json(silent=True) or {}
+    email = str(payload.get('email') or '').strip().lower()
+    password = str(payload.get('password') or '').strip()
+    if not email or not password:
+        return jsonify({'error': 'email and password are required'}), 400
+
+    user = User.query.filter(func.lower(User.email) == email).first()
+    if not user or not user.is_active or not check_password_hash(user.password_hash, password):
+        return jsonify({'error': 'Invalid email or password'}), 401
+
+    access_token = _issue_access_token(user)
+    return jsonify(
+        {
+            'access_token': access_token,
+            'token_type': 'Bearer',
+            'expires_in_hours': _jwt_exp_hours(),
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'name': user.name,
+                'role': user.role,
+            },
+        }
+    )
+
+
 @app.route('/api/v1/waste-requests', methods=['POST'])
+@jwt_required(roles={'customer', 'admin'})
 def api_create_waste_request():
     data = request.get_json(silent=True) or {}
     try:
+        role = _current_jwt_role()
         required_fields = [
             'requester_name',
             'requester_email',
@@ -1647,6 +1771,13 @@ def api_create_waste_request():
                 missing.append(field)
         if missing:
             return jsonify({'error': 'Missing required field(s)', 'fields': missing}), 400
+
+        requester_email = cleaned['requester_email'].strip().lower()
+        if role == 'customer':
+            token_email = _current_jwt_email()
+            if not token_email:
+                return jsonify({'error': 'Token missing email claim'}), 403
+            requester_email = token_email
 
         material_type = cleaned['material_type']
         if material_type == 'Other':
@@ -1684,7 +1815,7 @@ def api_create_waste_request():
 
         booking = WasteRemovalRequest(
             requester_name=cleaned['requester_name'][:120],
-            requester_email=cleaned['requester_email'][:255],
+            requester_email=requester_email[:255],
             material_type=material_type,
             waste_amount=waste_amount,
             waste_unit=cleaned['waste_unit'][:32],
@@ -1735,10 +1866,13 @@ def api_create_waste_request():
 
 
 @app.route('/api/v1/waste-requests/<int:request_id>', methods=['GET'])
+@jwt_required(roles={'customer', 'driver', 'admin'})
 def api_get_waste_request(request_id):
     booking = db.session.get(WasteRemovalRequest, request_id)
     if not booking:
         return jsonify({'error': 'Waste request not found'}), 404
+    if not _request_access_allowed(booking):
+        return jsonify({'error': 'Forbidden'}), 403
 
     match_row = (
         WasteRemovalMatch.query.filter_by(waste_removal_request_id=booking.id)
@@ -1760,6 +1894,7 @@ def api_get_waste_request(request_id):
 
 
 @app.route('/api/v1/waste-requests/<int:request_id>/status', methods=['POST'])
+@jwt_required(roles={'driver', 'admin'})
 def api_update_waste_request_status(request_id):
     booking = db.session.get(WasteRemovalRequest, request_id)
     if not booking:
@@ -1787,6 +1922,7 @@ def api_update_waste_request_status(request_id):
 
 
 @app.route('/api/v1/waste-requests/<int:request_id>/location', methods=['POST'])
+@jwt_required(roles={'driver', 'admin'})
 def api_create_vehicle_location(request_id):
     booking = db.session.get(WasteRemovalRequest, request_id)
     if not booking:
@@ -1822,10 +1958,13 @@ def api_create_vehicle_location(request_id):
 
 
 @app.route('/api/v1/waste-requests/<int:request_id>/location/latest', methods=['GET'])
+@jwt_required(roles={'customer', 'driver', 'admin'})
 def api_get_latest_vehicle_location(request_id):
     booking = db.session.get(WasteRemovalRequest, request_id)
     if not booking:
         return jsonify({'error': 'Waste request not found'}), 404
+    if not _request_access_allowed(booking):
+        return jsonify({'error': 'Forbidden'}), 403
 
     location_row = (
         WasteRemovalVehicleLocation.query.filter_by(waste_removal_request_id=booking.id)

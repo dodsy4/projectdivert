@@ -11,6 +11,16 @@ def _bool_env(name, default=False):
     return value.strip().lower() in {'1', 'true', 'yes', 'on'}
 
 
+def _int_env(name, default):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value.strip())
+    except (TypeError, ValueError):
+        return default
+
+
 DEBUG = _bool_env('FLASK_DEBUG', False)
 
 # Never use a randomly generated key in production; set SECRET_KEY in env.
@@ -52,3 +62,7 @@ SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY', '')
 REQUEST_NOTIFICATION_EMAIL = os.getenv('REQUEST_NOTIFICATION_EMAIL', '')
 WASTE_REMOVAL_NOTIFICATION_EMAIL = os.getenv('WASTE_REMOVAL_NOTIFICATION_EMAIL', '') or REQUEST_NOTIFICATION_EMAIL
 APP_BASE_URL = os.getenv('APP_BASE_URL', '')
+
+# API auth
+JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', SECRET_KEY)
+JWT_EXP_HOURS = _int_env('JWT_EXP_HOURS', 24)
