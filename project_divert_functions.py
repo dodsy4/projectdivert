@@ -6,6 +6,7 @@
 # Without Todd's article I fear I may have been lost forever!
 
 import json
+import os
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -40,10 +41,12 @@ divert_output['recycle_offset'] = pd.to_numeric(divert_output['recycle_offset'])
 reuse_offset.set_index(keys='material', inplace=True)
 recycle_offset.set_index(keys='material', inplace=True)
 
-API_KEY = 'REMOVED_GOOGLE_MAPS_API_KEY'
+API_KEY = (os.getenv('GOOGLE_MAPS_API_KEY') or '').strip()
 
 def google_maps_distance(destinations, origins):
     """Fetch distance between two points."""
+    if not API_KEY:
+        raise ValueError('GOOGLE_MAPS_API_KEY is not configured.')
     destinations = ''.join(destinations)
     endpoint = "https://maps.googleapis.com/maps/api/distancematrix/json"
     params = {

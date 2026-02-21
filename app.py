@@ -398,7 +398,7 @@ def _pick_random_provider_within_radius(pickup_latitude, pickup_longitude, radiu
 
 
 def _drive_time_between_points(origin_latitude, origin_longitude, dest_latitude, dest_longitude):
-    api_key = (app.config.get('GOOGLE_MAPS_API_KEY') or globals().get('API_KEY', '')).strip()
+    api_key = (app.config.get('GOOGLE_MAPS_API_KEY') or '').strip()
     if not api_key:
         return None
 
@@ -836,7 +836,7 @@ def map():
     return render_template(
         'pages/map.html',
         markers=markers,
-        google_maps_api_key=app.config.get('GOOGLE_MAPS_API_KEY') or globals().get('API_KEY', ''),
+        google_maps_api_key=app.config.get('GOOGLE_MAPS_API_KEY') or '',
         filter_postcode=postcode,
         filter_radius=radius_raw,
         filter_applied=filter_applied,
