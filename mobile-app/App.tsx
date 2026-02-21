@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Button,
+  Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -16,7 +17,13 @@ import {
   WasteRequestDetails,
   AuthResponse,
   UpdateStatusPayload,
+  UserRole,
 } from './src/api/client';
+import {
+  clearAuthSession,
+  loadAuthSession,
+  persistAuthSession,
+} from './src/storage/authSessionStore';
 
 type LoginState = {
   email: string;
@@ -48,28 +55,20 @@ type DriverControlsState = {
   vehicleId: string;
 };
 
-const defaultFormState = (): RequestFormState => {
-  const defaultDate = new Date(Date.now() + 60 * 60 * 1000);
-  const isoLocal = new Date(defaultDate.getTime() - defaultDate.getTimezoneOffset() * 60000)
-    .toISOString()
-    .slice(0, 16);
+type AppTab = 'create' | 'driver' | 'track' | 'account';
 
-  return {
-    requesterName: '',
-    requesterEmail: '',
-    materialType: 'Wood',
-    customMaterialType: '',
-    wasteAmount: '1',
-    wasteUnit: 'Tonnes',
-    matchRadiusMiles: '25',
-    pickupAddress: '',
-    pickupCity: '',
-    pickupCounty: '',
-    pickupPostcode: '',
-    scheduledPickupAtLocal: isoLocal,
-    notes: '',
-  };
+type AppTabDefinition = {
+  id: AppTab;
+  label: string;
+  roles: UserRole[];
 };
+
+const appTabs: AppTabDefinition[] = [
+  { id: 'create', label: 'Create', roles: ['customer', 'admin'] },
+  { id: 'driver', label: 'Driver', roles: ['driver', 'admin'] },
+  { id: 'track', label: 'Track', roles: ['customer', 'driver', 'admin'] },
+  { id: 'account', label: 'Account', roles: ['customer', 'driver', 'admin'] },
+];
 
 const defaultDriverControls: DriverControlsState = {
   requestId: '',
@@ -92,6 +91,34 @@ const allowedStatuses: UpdateStatusPayload['status'][] = [
   'cancelled',
 ];
 
+const defaultLoginState: LoginState = {
+  email: '',
+  password: '',
+};
+
+function defaultFormState(): RequestFormState {
+  const defaultDate = new Date(Date.now() + 60 * 60 * 1000);
+  const isoLocal = new Date(defaultDate.getTime() - defaultDate.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 16);
+
+  return {
+    requesterName: '',
+    requesterEmail: '',
+    materialType: 'Wood',
+    customMaterialType: '',
+    wasteAmount: '1',
+    wasteUnit: 'Tonnes',
+    matchRadiusMiles: '25',
+    pickupAddress: '',
+    pickupCity: '',
+    pickupCounty: '',
+    pickupPostcode: '',
+    scheduledPickupAtLocal: isoLocal,
+    notes: '',
+  };
+}
+
 function parseStatusValue(value: string): UpdateStatusPayload['status'] | null {
   const normalized = value.trim().toLowerCase();
   if ((allowedStatuses as string[]).includes(normalized)) {
@@ -100,24 +127,42 @@ function parseStatusValue(value: string): UpdateStatusPayload['status'] | null {
   return null;
 }
 
+function getVisibleTabs(role: UserRole): AppTabDefinition[] {
+  return appTabs.filter((tab) => tab.roles.includes(role));
+}
+
+function mergeRequesterDetails(form: RequestFormState, auth: AuthResponse): RequestFormState {
+  return {
+    ...form,
+    requesterName: auth.user.name || form.requesterName,
+    requesterEmail: auth.user.email || form.requesterEmail,
+  };
+}
+
 export default function App() {
-  const [login, setLogin] = useState<LoginState>({ email: '', password: '' });
+  const [login, setLogin] = useState<LoginState>(defaultLoginState);
   const [auth, setAuth] = useState<AuthResponse | null>(null);
   const [form, setForm] = useState<RequestFormState>(defaultFormState);
   const [created, setCreated] = useState<CreateWasteRequestResponse | null>(null);
   const [requestDetails, setRequestDetails] = useState<WasteRequestDetails | null>(null);
   const [trackedRequestId, setTrackedRequestId] = useState('');
   const [driver, setDriver] = useState<DriverControlsState>(defaultDriverControls);
+  const [activeTab, setActiveTab] = useState<AppTab>('track');
   const [isLoading, setIsLoading] = useState(false);
   const [isPolling, setIsPolling] = useState(false);
+  const [isBootstrappingSession, setIsBootstrappingSession] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
-  const canCreateRequest = auth?.user.role === 'customer' || auth?.user.role === 'admin';
-  const canDrive = auth?.user.role === 'driver' || auth?.user.role === 'admin';
-
   const parsedTrackedRequestId = Number(trackedRequestId);
   const hasTrackedRequest = Number.isInteger(parsedTrackedRequestId) && parsedTrackedRequestId > 0;
+
+  const visibleTabs = useMemo(() => {
+    if (!auth) {
+      return [];
+    }
+    return getVisibleTabs(auth.user.role);
+  }, [auth]);
 
   const statusLine = useMemo(() => {
     if (!requestDetails) {
@@ -127,6 +172,46 @@ export default function App() {
     const provider = requestDetails.match?.provider_name || 'No provider matched yet';
     return `Status: ${status} | Provider: ${provider}`;
   }, [requestDetails]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      try {
+        const restored = await loadAuthSession();
+        if (!cancelled && restored) {
+          setAuth(restored);
+          setForm((prev) => mergeRequesterDetails(prev, restored));
+          setInfo(`Restored session for ${restored.user.email}.`);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(normalizeError(err));
+        }
+      } finally {
+        if (!cancelled) {
+          setIsBootstrappingSession(false);
+        }
+      }
+    };
+
+    bootstrap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!auth) {
+      return;
+    }
+
+    const available = getVisibleTabs(auth.user.role);
+    if (!available.some((tab) => tab.id === activeTab)) {
+      setActiveTab(available[0].id);
+    }
+  }, [auth, activeTab]);
 
   useEffect(() => {
     if (!auth || !hasTrackedRequest) {
@@ -182,17 +267,44 @@ export default function App() {
     try {
       const response = await apiClient.login(login.email.trim(), login.password);
       setAuth(response);
-      setForm((prev) => ({
-        ...prev,
-        requesterName: response.user.name || prev.requesterName,
-        requesterEmail: response.user.email || prev.requesterEmail,
-      }));
-      setInfo(`Signed in as ${response.user.email} (${response.user.role}).`);
+      setForm((prev) => mergeRequesterDetails(prev, response));
+      setLogin(defaultLoginState);
+
+      try {
+        await persistAuthSession(response);
+        setInfo(`Signed in as ${response.user.email} (${response.user.role}).`);
+      } catch (persistError) {
+        setInfo(
+          `Signed in as ${response.user.email} (${response.user.role}), but session persistence failed: ${normalizeError(
+            persistError,
+          )}`,
+        );
+      }
     } catch (err) {
       setError(normalizeError(err));
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const onLogout = async () => {
+    setError(null);
+    setInfo(null);
+
+    try {
+      await clearAuthSession();
+    } catch (err) {
+      setError(normalizeError(err));
+    }
+
+    setAuth(null);
+    setCreated(null);
+    setRequestDetails(null);
+    setTrackedRequestId('');
+    setDriver(defaultDriverControls);
+    setForm(defaultFormState());
+    setActiveTab('track');
+    setInfo('Signed out.');
   };
 
   const onCreateRequest = async () => {
@@ -234,6 +346,7 @@ export default function App() {
       setDriver((prev) => ({ ...prev, requestId: String(response.request.id) }));
       const details = await apiClient.getWasteRequest(response.request.id, auth.access_token);
       setRequestDetails(details);
+      setActiveTab('track');
       setInfo(`Created waste request #${response.request.id}.`);
     } catch (err) {
       setError(normalizeError(err));
@@ -336,6 +449,17 @@ export default function App() {
     }
   };
 
+  if (isBootstrappingSession) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.loadingScreen}>
+          <ActivityIndicator size="large" />
+          <Text>Restoring session...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
@@ -350,6 +474,7 @@ export default function App() {
               value={login.email}
               onChangeText={(value) => setLogin((prev) => ({ ...prev, email: value }))}
               autoCapitalize="none"
+              keyboardType="email-address"
             />
             <Field
               label="Password"
@@ -357,88 +482,237 @@ export default function App() {
               onChangeText={(value) => setLogin((prev) => ({ ...prev, password: value }))}
               secureTextEntry
             />
-            <Button title={isLoading ? 'Signing in...' : 'Sign in'} onPress={onLogin} disabled={isLoading} />
-          </View>
-        ) : (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Signed in as {auth.user.email}</Text>
-            <Text>Role: {auth.user.role}</Text>
-          </View>
-        )}
-
-        {auth && canCreateRequest && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>2) Create Waste Request (Customer)</Text>
-            <Field label="Requester name" value={form.requesterName} onChangeText={(value) => setForm((prev) => ({ ...prev, requesterName: value }))} />
-            <Field label="Requester email" value={form.requesterEmail} onChangeText={(value) => setForm((prev) => ({ ...prev, requesterEmail: value }))} autoCapitalize="none" />
-            <Field label="Material type" value={form.materialType} onChangeText={(value) => setForm((prev) => ({ ...prev, materialType: value }))} />
-            <Field label="Custom material (if Material type is Other)" value={form.customMaterialType} onChangeText={(value) => setForm((prev) => ({ ...prev, customMaterialType: value }))} />
-            <Field label="Waste amount" value={form.wasteAmount} onChangeText={(value) => setForm((prev) => ({ ...prev, wasteAmount: value }))} keyboardType="decimal-pad" />
-            <Field label="Waste unit" value={form.wasteUnit} onChangeText={(value) => setForm((prev) => ({ ...prev, wasteUnit: value }))} />
-            <Field label="Match radius miles" value={form.matchRadiusMiles} onChangeText={(value) => setForm((prev) => ({ ...prev, matchRadiusMiles: value }))} keyboardType="decimal-pad" />
-            <Field label="Pickup address" value={form.pickupAddress} onChangeText={(value) => setForm((prev) => ({ ...prev, pickupAddress: value }))} />
-            <Field label="Pickup city" value={form.pickupCity} onChangeText={(value) => setForm((prev) => ({ ...prev, pickupCity: value }))} />
-            <Field label="Pickup county" value={form.pickupCounty} onChangeText={(value) => setForm((prev) => ({ ...prev, pickupCounty: value }))} />
-            <Field label="Pickup postcode" value={form.pickupPostcode} onChangeText={(value) => setForm((prev) => ({ ...prev, pickupPostcode: value }))} autoCapitalize="characters" />
-            <Field label="Scheduled pickup (local)" value={form.scheduledPickupAtLocal} onChangeText={(value) => setForm((prev) => ({ ...prev, scheduledPickupAtLocal: value }))} placeholder="YYYY-MM-DDTHH:mm" />
-            <Field label="Notes" value={form.notes} onChangeText={(value) => setForm((prev) => ({ ...prev, notes: value }))} multiline />
-
             <Button
-              title={isLoading ? 'Submitting...' : 'Submit request'}
-              onPress={onCreateRequest}
+              title={isLoading ? 'Signing in...' : 'Sign in'}
+              onPress={onLogin}
               disabled={isLoading}
             />
           </View>
-        )}
-
-        {auth && canDrive && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>3) Driver Controls (Simulation)</Text>
-            <Field label="Request ID" value={driver.requestId} onChangeText={(value) => setDriver((prev) => ({ ...prev, requestId: value }))} keyboardType="number-pad" />
-            <Field label="Status" value={driver.status} onChangeText={(value) => setDriver((prev) => ({ ...prev, status: value }))} placeholder="en_route" />
-            <Button title={isLoading ? 'Updating...' : 'Update status'} onPress={onUpdateStatus} disabled={isLoading} />
-
-            <Field label="Latitude" value={driver.latitude} onChangeText={(value) => setDriver((prev) => ({ ...prev, latitude: value }))} keyboardType="decimal-pad" />
-            <Field label="Longitude" value={driver.longitude} onChangeText={(value) => setDriver((prev) => ({ ...prev, longitude: value }))} keyboardType="decimal-pad" />
-            <Field label="Driver ID" value={driver.driverId} onChangeText={(value) => setDriver((prev) => ({ ...prev, driverId: value }))} />
-            <Field label="Vehicle ID" value={driver.vehicleId} onChangeText={(value) => setDriver((prev) => ({ ...prev, vehicleId: value }))} />
-            <Button title={isLoading ? 'Sending...' : 'Push location'} onPress={onPushLocation} disabled={isLoading} />
-          </View>
-        )}
-
-        {auth && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>4) Track Request</Text>
-            <Field label="Tracked request ID" value={trackedRequestId} onChangeText={setTrackedRequestId} keyboardType="number-pad" />
-            <Button title={isLoading ? 'Refreshing...' : 'Refresh now'} onPress={onRefreshNow} disabled={isLoading || !hasTrackedRequest} />
-            <View style={styles.pollRow}>
-              {isPolling ? <ActivityIndicator size="small" /> : null}
-              <Text>{hasTrackedRequest ? 'Auto-refresh every 10s' : 'Enter request ID to start polling'}</Text>
+        ) : (
+          <>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Signed in as {auth.user.email}</Text>
+              <Text>Role: {auth.user.role}</Text>
             </View>
-          </View>
-        )}
 
-        {created && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Latest Created Request</Text>
-            <Text>Request ID: {created.request.id}</Text>
-            <Text>{statusLine}</Text>
-            {created.match ? <Text>Matched distance: {created.match.distance_miles} miles</Text> : null}
-            {created.drive_time ? (
-              <Text>
-                Drive time: {created.drive_time.duration_text || 'n/a'} ({created.drive_time.distance_text || 'n/a'})
-              </Text>
-            ) : (
-              <Text>Drive time: unavailable</Text>
+            <View style={styles.tabBar}>
+              {visibleTabs.map((tab) => {
+                const selected = tab.id === activeTab;
+                return (
+                  <Pressable
+                    key={tab.id}
+                    onPress={() => setActiveTab(tab.id)}
+                    style={[styles.tabButton, selected ? styles.tabButtonSelected : undefined]}
+                  >
+                    <Text style={[styles.tabButtonText, selected ? styles.tabButtonTextSelected : undefined]}>
+                      {tab.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {activeTab === 'create' && (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Create Waste Request</Text>
+                <Field
+                  label="Requester name"
+                  value={form.requesterName}
+                  onChangeText={(value) => setForm((prev) => ({ ...prev, requesterName: value }))}
+                />
+                <Field
+                  label="Requester email"
+                  value={form.requesterEmail}
+                  onChangeText={(value) => setForm((prev) => ({ ...prev, requesterEmail: value }))}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
+                <Field
+                  label="Material type"
+                  value={form.materialType}
+                  onChangeText={(value) => setForm((prev) => ({ ...prev, materialType: value }))}
+                />
+                <Field
+                  label="Custom material (if Material type is Other)"
+                  value={form.customMaterialType}
+                  onChangeText={(value) =>
+                    setForm((prev) => ({ ...prev, customMaterialType: value }))
+                  }
+                />
+                <Field
+                  label="Waste amount"
+                  value={form.wasteAmount}
+                  onChangeText={(value) => setForm((prev) => ({ ...prev, wasteAmount: value }))}
+                  keyboardType="decimal-pad"
+                />
+                <Field
+                  label="Waste unit"
+                  value={form.wasteUnit}
+                  onChangeText={(value) => setForm((prev) => ({ ...prev, wasteUnit: value }))}
+                />
+                <Field
+                  label="Match radius miles"
+                  value={form.matchRadiusMiles}
+                  onChangeText={(value) => setForm((prev) => ({ ...prev, matchRadiusMiles: value }))}
+                  keyboardType="decimal-pad"
+                />
+                <Field
+                  label="Pickup address"
+                  value={form.pickupAddress}
+                  onChangeText={(value) => setForm((prev) => ({ ...prev, pickupAddress: value }))}
+                />
+                <Field
+                  label="Pickup city"
+                  value={form.pickupCity}
+                  onChangeText={(value) => setForm((prev) => ({ ...prev, pickupCity: value }))}
+                />
+                <Field
+                  label="Pickup county"
+                  value={form.pickupCounty}
+                  onChangeText={(value) => setForm((prev) => ({ ...prev, pickupCounty: value }))}
+                />
+                <Field
+                  label="Pickup postcode"
+                  value={form.pickupPostcode}
+                  onChangeText={(value) => setForm((prev) => ({ ...prev, pickupPostcode: value }))}
+                  autoCapitalize="characters"
+                />
+                <Field
+                  label="Scheduled pickup (local)"
+                  value={form.scheduledPickupAtLocal}
+                  onChangeText={(value) =>
+                    setForm((prev) => ({ ...prev, scheduledPickupAtLocal: value }))
+                  }
+                  placeholder="YYYY-MM-DDTHH:mm"
+                />
+                <Field
+                  label="Notes"
+                  value={form.notes}
+                  onChangeText={(value) => setForm((prev) => ({ ...prev, notes: value }))}
+                  multiline
+                />
+
+                <Button
+                  title={isLoading ? 'Submitting...' : 'Submit request'}
+                  onPress={onCreateRequest}
+                  disabled={isLoading}
+                />
+              </View>
             )}
-            {requestDetails?.latest_location ? (
-              <Text>
-                Latest location: {requestDetails.latest_location.latitude}, {requestDetails.latest_location.longitude}
-              </Text>
-            ) : (
-              <Text>Latest location: none yet</Text>
+
+            {activeTab === 'driver' && (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Driver Controls</Text>
+                <Field
+                  label="Request ID"
+                  value={driver.requestId}
+                  onChangeText={(value) => setDriver((prev) => ({ ...prev, requestId: value }))}
+                  keyboardType="number-pad"
+                />
+                <Field
+                  label="Status"
+                  value={driver.status}
+                  onChangeText={(value) => setDriver((prev) => ({ ...prev, status: value }))}
+                  placeholder="en_route"
+                />
+                <Button
+                  title={isLoading ? 'Updating...' : 'Update status'}
+                  onPress={onUpdateStatus}
+                  disabled={isLoading}
+                />
+
+                <Field
+                  label="Latitude"
+                  value={driver.latitude}
+                  onChangeText={(value) => setDriver((prev) => ({ ...prev, latitude: value }))}
+                  keyboardType="decimal-pad"
+                />
+                <Field
+                  label="Longitude"
+                  value={driver.longitude}
+                  onChangeText={(value) => setDriver((prev) => ({ ...prev, longitude: value }))}
+                  keyboardType="decimal-pad"
+                />
+                <Field
+                  label="Driver ID"
+                  value={driver.driverId}
+                  onChangeText={(value) => setDriver((prev) => ({ ...prev, driverId: value }))}
+                />
+                <Field
+                  label="Vehicle ID"
+                  value={driver.vehicleId}
+                  onChangeText={(value) => setDriver((prev) => ({ ...prev, vehicleId: value }))}
+                />
+                <Button
+                  title={isLoading ? 'Sending...' : 'Push location'}
+                  onPress={onPushLocation}
+                  disabled={isLoading}
+                />
+              </View>
             )}
-          </View>
+
+            {activeTab === 'track' && (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Track Request</Text>
+                <Field
+                  label="Tracked request ID"
+                  value={trackedRequestId}
+                  onChangeText={setTrackedRequestId}
+                  keyboardType="number-pad"
+                />
+                <Button
+                  title={isLoading ? 'Refreshing...' : 'Refresh now'}
+                  onPress={onRefreshNow}
+                  disabled={isLoading || !hasTrackedRequest}
+                />
+                <View style={styles.pollRow}>
+                  {isPolling ? <ActivityIndicator size="small" /> : null}
+                  <Text>
+                    {hasTrackedRequest
+                      ? 'Auto-refresh every 10s'
+                      : 'Enter request ID to start polling'}
+                  </Text>
+                </View>
+
+                {created && (
+                  <View style={styles.resultBlock}>
+                    <Text style={styles.blockTitle}>Latest Created Request</Text>
+                    <Text>Request ID: {created.request.id}</Text>
+                    <Text>{statusLine}</Text>
+                    {created.match ? (
+                      <Text>Matched distance: {created.match.distance_miles} miles</Text>
+                    ) : null}
+                    {created.drive_time ? (
+                      <Text>
+                        Drive time: {created.drive_time.duration_text || 'n/a'} (
+                        {created.drive_time.distance_text || 'n/a'})
+                      </Text>
+                    ) : (
+                      <Text>Drive time: unavailable</Text>
+                    )}
+                    {requestDetails?.latest_location ? (
+                      <Text>
+                        Latest location: {requestDetails.latest_location.latitude},{' '}
+                        {requestDetails.latest_location.longitude}
+                      </Text>
+                    ) : (
+                      <Text>Latest location: none yet</Text>
+                    )}
+                  </View>
+                )}
+              </View>
+            )}
+
+            {activeTab === 'account' && (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Account</Text>
+                <Text>Email: {auth.user.email}</Text>
+                <Text>Role: {auth.user.role}</Text>
+                <Text>User ID: {auth.user.id}</Text>
+                <Button title="Sign out" onPress={onLogout} disabled={isLoading} />
+              </View>
+            )}
+          </>
         )}
 
         {info ? (
@@ -512,6 +786,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f7f7f7',
   },
+  loadingScreen: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 10,
+  },
   container: {
     padding: 16,
     gap: 12,
@@ -535,6 +815,31 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 16,
     fontWeight: '700',
+  },
+  tabBar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  tabButton: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#cccccc',
+    backgroundColor: '#efefef',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  tabButtonSelected: {
+    borderColor: '#1e4f9f',
+    backgroundColor: '#dfeaff',
+  },
+  tabButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#2f2f2f',
+  },
+  tabButtonTextSelected: {
+    color: '#123b74',
   },
   field: {
     gap: 4,
@@ -560,6 +865,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     marginTop: 8,
+  },
+  resultBlock: {
+    borderTopWidth: 1,
+    borderColor: '#e5e5e5',
+    marginTop: 8,
+    paddingTop: 8,
+    gap: 4,
+  },
+  blockTitle: {
+    fontSize: 14,
+    fontWeight: '700',
   },
   infoBox: {
     borderRadius: 8,
