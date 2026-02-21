@@ -1,0 +1,169 @@
+{% extends 'layouts/main.html' %}
+{% block title %}Book Waste Removal{% endblock %}
+{% block content %}
+<style>
+  .pickup-shell {
+    max-width: 900px;
+    margin: 12px auto 30px;
+  }
+
+  .pickup-head {
+    background: linear-gradient(135deg, #1a7a5a, #36a279);
+    color: #fff;
+    border-radius: 12px;
+    padding: 18px;
+    margin-bottom: 14px;
+  }
+
+  .pickup-head h2 {
+    margin: 0 0 6px;
+    font-size: 30px;
+  }
+
+  .pickup-head p {
+    margin: 0;
+    opacity: 0.95;
+  }
+
+  .pickup-form {
+    background: #fff;
+    border: 1px solid #d6e9e0;
+    border-radius: 12px;
+    box-shadow: 0 4px 14px rgba(10, 40, 66, 0.08);
+    padding: 16px;
+  }
+
+  .section-card {
+    border: 1px solid #e1efe9;
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 14px;
+    background: #fbfffd;
+  }
+
+  .section-title {
+    margin: 0 0 10px;
+    font-size: 18px;
+    color: #1b5944;
+  }
+</style>
+
+<div class="pickup-shell">
+  <div class="pickup-head">
+    <h2>Book Waste Removal</h2>
+    <p>Submit the material, pickup location, amount of waste, and preferred time.</p>
+  </div>
+
+  <form method="post" class="pickup-form">
+    <section class="section-card">
+      <h3 class="section-title">Contact</h3>
+      <div class="row">
+        <div class="col-sm-6">
+          <div class="form-group">
+            <label for="requester_name">Name</label>
+            {{ form.requester_name(class_='form-control', autofocus=true, placeholder='Your name') }}
+          </div>
+        </div>
+        <div class="col-sm-6">
+          <div class="form-group">
+            <label for="requester_email">Email</label>
+            {{ form.requester_email(class_='form-control', placeholder='you@example.com') }}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-card">
+      <h3 class="section-title">Waste Details</h3>
+      <div class="row">
+        <div class="col-sm-6">
+          <div class="form-group">
+            <label for="material_type">Material Type</label>
+            {{ form.material_type(class_='form-control') }}
+          </div>
+        </div>
+        <div class="col-sm-3">
+          <div class="form-group">
+            <label for="waste_amount">Amount of Waste</label>
+            {{ form.waste_amount(class_='form-control', placeholder='e.g. 2.5') }}
+          </div>
+        </div>
+        <div class="col-sm-3">
+          <div class="form-group">
+            <label for="waste_unit">Unit</label>
+            {{ form.waste_unit(class_='form-control') }}
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group" id="custom-material-wrap" style="display:none;">
+        <label for="custom_material_type">If Other, enter material type</label>
+        <input id="custom_material_type" name="custom_material_type" type="text" class="form-control" placeholder="e.g. Mixed demolition waste">
+      </div>
+    </section>
+
+    <section class="section-card">
+      <h3 class="section-title">Pickup Location & Time</h3>
+      <div class="form-group">
+        <label for="pickup_address">Pickup Address</label>
+        {{ form.pickup_address(class_='form-control', placeholder='Street address') }}
+      </div>
+
+      <div class="row">
+        <div class="col-sm-4">
+          <div class="form-group">
+            <label for="pickup_city">City</label>
+            {{ form.pickup_city(class_='form-control', placeholder='City') }}
+          </div>
+        </div>
+        <div class="col-sm-4">
+          <div class="form-group">
+            <label for="pickup_county">County</label>
+            {{ form.pickup_county(class_='form-control') }}
+          </div>
+        </div>
+        <div class="col-sm-4">
+          <div class="form-group">
+            <label for="pickup_postcode">Postcode</label>
+            {{ form.pickup_postcode(class_='form-control', placeholder='e.g. SW1A 1AA') }}
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="scheduled_pickup_at">Scheduled Pickup Time</label>
+        {{ form.scheduled_pickup_at(class_='form-control', type='datetime-local', min=min_pickup_iso) }}
+      </div>
+
+      <div class="form-group">
+        <label for="notes">Additional Notes (optional)</label>
+        {{ form.notes(class_='form-control', rows='4', placeholder='Access instructions, site contact, etc.') }}
+      </div>
+    </section>
+
+    <input type="submit" value="Submit Pickup Request" class="btn btn-primary btn-lg btn-block">
+  </form>
+</div>
+
+<script>
+  (function () {
+    var materialType = document.getElementById('material_type');
+    var customWrap = document.getElementById('custom-material-wrap');
+    var customInput = document.getElementById('custom_material_type');
+
+    function toggleCustomMaterial() {
+      var show = materialType && materialType.value === 'Other';
+      customWrap.style.display = show ? 'block' : 'none';
+      customInput.required = show;
+      if (!show) {
+        customInput.value = '';
+      }
+    }
+
+    if (materialType) {
+      materialType.addEventListener('change', toggleCustomMaterial);
+      toggleCustomMaterial();
+    }
+  })();
+</script>
+{% endblock %}

@@ -6,6 +6,7 @@ import json
 import os
 import csv
 import uuid
+from datetime import datetime
 import dateutil.parser
 import babel
 import requests
@@ -126,6 +127,28 @@ class r(db.Model):
 
     def __repr__(self):
         return '<Request {}>'.format(self.mat_id)
+
+
+class WasteRemovalRequest(db.Model):
+    __tablename__ = 'waste_removal_requests'
+
+    id = db.Column(db.Integer, primary_key=True)
+    requester_name = db.Column(db.String(120), nullable=False)
+    requester_email = db.Column(db.String(255), nullable=False)
+    material_type = db.Column(db.String(120), nullable=False)
+    waste_amount = db.Column(db.Float, nullable=False)
+    waste_unit = db.Column(db.String(32), nullable=False)
+    pickup_address = db.Column(db.String(255), nullable=False)
+    pickup_city = db.Column(db.String(120))
+    pickup_county = db.Column(db.String(120))
+    pickup_postcode = db.Column(db.String(32), nullable=False)
+    scheduled_pickup_at = db.Column(db.DateTime, nullable=False)
+    notes = db.Column(db.Text)
+    status = db.Column(db.String(32), nullable=False, default='pending')
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    def __repr__(self):
+        return '<WasteRemovalRequest {} {}>'.format(self.id, self.material_type)
 
 
 @login_manager.user_loader
@@ -1162,6 +1185,94 @@ def request_material_form(mat_id):
             flash('Request saved. Email notification is not configured yet.')
         
     return redirect('/materials')
+
+
+@app.route('/waste-removal/request', methods=['GET'])
+@app.route('/waste_removal/request', methods=['GET'])
+def create_waste_removal_request_form():
+    form = WasteRemovalRequestForm()
+    if current_user.is_authenticated:
+        if current_user.name:
+            form.requester_name.data = current_user.name
+        if current_user.email:
+            form.requester_email.data = current_user.email
+    min_pickup_iso = datetime.now().replace(second=0, microsecond=0).strftime('%Y-%m-%dT%H:%M')
+    return render_template('forms/waste_removal_request.html', form=form, min_pickup_iso=min_pickup_iso)
+
+
+@app.route('/waste-removal/request', methods=['POST'])
+@app.route('/waste_removal/request', methods=['POST'])
+def create_waste_removal_request_submission():
+    error = False
+    try:
+        form = _require_form_fields(
+            request.form,
+            [
+                'requester_name',
+                'requester_email',
+                'material_type',
+                'waste_amount',
+                'waste_unit',
+                'pickup_address',
+                'pickup_postcode',
+                'scheduled_pickup_at',
+            ],
+        )
+
+        material_type = form['material_type']
+        if material_type == 'Other':
+            custom_material_type = request.form.get('custom_material_type', '').strip()
+            if not custom_material_type:
+                raise ValueError('Please enter a material type when selecting Other.')
+            material_type = custom_material_type[:120]
+
+        waste_amount = _to_float_or_none(form['waste_amount'])
+        if waste_amount is None or waste_amount <= 0:
+            raise ValueError('Waste amount must be a positive number.')
+
+        try:
+            scheduled_pickup_at = dateutil.parser.parse(form['scheduled_pickup_at'])
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError('Please provide a valid scheduled pickup date and time.')
+
+        if scheduled_pickup_at.tzinfo is not None:
+            scheduled_pickup_at = scheduled_pickup_at.astimezone().replace(tzinfo=None)
+        if scheduled_pickup_at <= datetime.now():
+            raise ValueError('Scheduled pickup time must be in the future.')
+
+        booking = WasteRemovalRequest(
+            requester_name=form['requester_name'][:120],
+            requester_email=form['requester_email'][:255],
+            material_type=material_type,
+            waste_amount=waste_amount,
+            waste_unit=form['waste_unit'][:32],
+            pickup_address=form['pickup_address'][:255],
+            pickup_city=(request.form.get('pickup_city') or '').strip()[:120] or None,
+            pickup_county=(request.form.get('pickup_county') or '').strip()[:120] or None,
+            pickup_postcode=form['pickup_postcode'][:32],
+            scheduled_pickup_at=scheduled_pickup_at,
+            notes=(request.form.get('notes') or '').strip() or None,
+            status='pending',
+        )
+        db.session.add(booking)
+        db.session.commit()
+    except ValueError as exc:
+        error = True
+        db.session.rollback()
+        flash(str(exc))
+    except Exception:
+        error = True
+        db.session.rollback()
+        app.logger.exception('Waste removal request submission failed.')
+    finally:
+        db.session.close()
+
+    if error:
+        flash('Waste removal request could not be submitted.')
+    else:
+        flash('Waste removal request submitted. We will contact you to confirm pickup.')
+
+    return redirect('/waste-removal/request')
 
 #  Error Handling and Initializing
 #  ----------------------------------------------------------------

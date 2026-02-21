@@ -1,6 +1,6 @@
 from flask_wtf import FlaskForm
 from wtforms import StringField, SelectField, FloatField, TextAreaField
-from wtforms.validators import DataRequired, URL
+from wtforms.validators import DataRequired, NumberRange, URL
 
 COUNTY_CHOICES = [
     'Bath and North East Somerset',
@@ -97,6 +97,14 @@ OUTPUT_MATERIAL_CHOICES = [
     'Other',
 ]
 
+WASTE_AMOUNT_UNIT_CHOICES = [
+    'Tonnes',
+    'Kilograms',
+    'Cubic Meters',
+    'Bags',
+    'Items',
+]
+
 
 class FilterForm(FlaskForm):
     postcode = StringField('postcode', validators=[DataRequired()])
@@ -178,3 +186,17 @@ class OutputForm(FlaskForm):
     site_address = StringField('site_address', validators=[DataRequired()])
     traditional_address = StringField('traditional_address', validators=[DataRequired()])
     divert_address = StringField('divert_address', validators=[DataRequired()])
+
+
+class WasteRemovalRequestForm(FlaskForm):
+    requester_name = StringField('requester_name', validators=[DataRequired()])
+    requester_email = StringField('requester_email', validators=[DataRequired()])
+    material_type = SelectField('material_type', validators=[DataRequired()], choices=MATERIAL_CHOICES)
+    waste_amount = FloatField('waste_amount', validators=[DataRequired(), NumberRange(min=0.01)])
+    waste_unit = SelectField('waste_unit', validators=[DataRequired()], choices=WASTE_AMOUNT_UNIT_CHOICES)
+    pickup_address = StringField('pickup_address', validators=[DataRequired()])
+    pickup_city = StringField('pickup_city')
+    pickup_county = SelectField('pickup_county', choices=COUNTY_CHOICES)
+    pickup_postcode = StringField('pickup_postcode', validators=[DataRequired()])
+    scheduled_pickup_at = StringField('scheduled_pickup_at', validators=[DataRequired()])
+    notes = TextAreaField('notes')

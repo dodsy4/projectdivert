@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -22,6 +23,7 @@ def test_core_get_routes(client):
         '/first': 200,
         '/output': 200,
         '/map': 200,
+        '/waste-removal/request': 200,
     }
 
     for route, status_code in expected.items():
@@ -165,3 +167,75 @@ def test_result_redirects_to_output_when_distance_api_fails(client, app_context,
 
     assert response.status_code == 302
     assert response.headers['Location'].endswith('/output')
+
+
+def test_waste_removal_request_missing_required_fields_does_not_create_record(client, app_context):
+    with app_context.app.app_context():
+        count_before = app_context.WasteRemovalRequest.query.count()
+
+    response = client.post('/waste-removal/request', data={})
+
+    with app_context.app.app_context():
+        count_after = app_context.WasteRemovalRequest.query.count()
+
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/waste-removal/request')
+    assert count_after == count_before
+
+
+def test_waste_removal_request_valid_creates_record(client, app_context):
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+    payload = {
+        'requester_name': 'Test User',
+        'requester_email': 'test@example.com',
+        'material_type': 'Glass',
+        'waste_amount': '2.5',
+        'waste_unit': 'Tonnes',
+        'pickup_address': '1 Example Road',
+        'pickup_city': 'London',
+        'pickup_county': 'Greater London',
+        'pickup_postcode': 'SW1A1AA',
+        'scheduled_pickup_at': scheduled_time,
+        'notes': 'Gate code 1234',
+    }
+
+    with app_context.app.app_context():
+        count_before = app_context.WasteRemovalRequest.query.count()
+
+    response = client.post('/waste-removal/request', data=payload)
+
+    with app_context.app.app_context():
+        count_after = app_context.WasteRemovalRequest.query.count()
+        latest = app_context.WasteRemovalRequest.query.order_by(app_context.WasteRemovalRequest.id.desc()).first()
+
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/waste-removal/request')
+    assert count_after == count_before + 1
+    assert latest.material_type == 'Glass'
+    assert latest.waste_amount == pytest.approx(2.5)
+
+
+def test_waste_removal_request_past_time_is_rejected(client, app_context):
+    past_time = (datetime.now() - timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M')
+    payload = {
+        'requester_name': 'Test User',
+        'requester_email': 'test@example.com',
+        'material_type': 'Glass',
+        'waste_amount': '1',
+        'waste_unit': 'Tonnes',
+        'pickup_address': '1 Example Road',
+        'pickup_postcode': 'SW1A1AA',
+        'scheduled_pickup_at': past_time,
+    }
+
+    with app_context.app.app_context():
+        count_before = app_context.WasteRemovalRequest.query.count()
+
+    response = client.post('/waste-removal/request', data=payload)
+
+    with app_context.app.app_context():
+        count_after = app_context.WasteRemovalRequest.query.count()
+
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/waste-removal/request')
+    assert count_after == count_before
