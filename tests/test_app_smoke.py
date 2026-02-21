@@ -239,3 +239,38 @@ def test_waste_removal_request_past_time_is_rejected(client, app_context):
     assert response.status_code == 302
     assert response.headers['Location'].endswith('/waste-removal/request')
     assert count_after == count_before
+
+
+def test_waste_removal_request_sends_notification_email(client, app_context, monkeypatch):
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+    payload = {
+        'requester_name': 'Test User',
+        'requester_email': 'test@example.com',
+        'material_type': 'Glass',
+        'waste_amount': '2.5',
+        'waste_unit': 'Tonnes',
+        'pickup_address': '1 Example Road',
+        'pickup_city': 'London',
+        'pickup_county': 'Greater London',
+        'pickup_postcode': 'SW1A1AA',
+        'scheduled_pickup_at': scheduled_time,
+    }
+
+    app_context.app.config['WASTE_REMOVAL_NOTIFICATION_EMAIL'] = 'ops@example.com'
+    captured = {}
+
+    def _fake_send(to_email, subject, text_body, html_body=None):
+        captured['to_email'] = to_email
+        captured['subject'] = subject
+        captured['text_body'] = text_body
+        return True
+
+    monkeypatch.setattr(app_context, '_send_material_request_email', _fake_send)
+
+    response = client.post('/waste-removal/request', data=payload)
+
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/waste-removal/request')
+    assert captured['to_email'] == 'ops@example.com'
+    assert 'New waste removal request' in captured['subject']
+    assert 'Waste Amount: 2.5 Tonnes' in captured['text_body']

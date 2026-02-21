@@ -1204,6 +1204,8 @@ def create_waste_removal_request_form():
 @app.route('/waste_removal/request', methods=['POST'])
 def create_waste_removal_request_submission():
     error = False
+    email_sent = False
+    email_configured = False
     try:
         form = _require_form_fields(
             request.form,
@@ -1256,6 +1258,46 @@ def create_waste_removal_request_submission():
         )
         db.session.add(booking)
         db.session.commit()
+
+        notification_email = (app.config.get('WASTE_REMOVAL_NOTIFICATION_EMAIL') or '').strip()
+        email_configured = bool(notification_email)
+        if notification_email:
+            local_pickup = scheduled_pickup_at.strftime('%Y-%m-%d %H:%M')
+            subject = 'New waste removal request: {}'.format(material_type)
+            text_body = (
+                'A new waste removal request was submitted.\n\n'
+                'Request ID: {request_id}\n'
+                'Requester Name: {requester_name}\n'
+                'Requester Email: {requester_email}\n'
+                'Material Type: {material_type}\n'
+                'Waste Amount: {waste_amount} {waste_unit}\n'
+                'Pickup Address: {pickup_address}\n'
+                'Pickup City: {pickup_city}\n'
+                'Pickup County: {pickup_county}\n'
+                'Pickup Postcode: {pickup_postcode}\n'
+                'Scheduled Pickup: {scheduled_pickup}\n'
+                'Notes: {notes}\n'
+                'Status: {status}\n'
+            ).format(
+                request_id=booking.id,
+                requester_name=booking.requester_name,
+                requester_email=booking.requester_email,
+                material_type=booking.material_type,
+                waste_amount=booking.waste_amount,
+                waste_unit=booking.waste_unit,
+                pickup_address=booking.pickup_address,
+                pickup_city=booking.pickup_city or '(not provided)',
+                pickup_county=booking.pickup_county or '(not provided)',
+                pickup_postcode=booking.pickup_postcode,
+                scheduled_pickup=local_pickup,
+                notes=booking.notes or '(none)',
+                status=booking.status,
+            )
+            email_sent = _send_material_request_email(notification_email, subject, text_body)
+        else:
+            app.logger.warning(
+                'WASTE_REMOVAL_NOTIFICATION_EMAIL not set; waste removal email notification skipped.'
+            )
     except ValueError as exc:
         error = True
         db.session.rollback()
@@ -1270,7 +1312,12 @@ def create_waste_removal_request_submission():
     if error:
         flash('Waste removal request could not be submitted.')
     else:
-        flash('Waste removal request submitted. We will contact you to confirm pickup.')
+        if email_sent:
+            flash('Waste removal request submitted and emailed to the team.')
+        elif email_configured:
+            flash('Waste removal request submitted. Email delivery failed.')
+        else:
+            flash('Waste removal request submitted. Email notification is not configured yet.')
 
     return redirect('/waste-removal/request')
 
