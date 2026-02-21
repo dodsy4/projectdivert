@@ -6,6 +6,7 @@ import json
 import os
 import csv
 import uuid
+import random
 from datetime import datetime
 import dateutil.parser
 import babel
@@ -151,6 +152,33 @@ class WasteRemovalRequest(db.Model):
         return '<WasteRemovalRequest {} {}>'.format(self.id, self.material_type)
 
 
+class WasteRemovalMatch(db.Model):
+    __tablename__ = 'waste_removal_matches'
+
+    id = db.Column(db.Integer, primary_key=True)
+    waste_removal_request_id = db.Column(
+        db.Integer,
+        db.ForeignKey('waste_removal_requests.id'),
+        nullable=False,
+        index=True,
+    )
+    provider_name = db.Column(db.String(255), nullable=False)
+    provider_type = db.Column(db.String(120))
+    provider_city = db.Column(db.String(120))
+    provider_postcode = db.Column(db.String(32))
+    provider_latitude = db.Column(db.Float, nullable=False)
+    provider_longitude = db.Column(db.Float, nullable=False)
+    distance_miles = db.Column(db.Float, nullable=False)
+    match_radius_miles = db.Column(db.Float, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    def __repr__(self):
+        return '<WasteRemovalMatch request={} provider={}>'.format(
+            self.waste_removal_request_id,
+            self.provider_name,
+        )
+
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
@@ -178,6 +206,76 @@ def _to_float_or_none(value):
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _postcode_coordinates(postcode):
+    endpoint = "http://api.postcodes.io/postcodes/{}".format(postcode)
+    response = requests.get(endpoint, timeout=10)
+    payload = response.json()
+    result = payload.get('result') if isinstance(payload, dict) else None
+    if not result:
+        raise ValueError('Please enter a valid pickup postcode.')
+
+    longitude = _to_float_or_none(result.get('longitude'))
+    latitude = _to_float_or_none(result.get('latitude'))
+    if longitude is None or latitude is None:
+        raise ValueError('Please enter a valid pickup postcode.')
+    return latitude, longitude
+
+
+def _haversine_miles(lat1, lon1, lat2, lon2):
+    radius_miles = 3958.8
+    lat1_r = math.radians(lat1)
+    lon1_r = math.radians(lon1)
+    lat2_r = math.radians(lat2)
+    lon2_r = math.radians(lon2)
+    delta_lat = lat2_r - lat1_r
+    delta_lon = lon2_r - lon1_r
+    a = (
+        math.sin(delta_lat / 2) ** 2
+        + math.cos(lat1_r) * math.cos(lat2_r) * math.sin(delta_lon / 2) ** 2
+    )
+    c = 2 * math.asin(math.sqrt(a))
+    return radius_miles * c
+
+
+def _pick_random_provider_within_radius(pickup_latitude, pickup_longitude, radius_miles):
+    if radius_miles <= 0:
+        raise ValueError('Provider match radius must be greater than zero.')
+
+    if suppliers is None or getattr(suppliers, 'empty', True):
+        return None
+
+    candidates = []
+    for _, row in suppliers.iterrows():
+        provider_name = str(row.get('name') or '').strip()
+        provider_latitude = _to_float_or_none(row.get('lat'))
+        provider_longitude = _to_float_or_none(row.get('long'))
+        if not provider_name or provider_latitude is None or provider_longitude is None:
+            continue
+
+        distance_miles = _haversine_miles(
+            pickup_latitude,
+            pickup_longitude,
+            provider_latitude,
+            provider_longitude,
+        )
+        if distance_miles <= radius_miles:
+            candidates.append(
+                {
+                    'provider_name': provider_name[:255],
+                    'provider_type': str(row.get('sup_type') or '').strip()[:120] or None,
+                    'provider_city': str(row.get('city') or '').strip()[:120] or None,
+                    'provider_postcode': str(row.get('postcode') or '').strip()[:32] or None,
+                    'provider_latitude': provider_latitude,
+                    'provider_longitude': provider_longitude,
+                    'distance_miles': round(distance_miles, 2),
+                }
+            )
+
+    if not candidates:
+        return None
+    return random.choice(candidates)
 
 
 def _require_form_fields(form_data, required_fields):
@@ -1191,6 +1289,8 @@ def request_material_form(mat_id):
 @app.route('/waste_removal/request', methods=['GET'])
 def create_waste_removal_request_form():
     form = WasteRemovalRequestForm()
+    if not form.match_radius_miles.data:
+        form.match_radius_miles.data = 25
     if current_user.is_authenticated:
         if current_user.name:
             form.requester_name.data = current_user.name
@@ -1206,6 +1306,8 @@ def create_waste_removal_request_submission():
     error = False
     email_sent = False
     email_configured = False
+    provider_match = None
+    match_radius_miles = None
     try:
         form = _require_form_fields(
             request.form,
@@ -1215,6 +1317,7 @@ def create_waste_removal_request_submission():
                 'material_type',
                 'waste_amount',
                 'waste_unit',
+                'match_radius_miles',
                 'pickup_address',
                 'pickup_postcode',
                 'scheduled_pickup_at',
@@ -1232,6 +1335,10 @@ def create_waste_removal_request_submission():
         if waste_amount is None or waste_amount <= 0:
             raise ValueError('Waste amount must be a positive number.')
 
+        match_radius_miles = _to_float_or_none(form['match_radius_miles'])
+        if match_radius_miles is None or match_radius_miles <= 0:
+            raise ValueError('Provider match radius must be a positive number of miles.')
+
         try:
             scheduled_pickup_at = dateutil.parser.parse(form['scheduled_pickup_at'])
         except (TypeError, ValueError, OverflowError):
@@ -1241,6 +1348,13 @@ def create_waste_removal_request_submission():
             scheduled_pickup_at = scheduled_pickup_at.astimezone().replace(tzinfo=None)
         if scheduled_pickup_at <= datetime.now():
             raise ValueError('Scheduled pickup time must be in the future.')
+
+        pickup_latitude, pickup_longitude = _postcode_coordinates(form['pickup_postcode'])
+        provider_match = _pick_random_provider_within_radius(
+            pickup_latitude,
+            pickup_longitude,
+            match_radius_miles,
+        )
 
         booking = WasteRemovalRequest(
             requester_name=form['requester_name'][:120],
@@ -1254,9 +1368,26 @@ def create_waste_removal_request_submission():
             pickup_postcode=form['pickup_postcode'][:32],
             scheduled_pickup_at=scheduled_pickup_at,
             notes=(request.form.get('notes') or '').strip() or None,
-            status='pending',
+            status='matched' if provider_match else 'pending_match',
         )
         db.session.add(booking)
+        db.session.flush()
+
+        if provider_match:
+            db.session.add(
+                WasteRemovalMatch(
+                    waste_removal_request_id=booking.id,
+                    provider_name=provider_match['provider_name'],
+                    provider_type=provider_match['provider_type'],
+                    provider_city=provider_match['provider_city'],
+                    provider_postcode=provider_match['provider_postcode'],
+                    provider_latitude=provider_match['provider_latitude'],
+                    provider_longitude=provider_match['provider_longitude'],
+                    distance_miles=provider_match['distance_miles'],
+                    match_radius_miles=match_radius_miles,
+                )
+            )
+
         db.session.commit()
 
         notification_email = (app.config.get('WASTE_REMOVAL_NOTIFICATION_EMAIL') or '').strip()
@@ -1276,6 +1407,8 @@ def create_waste_removal_request_submission():
                 'Pickup County: {pickup_county}\n'
                 'Pickup Postcode: {pickup_postcode}\n'
                 'Scheduled Pickup: {scheduled_pickup}\n'
+                'Match Radius (miles): {match_radius_miles}\n'
+                'Matched Provider: {matched_provider}\n'
                 'Notes: {notes}\n'
                 'Status: {status}\n'
             ).format(
@@ -1290,6 +1423,15 @@ def create_waste_removal_request_submission():
                 pickup_county=booking.pickup_county or '(not provided)',
                 pickup_postcode=booking.pickup_postcode,
                 scheduled_pickup=local_pickup,
+                match_radius_miles=match_radius_miles,
+                matched_provider=(
+                    '{} ({} miles)'.format(
+                        provider_match['provider_name'],
+                        provider_match['distance_miles'],
+                    )
+                    if provider_match
+                    else 'No provider found within radius'
+                ),
                 notes=booking.notes or '(none)',
                 status=booking.status,
             )
@@ -1312,12 +1454,25 @@ def create_waste_removal_request_submission():
     if error:
         flash('Waste removal request could not be submitted.')
     else:
-        if email_sent:
-            flash('Waste removal request submitted and emailed to the team.')
-        elif email_configured:
-            flash('Waste removal request submitted. Email delivery failed.')
+        if provider_match:
+            flash(
+                'Waste removal request submitted. Matched provider: {} ({} miles).'.format(
+                    provider_match['provider_name'],
+                    provider_match['distance_miles'],
+                )
+            )
         else:
-            flash('Waste removal request submitted. Email notification is not configured yet.')
+            flash(
+                'Waste removal request submitted. No provider found within {} miles yet.'.format(
+                    round(match_radius_miles or 0, 2),
+                )
+            )
+        if email_sent:
+            flash('Request details emailed to the team.')
+        elif email_configured:
+            flash('Request saved but email delivery failed.')
+        else:
+            flash('Request saved. Email notification is not configured yet.')
 
     return redirect('/waste-removal/request')
 

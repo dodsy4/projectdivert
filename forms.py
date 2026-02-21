@@ -194,6 +194,7 @@ class WasteRemovalRequestForm(FlaskForm):
     material_type = SelectField('material_type', validators=[DataRequired()], choices=MATERIAL_CHOICES)
     waste_amount = FloatField('waste_amount', validators=[DataRequired(), NumberRange(min=0.01)])
     waste_unit = SelectField('waste_unit', validators=[DataRequired()], choices=WASTE_AMOUNT_UNIT_CHOICES)
+    match_radius_miles = FloatField('match_radius_miles', validators=[DataRequired(), NumberRange(min=1, max=500)])
     pickup_address = StringField('pickup_address', validators=[DataRequired()])
     pickup_city = StringField('pickup_city')
     pickup_county = SelectField('pickup_county', choices=COUNTY_CHOICES)

@@ -96,6 +96,12 @@
         </div>
       </div>
 
+      <div class="form-group">
+        <label for="match_radius_miles">Provider Match Radius (miles)</label>
+        {{ form.match_radius_miles(class_='form-control', placeholder='e.g. 25') }}
+        <p class="help-block">We will randomly match a provider within this range.</p>
+      </div>
+
       <div class="form-group" id="custom-material-wrap" style="display:none;">
         <label for="custom_material_type">If Other, enter material type</label>
         <input id="custom_material_type" name="custom_material_type" type="text" class="form-control" placeholder="e.g. Mixed demolition waste">

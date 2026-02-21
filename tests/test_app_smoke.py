@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timedelta
 
+import pandas as pd
 import pytest
 
 
@@ -11,6 +12,33 @@ class FakeResponse:
 
     def json(self):
         return self._payload
+
+
+def _fake_postcode_lookup(*args, **kwargs):
+    return FakeResponse({'result': {'longitude': -0.1276, 'latitude': 51.5072}})
+
+
+def _provider_frame():
+    return pd.DataFrame(
+        [
+            {
+                'name': 'Provider Alpha',
+                'sup_type': 'Waste Carrier',
+                'city': 'London',
+                'postcode': 'SW1A1AA',
+                'lat': 51.5074,
+                'long': -0.1278,
+            },
+            {
+                'name': 'Provider Far',
+                'sup_type': 'Waste Carrier',
+                'city': 'Leeds',
+                'postcode': 'LS11AA',
+                'lat': 53.8008,
+                'long': -1.5491,
+            },
+        ]
+    )
 
 
 def test_core_get_routes(client):
@@ -90,7 +118,7 @@ def test_material_post_valid_creates_record(client, app_context, monkeypatch):
     monkeypatch.setattr(
         app_context.requests,
         'get',
-        lambda *args, **kwargs: FakeResponse({'result': {'longitude': -0.1276, 'latitude': 51.5072}}),
+        _fake_postcode_lookup,
     )
 
     payload = {
@@ -183,7 +211,10 @@ def test_waste_removal_request_missing_required_fields_does_not_create_record(cl
     assert count_after == count_before
 
 
-def test_waste_removal_request_valid_creates_record(client, app_context):
+def test_waste_removal_request_valid_creates_record(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+
     scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
     payload = {
         'requester_name': 'Test User',
@@ -191,6 +222,7 @@ def test_waste_removal_request_valid_creates_record(client, app_context):
         'material_type': 'Glass',
         'waste_amount': '2.5',
         'waste_unit': 'Tonnes',
+        'match_radius_miles': '25',
         'pickup_address': '1 Example Road',
         'pickup_city': 'London',
         'pickup_county': 'Greater London',
@@ -207,12 +239,16 @@ def test_waste_removal_request_valid_creates_record(client, app_context):
     with app_context.app.app_context():
         count_after = app_context.WasteRemovalRequest.query.count()
         latest = app_context.WasteRemovalRequest.query.order_by(app_context.WasteRemovalRequest.id.desc()).first()
+        latest_match = app_context.WasteRemovalMatch.query.order_by(app_context.WasteRemovalMatch.id.desc()).first()
 
     assert response.status_code == 302
     assert response.headers['Location'].endswith('/waste-removal/request')
     assert count_after == count_before + 1
     assert latest.material_type == 'Glass'
     assert latest.waste_amount == pytest.approx(2.5)
+    assert latest.status == 'matched'
+    assert latest_match.waste_removal_request_id == latest.id
+    assert latest_match.provider_name == 'Provider Alpha'
 
 
 def test_waste_removal_request_past_time_is_rejected(client, app_context):
@@ -223,6 +259,7 @@ def test_waste_removal_request_past_time_is_rejected(client, app_context):
         'material_type': 'Glass',
         'waste_amount': '1',
         'waste_unit': 'Tonnes',
+        'match_radius_miles': '25',
         'pickup_address': '1 Example Road',
         'pickup_postcode': 'SW1A1AA',
         'scheduled_pickup_at': past_time,
@@ -241,7 +278,25 @@ def test_waste_removal_request_past_time_is_rejected(client, app_context):
     assert count_after == count_before
 
 
-def test_waste_removal_request_sends_notification_email(client, app_context, monkeypatch):
+def test_waste_removal_request_no_provider_in_radius_sets_pending(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(
+        app_context,
+        'suppliers',
+        pd.DataFrame(
+            [
+                {
+                    'name': 'Provider Far',
+                    'sup_type': 'Waste Carrier',
+                    'city': 'Leeds',
+                    'postcode': 'LS11AA',
+                    'lat': 53.8008,
+                    'long': -1.5491,
+                }
+            ]
+        ),
+    )
+
     scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
     payload = {
         'requester_name': 'Test User',
@@ -249,6 +304,36 @@ def test_waste_removal_request_sends_notification_email(client, app_context, mon
         'material_type': 'Glass',
         'waste_amount': '2.5',
         'waste_unit': 'Tonnes',
+        'match_radius_miles': '1',
+        'pickup_address': '1 Example Road',
+        'pickup_postcode': 'SW1A1AA',
+        'scheduled_pickup_at': scheduled_time,
+    }
+
+    response = client.post('/waste-removal/request', data=payload)
+
+    with app_context.app.app_context():
+        latest = app_context.WasteRemovalRequest.query.order_by(app_context.WasteRemovalRequest.id.desc()).first()
+        match_count = app_context.WasteRemovalMatch.query.filter_by(waste_removal_request_id=latest.id).count()
+
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/waste-removal/request')
+    assert latest.status == 'pending_match'
+    assert match_count == 0
+
+
+def test_waste_removal_request_sends_notification_email(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+    payload = {
+        'requester_name': 'Test User',
+        'requester_email': 'test@example.com',
+        'material_type': 'Glass',
+        'waste_amount': '2.5',
+        'waste_unit': 'Tonnes',
+        'match_radius_miles': '25',
         'pickup_address': '1 Example Road',
         'pickup_city': 'London',
         'pickup_county': 'Greater London',
@@ -274,3 +359,4 @@ def test_waste_removal_request_sends_notification_email(client, app_context, mon
     assert captured['to_email'] == 'ops@example.com'
     assert 'New waste removal request' in captured['subject']
     assert 'Waste Amount: 2.5 Tonnes' in captured['text_body']
+    assert 'Matched Provider: Provider Alpha' in captured['text_body']
