@@ -6,18 +6,23 @@ This mobile app scaffold connects directly to your existing backend APIs:
 - `POST /api/v1/waste-requests`
 - `GET /api/v1/waste-requests/:id`
 - `GET /api/v1/waste-requests/:id/location/latest`
+- `GET /api/v1/waste-requests/:id/events` (SSE realtime stream)
 - `POST /api/v1/waste-requests/:id/status` (driver/admin simulation)
 - `POST /api/v1/waste-requests/:id/location` (driver/admin simulation)
+- `POST /api/v1/push-subscriptions` (register Expo push token)
+- `DELETE /api/v1/push-subscriptions` (deactivate Expo push token)
 
-It includes an end-to-end flow:
+It now includes role-specific screen flows:
 
 1. Sign in
-2. Create a waste removal request (customer/admin)
-3. View matched provider + drive time
-4. Simulate driver status/location updates (driver/admin)
-5. Poll for live status/location updates every 10 seconds
-6. Navigate between role-based tabs (`Create`, `Driver`, `Track`, `Account`)
-7. Restore an existing auth session on app restart
+2. Customer screens: `New Request` -> `Request Status`
+3. Driver screens: `Offer Inbox` -> `Active Job`
+4. Accept dispatch offers via `POST /api/v1/waste-requests/:id/dispatch/accept`
+5. Progress status with guided actions (`accepted` -> `completed`)
+6. Push live vehicle location updates
+7. Live request/location updates via SSE (replacing 10s polling)
+8. Foreground push-style alerts for key realtime events
+9. Restore an existing auth session on app restart
 
 ## 1) Prerequisites
 
@@ -40,6 +45,11 @@ Set `EXPO_PUBLIC_API_BASE_URL` in `.env`:
 - Android emulator: `http://10.0.2.2:5000`
 - Physical device: `http://<your-mac-lan-ip>:5000`
 
+Payment feature flag (recommended while still building):
+
+- `EXPO_PUBLIC_PAYMENTS_ENABLED=0` to keep payment actions disabled in the app
+- switch to `1` only when backend `PAYMENTS_ENABLED=1` and Stripe is configured
+
 ## 3) Run
 
 ```bash
@@ -52,6 +62,8 @@ Then open in iOS/Android simulator or Expo Go.
 
 ## Notes
 
-- This remains intentionally lightweight and single-screen/tab based.
 - Auth sessions are persisted with `expo-secure-store` and restored on launch.
-- Live updates currently poll every 10s; WebSocket updates are still a future iteration.
+- Realtime delivery is now SSE-based. For production with multiple API workers, route sticky sessions or a shared event bus is recommended.
+- For OS background push, install Expo modules in `mobile-app`:
+  - `npx expo install expo-notifications expo-device expo-constants`
+  - Also configure credentials/build profiles for APNS/FCM in your Expo project.

@@ -45,6 +45,9 @@
             <li><a href="/material_input">List Material</a></li>
             <li><a href="/waste-removal/request">Book Waste Removal</a></li>
             <li><a href="/output">Carbon Calculator</a></li>
+            {% if current_user.is_authenticated and (current_user.role or '').lower() == 'admin' %}
+            <li><a href="/admin/dispatch">Dispatch Admin</a></li>
+            {% endif %}
           </ul>
           <ul class="nav navbar-nav navbar-right">
             {% if current_user.is_authenticated %}

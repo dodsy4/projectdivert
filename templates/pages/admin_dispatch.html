@@ -1,0 +1,277 @@
+{% extends 'layouts/main.html' %}
+{% block title %}Dispatch Admin{% endblock %}
+{% block content %}
+<style>
+  .dispatch-admin-shell {
+    margin-top: 16px;
+  }
+
+  .dispatch-admin-kpis {
+    margin: 0 0 14px;
+    color: #587089;
+    font-size: 13px;
+  }
+
+  .dispatch-admin-kpis span {
+    display: inline-block;
+    margin-right: 16px;
+  }
+
+  .dispatch-table-wrap {
+    overflow-x: auto;
+    border: 1px solid #d7e0ea;
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .dispatch-summary {
+    margin: 0 0 14px;
+  }
+
+  .dispatch-summary .label {
+    margin-right: 8px;
+    margin-bottom: 6px;
+    display: inline-block;
+  }
+
+  .dispatch-filter-bar {
+    margin: 0 0 14px;
+    padding: 12px;
+    border: 1px solid #d7e0ea;
+    border-radius: 8px;
+    background: #f7fafc;
+  }
+
+  .dispatch-filter-bar .checkbox-inline {
+    margin-top: 6px;
+  }
+
+  .dispatch-table {
+    min-width: 1100px;
+    margin-bottom: 0;
+  }
+
+  .dispatch-table th {
+    font-size: 12px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: #60758c;
+    border-bottom: 2px solid #d7e0ea !important;
+  }
+
+  .dispatch-badges .label {
+    margin-right: 6px;
+    display: inline-block;
+    margin-bottom: 4px;
+  }
+
+  .dispatch-cell-tight p {
+    margin: 0 0 4px;
+    font-size: 12px;
+    color: #4f6479;
+  }
+
+  .dispatch-form .form-control {
+    margin-bottom: 6px;
+  }
+
+  .dispatch-form .btn {
+    width: 100%;
+  }
+</style>
+
+<div class="dispatch-admin-shell">
+  <h1>Dispatch Admin Board</h1>
+  <p class="lead">Manual driver assignment and live queue triage.</p>
+
+  <div class="dispatch-admin-kpis">
+    <span><strong>Open statuses:</strong> {{ statuses|join(', ') }}</span>
+    <span><strong>Pending-match SLA:</strong> {{ sla_thresholds.pending_match_minutes }}m</span>
+    <span><strong>Unassigned-match SLA:</strong> {{ sla_thresholds.unassigned_match_minutes }}m</span>
+    <span><strong>Location stale:</strong> {{ sla_thresholds.location_stale_minutes }}m</span>
+  </div>
+
+  <div class="dispatch-summary">
+    <span class="label label-primary">rows: {{ summary.total_rows }}</span>
+    <span class="label label-danger">requests with incidents: {{ summary.requests_with_incidents }}</span>
+    <span class="label label-warning">incident flags: {{ summary.incident_total }}</span>
+    <span class="label label-info">pickup overdue: {{ summary.requests_overdue }}</span>
+  </div>
+
+  <form class="dispatch-filter-bar" method="get" action="/admin/dispatch">
+    <div class="row">
+      <div class="col-sm-6">
+        <label for="statuses">Statuses (comma-separated)</label>
+        <input
+          id="statuses"
+          class="form-control"
+          type="text"
+          name="statuses"
+          value="{{ statuses|join(',') }}"
+          placeholder="{{ status_options|join(',') }}"
+        >
+      </div>
+      <div class="col-sm-3">
+        <label for="assigned">Assignment</label>
+        <select id="assigned" class="form-control" name="assigned">
+          <option value="" {% if assigned_filter is none %}selected{% endif %}>Any</option>
+          <option value="true" {% if assigned_filter is sameas true %}selected{% endif %}>Assigned only</option>
+          <option value="false" {% if assigned_filter is sameas false %}selected{% endif %}>Unassigned only</option>
+        </select>
+      </div>
+      <div class="col-sm-3">
+        <label>&nbsp;</label>
+        <div>
+          <label class="checkbox-inline">
+            <input type="checkbox" name="incidents_only" value="true" {% if incidents_only %}checked{% endif %}>
+            Incident rows only
+          </label>
+        </div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <div class="col-sm-12">
+        <button type="submit" class="btn btn-default btn-sm">Apply Filters</button>
+        <a class="btn btn-link btn-sm" href="/admin/dispatch">Reset</a>
+      </div>
+    </div>
+  </form>
+
+  {% if incident_rows %}
+    <h3>Top Incidents</h3>
+    <div class="dispatch-table-wrap" style="margin-bottom:14px;">
+      <table class="table table-striped dispatch-table">
+        <thead>
+          <tr>
+            <th>Request</th>
+            <th>Status</th>
+            <th>Driver</th>
+            <th>Incident Flags</th>
+            <th>Overdue</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in incident_rows %}
+            <tr>
+              <td>#{{ item.request.id }} {{ item.request.material_type }}</td>
+              <td><span class="label label-primary">{{ item.request.status }}</span></td>
+              <td>
+                {% if item.driver %}
+                  {{ item.driver.name or item.driver.email }}
+                {% else %}
+                  <span class="label label-default">Unassigned</span>
+                {% endif %}
+              </td>
+              <td class="dispatch-badges">
+                {% for flag in item.incident_flags %}
+                  <span class="label label-danger">{{ flag }}</span>
+                {% endfor %}
+              </td>
+              <td>
+                {% if item.pickup_due_minutes is not none and item.pickup_due_minutes > 0 %}
+                  <span class="label label-warning">{{ item.pickup_due_minutes }}m</span>
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+
+  <div class="dispatch-table-wrap">
+    <table class="table table-striped dispatch-table">
+      <thead>
+        <tr>
+          <th>Request</th>
+          <th>Status</th>
+          <th>Schedule</th>
+          <th>Driver</th>
+          <th>Latest Location</th>
+          <th>Incident Flags</th>
+          <th>Override</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if queue_items %}
+          {% for item in queue_items %}
+            <tr>
+              <td class="dispatch-cell-tight">
+                <p><strong>#{{ item.request.id }}</strong> {{ item.request.material_type }}</p>
+                <p>{{ item.request.requester_name }} ({{ item.request.requester_email }})</p>
+                <p>{{ item.request.pickup_postcode }} | age {{ item.age_minutes if item.age_minutes is not none else '-' }}m</p>
+              </td>
+              <td>
+                <span class="label label-primary">{{ item.request.status }}</span>
+              </td>
+              <td class="dispatch-cell-tight">
+                <p>{{ item.request.scheduled_pickup_at or '-' }}</p>
+                <p>
+                  {% if item.pickup_due_minutes is not none %}
+                    {% if item.pickup_due_minutes > 0 %}
+                      overdue {{ item.pickup_due_minutes }}m
+                    {% else %}
+                      due in {{ (item.pickup_due_minutes * -1) }}m
+                    {% endif %}
+                  {% else %}
+                    -
+                  {% endif %}
+                </p>
+              </td>
+              <td class="dispatch-cell-tight">
+                {% if item.driver %}
+                  <p><strong>{{ item.driver.name or item.driver.email }}</strong></p>
+                  <p>{{ item.driver.email }}</p>
+                {% else %}
+                  <span class="label label-default">Unassigned</span>
+                {% endif %}
+              </td>
+              <td class="dispatch-cell-tight">
+                {% if item.latest_location %}
+                  <p>{{ item.latest_location.latitude }}, {{ item.latest_location.longitude }}</p>
+                  <p>{{ item.latest_location.recorded_at }}</p>
+                {% else %}
+                  <span class="label label-default">No location</span>
+                {% endif %}
+              </td>
+              <td class="dispatch-badges">
+                {% if item.incident_flags %}
+                  {% for flag in item.incident_flags %}
+                    <span class="label label-danger">{{ flag }}</span>
+                  {% endfor %}
+                {% else %}
+                  <span class="label label-success">ok</span>
+                {% endif %}
+              </td>
+              <td>
+                <form class="dispatch-form" method="post" action="/admin/dispatch/override">
+                  <input type="hidden" name="request_id" value="{{ item.request.id }}">
+                  <input type="hidden" name="return_query" value="{{ filter_query_string }}">
+                  <select class="form-control" name="driver_user_id">
+                    <option value="">Unassign</option>
+                    {% for driver in drivers %}
+                      <option value="{{ driver.id }}" {% if item.request.assigned_driver_user_id == driver.id %}selected{% endif %}>
+                        {{ driver.name or driver.email }} (#{{ driver.id }})
+                      </option>
+                    {% endfor %}
+                  </select>
+                  <input class="form-control" type="text" name="reason" maxlength="255" placeholder="Reason (optional)">
+                  <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="7">
+              <em>No dispatch rows found for current statuses.</em>
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

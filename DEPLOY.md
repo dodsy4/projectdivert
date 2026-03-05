@@ -29,6 +29,7 @@ Option B: create a Web Service manually with:
 ## 4. Database Migration
 After first deploy, run:
 - `flask db upgrade`
+- `flask seed-reference-data` (loads supplier/site/offset reference tables from existing files)
 
 ## 5. Verify Production
 - Home page loads (`/`)

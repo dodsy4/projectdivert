@@ -1,4 +1,5 @@
 import os
+from urllib.parse import quote, urlencode
 
 # Grabs the folder where the script runs.
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -31,13 +32,51 @@ def _clean_env_url(value):
     if not value:
         return value
     value = value.strip()
-    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
-        value = value[1:-1].strip()
+    quote_chars = "\"'‘’“”`"
+    # Be tolerant of copy/paste issues where a leading or trailing quote slips in.
+    while value and value[0] in quote_chars:
+        value = value[1:].lstrip()
+    while value and value[-1] in quote_chars:
+        value = value[:-1].rstrip()
     return value
 
 
+def _build_pg_env_url():
+    host = (os.getenv('PGHOST') or '').strip()
+    user = (os.getenv('PGUSER') or '').strip()
+    dbname = (os.getenv('PGDATABASE') or '').strip()
+    if not host or not user or not dbname:
+        return None
+
+    password = os.getenv('PGPASSWORD') or ''
+    port = (os.getenv('PGPORT') or '5432').strip() or '5432'
+
+    query = {}
+    sslmode = (os.getenv('PGSSLMODE') or '').strip()
+    if sslmode:
+        query['sslmode'] = sslmode
+    channel_binding = (os.getenv('PGCHANNELBINDING') or '').strip()
+    if channel_binding:
+        query['channel_binding'] = channel_binding
+
+    auth = '{}:{}'.format(quote(user, safe=''), quote(password, safe=''))
+    base = 'postgresql://{}@{}:{}/{}'.format(
+        auth,
+        host,
+        port,
+        quote(dbname, safe=''),
+    )
+    if query:
+        return '{}?{}'.format(base, urlencode(query))
+    return base
+
+
 # Prefer explicit SQLALCHEMY_DATABASE_URI when both are present.
-database_url = _clean_env_url(os.getenv('SQLALCHEMY_DATABASE_URI')) or _clean_env_url(os.getenv('DATABASE_URL'))
+database_url = (
+    _clean_env_url(os.getenv('SQLALCHEMY_DATABASE_URI'))
+    or _build_pg_env_url()
+    or _clean_env_url(os.getenv('DATABASE_URL'))
+)
 if database_url and database_url.startswith('postgres://'):
     database_url = database_url.replace('postgres://', 'postgresql://', 1)
 
@@ -66,3 +105,58 @@ APP_BASE_URL = os.getenv('APP_BASE_URL', '')
 # API auth
 JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', SECRET_KEY)
 JWT_EXP_HOURS = _int_env('JWT_EXP_HOURS', 24)
+JWT_REFRESH_EXP_DAYS = _int_env('JWT_REFRESH_EXP_DAYS', 30)
+EMAIL_VERIFICATION_TOKEN_EXP_HOURS = _int_env('EMAIL_VERIFICATION_TOKEN_EXP_HOURS', 24)
+PASSWORD_RESET_TOKEN_EXP_MINUTES = _int_env('PASSWORD_RESET_TOKEN_EXP_MINUTES', 30)
+AUTH_REQUIRE_EMAIL_VERIFICATION = _bool_env('AUTH_REQUIRE_EMAIL_VERIFICATION', False)
+AUTH_RETURN_TOKENS_IN_RESPONSE = _bool_env('AUTH_RETURN_TOKENS_IN_RESPONSE', False)
+AUTH_RATE_LIMIT_ENABLED = _bool_env('AUTH_RATE_LIMIT_ENABLED', True)
+AUTH_RATE_LIMIT_WINDOW_SECONDS = _int_env('AUTH_RATE_LIMIT_WINDOW_SECONDS', 300)
+AUTH_RATE_LIMIT_LOGIN_MAX_ATTEMPTS = _int_env('AUTH_RATE_LIMIT_LOGIN_MAX_ATTEMPTS', 10)
+AUTH_RATE_LIMIT_SIGNUP_MAX_ATTEMPTS = _int_env('AUTH_RATE_LIMIT_SIGNUP_MAX_ATTEMPTS', 8)
+AUTH_RATE_LIMIT_REFRESH_MAX_ATTEMPTS = _int_env('AUTH_RATE_LIMIT_REFRESH_MAX_ATTEMPTS', 30)
+AUTH_RATE_LIMIT_VERIFY_REQUEST_MAX_ATTEMPTS = _int_env('AUTH_RATE_LIMIT_VERIFY_REQUEST_MAX_ATTEMPTS', 10)
+AUTH_RATE_LIMIT_VERIFY_CONFIRM_MAX_ATTEMPTS = _int_env('AUTH_RATE_LIMIT_VERIFY_CONFIRM_MAX_ATTEMPTS', 20)
+AUTH_RATE_LIMIT_PASSWORD_RESET_REQUEST_MAX_ATTEMPTS = _int_env(
+    'AUTH_RATE_LIMIT_PASSWORD_RESET_REQUEST_MAX_ATTEMPTS',
+    10,
+)
+AUTH_RATE_LIMIT_PASSWORD_RESET_CONFIRM_MAX_ATTEMPTS = _int_env(
+    'AUTH_RATE_LIMIT_PASSWORD_RESET_CONFIRM_MAX_ATTEMPTS',
+    20,
+)
+AUTH_RATE_LIMIT_REDIS_URL = os.getenv('AUTH_RATE_LIMIT_REDIS_URL', '').strip()
+AUTH_RATE_LIMIT_REDIS_PREFIX = (
+    os.getenv('AUTH_RATE_LIMIT_REDIS_PREFIX', 'projectdivert:auth-rate-limit').strip()
+    or 'projectdivert:auth-rate-limit'
+)
+AUTH_LOGIN_LOCKOUT_ENABLED = _bool_env('AUTH_LOGIN_LOCKOUT_ENABLED', True)
+AUTH_LOGIN_LOCKOUT_WINDOW_SECONDS = _int_env('AUTH_LOGIN_LOCKOUT_WINDOW_SECONDS', 900)
+AUTH_LOGIN_LOCKOUT_MAX_ATTEMPTS = _int_env('AUTH_LOGIN_LOCKOUT_MAX_ATTEMPTS', 5)
+AUTH_LOGIN_LOCKOUT_DURATION_SECONDS = _int_env('AUTH_LOGIN_LOCKOUT_DURATION_SECONDS', 900)
+AUTH_VERIFY_REQUEST_COOLDOWN_SECONDS = _int_env('AUTH_VERIFY_REQUEST_COOLDOWN_SECONDS', 60)
+AUTH_PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS = _int_env('AUTH_PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS', 60)
+AUTH_MAX_ACTIVE_REFRESH_TOKENS = _int_env('AUTH_MAX_ACTIVE_REFRESH_TOKENS', 10)
+AUTH_BLOCKLIST_ENABLED = _bool_env('AUTH_BLOCKLIST_ENABLED', True)
+AUTH_BLOCKLIST_DEFAULT_DURATION_SECONDS = _int_env('AUTH_BLOCKLIST_DEFAULT_DURATION_SECONDS', 86400)
+AUTH_TOKEN_CLEANUP_RETENTION_DAYS = _int_env('AUTH_TOKEN_CLEANUP_RETENTION_DAYS', 30)
+
+# Dispatching
+DISPATCH_OFFER_FANOUT = _int_env('DISPATCH_OFFER_FANOUT', 10)
+WASTE_REQUEST_STREAM_HEARTBEAT_SECONDS = _int_env('WASTE_REQUEST_STREAM_HEARTBEAT_SECONDS', 20)
+DISPATCH_PENDING_MATCH_SLA_MINUTES = _int_env('DISPATCH_PENDING_MATCH_SLA_MINUTES', 30)
+DISPATCH_UNASSIGNED_MATCH_SLA_MINUTES = _int_env('DISPATCH_UNASSIGNED_MATCH_SLA_MINUTES', 20)
+DISPATCH_LOCATION_STALE_MINUTES = _int_env('DISPATCH_LOCATION_STALE_MINUTES', 20)
+
+# Payments (Stripe)
+PAYMENTS_ENABLED = _bool_env('PAYMENTS_ENABLED', False)
+STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', '')
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', '')
+STRIPE_API_BASE_URL = os.getenv('STRIPE_API_BASE_URL', 'https://api.stripe.com')
+PLATFORM_FEE_BPS = _int_env('PLATFORM_FEE_BPS', 1500)
+PLATFORM_CURRENCY = (os.getenv('PLATFORM_CURRENCY', 'gbp') or 'gbp').strip().lower()
+
+# Mobile push notifications (Expo)
+EXPO_PUSH_ENABLED = _bool_env('EXPO_PUSH_ENABLED', True)
+EXPO_PUSH_API_URL = os.getenv('EXPO_PUSH_API_URL', 'https://exp.host/--/api/v2/push/send')
+EXPO_PUSH_ACCESS_TOKEN = os.getenv('EXPO_PUSH_ACCESS_TOKEN', '')

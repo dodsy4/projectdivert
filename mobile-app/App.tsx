@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React from 'react';
 import {
   ActivityIndicator,
   Button,
@@ -7,447 +7,87 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
+import { apiClient } from './src/api/client';
+import { Field } from './src/components/Field';
+import { ScreenTabs } from './src/components/ScreenTabs';
 import {
-  ApiError,
-  apiClient,
-  CreateWasteRequestResponse,
-  WasteRequestDetails,
-  AuthResponse,
-  UpdateStatusPayload,
-  UserRole,
-} from './src/api/client';
-import {
-  clearAuthSession,
-  loadAuthSession,
-  persistAuthSession,
-} from './src/storage/authSessionStore';
+  customerTabs,
+  driverProgressionStatuses,
+  driverTabs,
+} from './src/features/wasteMobile/types';
+import { useWasteMobileController } from './src/features/wasteMobile/hooks/useWasteMobileController';
+import { NewRequestScreen } from './src/screens/customer/NewRequestScreen';
+import { RequestStatusScreen } from './src/screens/customer/RequestStatusScreen';
+import { ActiveJobScreen } from './src/screens/driver/ActiveJobScreen';
+import { OfferInboxScreen } from './src/screens/driver/OfferInboxScreen';
 
-type LoginState = {
-  email: string;
-  password: string;
-};
-
-type RequestFormState = {
-  requesterName: string;
-  requesterEmail: string;
-  materialType: string;
-  customMaterialType: string;
-  wasteAmount: string;
-  wasteUnit: string;
-  matchRadiusMiles: string;
-  pickupAddress: string;
-  pickupCity: string;
-  pickupCounty: string;
-  pickupPostcode: string;
-  scheduledPickupAtLocal: string;
-  notes: string;
-};
-
-type DriverControlsState = {
-  requestId: string;
-  status: string;
-  latitude: string;
-  longitude: string;
-  driverId: string;
-  vehicleId: string;
-};
-
-type AppTab = 'create' | 'driver' | 'track' | 'account';
-
-type AppTabDefinition = {
-  id: AppTab;
-  label: string;
-  roles: UserRole[];
-};
-
-const appTabs: AppTabDefinition[] = [
-  { id: 'create', label: 'Create', roles: ['customer', 'admin'] },
-  { id: 'driver', label: 'Driver', roles: ['driver', 'admin'] },
-  { id: 'track', label: 'Track', roles: ['customer', 'driver', 'admin'] },
-  { id: 'account', label: 'Account', roles: ['customer', 'driver', 'admin'] },
+const adminModes = ['customer', 'driver'] as const;
+const authTabs = [
+  { id: 'sign-in', label: 'Sign In' },
+  { id: 'sign-up', label: 'Sign Up' },
+  { id: 'verify-request', label: 'Verify Request' },
+  { id: 'verify-confirm', label: 'Verify Confirm' },
+  { id: 'reset-request', label: 'Reset Request' },
+  { id: 'reset-confirm', label: 'Reset Confirm' },
 ];
-
-const defaultDriverControls: DriverControlsState = {
-  requestId: '',
-  status: 'en_route',
-  latitude: '',
-  longitude: '',
-  driverId: 'driver-1',
-  vehicleId: 'van-42',
-};
-
-const allowedStatuses: UpdateStatusPayload['status'][] = [
-  'pending_match',
-  'matched',
-  'accepted',
-  'rejected',
-  'en_route',
-  'arrived',
-  'collected',
-  'completed',
-  'cancelled',
-];
-
-const defaultLoginState: LoginState = {
-  email: '',
-  password: '',
-};
-
-function defaultFormState(): RequestFormState {
-  const defaultDate = new Date(Date.now() + 60 * 60 * 1000);
-  const isoLocal = new Date(defaultDate.getTime() - defaultDate.getTimezoneOffset() * 60000)
-    .toISOString()
-    .slice(0, 16);
-
-  return {
-    requesterName: '',
-    requesterEmail: '',
-    materialType: 'Wood',
-    customMaterialType: '',
-    wasteAmount: '1',
-    wasteUnit: 'Tonnes',
-    matchRadiusMiles: '25',
-    pickupAddress: '',
-    pickupCity: '',
-    pickupCounty: '',
-    pickupPostcode: '',
-    scheduledPickupAtLocal: isoLocal,
-    notes: '',
-  };
-}
-
-function parseStatusValue(value: string): UpdateStatusPayload['status'] | null {
-  const normalized = value.trim().toLowerCase();
-  if ((allowedStatuses as string[]).includes(normalized)) {
-    return normalized as UpdateStatusPayload['status'];
-  }
-  return null;
-}
-
-function getVisibleTabs(role: UserRole): AppTabDefinition[] {
-  return appTabs.filter((tab) => tab.roles.includes(role));
-}
-
-function mergeRequesterDetails(form: RequestFormState, auth: AuthResponse): RequestFormState {
-  return {
-    ...form,
-    requesterName: auth.user.name || form.requesterName,
-    requesterEmail: auth.user.email || form.requesterEmail,
-  };
-}
 
 export default function App() {
-  const [login, setLogin] = useState<LoginState>(defaultLoginState);
-  const [auth, setAuth] = useState<AuthResponse | null>(null);
-  const [form, setForm] = useState<RequestFormState>(defaultFormState);
-  const [created, setCreated] = useState<CreateWasteRequestResponse | null>(null);
-  const [requestDetails, setRequestDetails] = useState<WasteRequestDetails | null>(null);
-  const [trackedRequestId, setTrackedRequestId] = useState('');
-  const [driver, setDriver] = useState<DriverControlsState>(defaultDriverControls);
-  const [activeTab, setActiveTab] = useState<AppTab>('track');
-  const [isLoading, setIsLoading] = useState(false);
-  const [isPolling, setIsPolling] = useState(false);
-  const [isBootstrappingSession, setIsBootstrappingSession] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
-
-  const parsedTrackedRequestId = Number(trackedRequestId);
-  const hasTrackedRequest = Number.isInteger(parsedTrackedRequestId) && parsedTrackedRequestId > 0;
-
-  const visibleTabs = useMemo(() => {
-    if (!auth) {
-      return [];
-    }
-    return getVisibleTabs(auth.user.role);
-  }, [auth]);
-
-  const statusLine = useMemo(() => {
-    if (!requestDetails) {
-      return 'No request loaded.';
-    }
-    const status = requestDetails.request.status || 'unknown';
-    const provider = requestDetails.match?.provider_name || 'No provider matched yet';
-    return `Status: ${status} | Provider: ${provider}`;
-  }, [requestDetails]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const bootstrap = async () => {
-      try {
-        const restored = await loadAuthSession();
-        if (!cancelled && restored) {
-          setAuth(restored);
-          setForm((prev) => mergeRequesterDetails(prev, restored));
-          setInfo(`Restored session for ${restored.user.email}.`);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(normalizeError(err));
-        }
-      } finally {
-        if (!cancelled) {
-          setIsBootstrappingSession(false);
-        }
-      }
-    };
-
-    bootstrap();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!auth) {
-      return;
-    }
-
-    const available = getVisibleTabs(auth.user.role);
-    if (!available.some((tab) => tab.id === activeTab)) {
-      setActiveTab(available[0].id);
-    }
-  }, [auth, activeTab]);
-
-  useEffect(() => {
-    if (!auth || !hasTrackedRequest) {
-      return;
-    }
-
-    let cancelled = false;
-
-    const poll = async () => {
-      setIsPolling(true);
-      try {
-        const [details, latest] = await Promise.all([
-          apiClient.getWasteRequest(parsedTrackedRequestId, auth.access_token),
-          apiClient.getLatestLocation(parsedTrackedRequestId, auth.access_token),
-        ]);
-
-        if (cancelled) {
-          return;
-        }
-
-        if (latest?.latest_location) {
-          setRequestDetails({
-            ...details,
-            latest_location: latest.latest_location,
-          });
-        } else {
-          setRequestDetails(details);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(normalizeError(err));
-        }
-      } finally {
-        if (!cancelled) {
-          setIsPolling(false);
-        }
-      }
-    };
-
-    poll();
-    const timer = setInterval(poll, 10000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [auth, parsedTrackedRequestId, hasTrackedRequest]);
-
-  const onLogin = async () => {
-    setError(null);
-    setInfo(null);
-    setIsLoading(true);
-    try {
-      const response = await apiClient.login(login.email.trim(), login.password);
-      setAuth(response);
-      setForm((prev) => mergeRequesterDetails(prev, response));
-      setLogin(defaultLoginState);
-
-      try {
-        await persistAuthSession(response);
-        setInfo(`Signed in as ${response.user.email} (${response.user.role}).`);
-      } catch (persistError) {
-        setInfo(
-          `Signed in as ${response.user.email} (${response.user.role}), but session persistence failed: ${normalizeError(
-            persistError,
-          )}`,
-        );
-      }
-    } catch (err) {
-      setError(normalizeError(err));
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const onLogout = async () => {
-    setError(null);
-    setInfo(null);
-
-    try {
-      await clearAuthSession();
-    } catch (err) {
-      setError(normalizeError(err));
-    }
-
-    setAuth(null);
-    setCreated(null);
-    setRequestDetails(null);
-    setTrackedRequestId('');
-    setDriver(defaultDriverControls);
-    setForm(defaultFormState());
-    setActiveTab('track');
-    setInfo('Signed out.');
-  };
-
-  const onCreateRequest = async () => {
-    if (!auth) {
-      return;
-    }
-
-    setError(null);
-    setInfo(null);
-    setIsLoading(true);
-
-    try {
-      const schedule = new Date(form.scheduledPickupAtLocal);
-      if (Number.isNaN(schedule.getTime())) {
-        throw new Error('Scheduled pickup date must be a valid datetime format (YYYY-MM-DDTHH:mm).');
-      }
-
-      const response = await apiClient.createWasteRequest(
-        {
-          requester_name: form.requesterName.trim(),
-          requester_email: form.requesterEmail.trim().toLowerCase(),
-          material_type: form.materialType.trim(),
-          custom_material_type: form.customMaterialType.trim() || undefined,
-          waste_amount: Number(form.wasteAmount),
-          waste_unit: form.wasteUnit.trim(),
-          match_radius_miles: Number(form.matchRadiusMiles),
-          pickup_address: form.pickupAddress.trim(),
-          pickup_city: form.pickupCity.trim() || undefined,
-          pickup_county: form.pickupCounty.trim() || undefined,
-          pickup_postcode: form.pickupPostcode.trim(),
-          scheduled_pickup_at: schedule.toISOString(),
-          notes: form.notes.trim() || undefined,
-        },
-        auth.access_token,
-      );
-
-      setCreated(response);
-      setTrackedRequestId(String(response.request.id));
-      setDriver((prev) => ({ ...prev, requestId: String(response.request.id) }));
-      const details = await apiClient.getWasteRequest(response.request.id, auth.access_token);
-      setRequestDetails(details);
-      setActiveTab('track');
-      setInfo(`Created waste request #${response.request.id}.`);
-    } catch (err) {
-      setError(normalizeError(err));
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const onRefreshNow = async () => {
-    if (!auth || !hasTrackedRequest) {
-      return;
-    }
-    setError(null);
-    setInfo(null);
-    setIsLoading(true);
-    try {
-      const details = await apiClient.getWasteRequest(parsedTrackedRequestId, auth.access_token);
-      setRequestDetails(details);
-      setInfo(`Fetched request #${parsedTrackedRequestId}.`);
-    } catch (err) {
-      setError(normalizeError(err));
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const onUpdateStatus = async () => {
-    if (!auth) {
-      return;
-    }
-    const requestId = Number(driver.requestId);
-    if (!Number.isInteger(requestId) || requestId <= 0) {
-      setError('Driver request ID must be a positive integer.');
-      return;
-    }
-
-    const statusValue = parseStatusValue(driver.status);
-    if (!statusValue) {
-      setError(`Invalid status. Allowed: ${allowedStatuses.join(', ')}`);
-      return;
-    }
-
-    setError(null);
-    setInfo(null);
-    setIsLoading(true);
-    try {
-      await apiClient.updateWasteRequestStatus(
-        requestId,
-        { status: statusValue },
-        auth.access_token,
-      );
-      setTrackedRequestId(String(requestId));
-      setInfo(`Updated request #${requestId} to status '${statusValue}'.`);
-    } catch (err) {
-      setError(normalizeError(err));
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const onPushLocation = async () => {
-    if (!auth) {
-      return;
-    }
-
-    const requestId = Number(driver.requestId);
-    const latitude = Number(driver.latitude);
-    const longitude = Number(driver.longitude);
-
-    if (!Number.isInteger(requestId) || requestId <= 0) {
-      setError('Driver request ID must be a positive integer.');
-      return;
-    }
-    if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
-      setError('Latitude and longitude must be valid numbers.');
-      return;
-    }
-
-    setError(null);
-    setInfo(null);
-    setIsLoading(true);
-    try {
-      await apiClient.pushVehicleLocation(
-        requestId,
-        {
-          latitude,
-          longitude,
-          driver_id: driver.driverId.trim() || undefined,
-          vehicle_id: driver.vehicleId.trim() || undefined,
-          source: 'mobile',
-        },
-        auth.access_token,
-      );
-      setTrackedRequestId(String(requestId));
-      setInfo(`Sent location update for request #${requestId}.`);
-    } catch (err) {
-      setError(normalizeError(err));
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const {
+    authScreen,
+    setAuthScreen,
+    login,
+    setLogin,
+    signup,
+    setSignup,
+    verifyRequest,
+    setVerifyRequest,
+    verifyConfirm,
+    setVerifyConfirm,
+    passwordResetRequest,
+    setPasswordResetRequest,
+    passwordResetConfirm,
+    setPasswordResetConfirm,
+    auth,
+    form,
+    setForm,
+    customerRequestId,
+    setCustomerRequestId,
+    driverOffer,
+    setDriverOffer,
+    driverJob,
+    setDriverJob,
+    created,
+    customerScreen,
+    onSelectCustomerScreen,
+    driverScreen,
+    onSelectDriverScreen,
+    adminViewMode,
+    setAdminViewMode,
+    isLoading,
+    isPolling,
+    isBootstrappingSession,
+    info,
+    error,
+    hasTrackedCustomerRequest,
+    customerRelevantRequestDetails,
+    driverRelevantRequestDetails,
+    currentRole,
+    onLogin,
+    onSignup,
+    onRequestEmailVerification,
+    onConfirmEmailVerification,
+    onRequestPasswordReset,
+    onConfirmPasswordReset,
+    onLogout,
+    onCreateRequest,
+    onRefreshNow,
+    onAcceptDispatchOffer,
+    onLoadDriverJob,
+    onUpdateDriverStatus,
+    onPushLocation,
+  } = useWasteMobileController();
 
   if (isBootstrappingSession) {
     return (
@@ -463,30 +103,161 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Project Divert Mobile MVP</Text>
+        <Text style={styles.title}>Project Divert Mobile</Text>
         <Text style={styles.caption}>API Base URL: {apiClient.apiBaseUrl}</Text>
+        <Text style={styles.caption}>
+          Payments: {apiClient.paymentsEnabled ? 'Enabled' : 'Disabled (feature flag)'}
+        </Text>
 
         {!auth ? (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>1) Login</Text>
-            <Field
-              label="Email"
-              value={login.email}
-              onChangeText={(value) => setLogin((prev) => ({ ...prev, email: value }))}
-              autoCapitalize="none"
-              keyboardType="email-address"
+            <Text style={styles.cardTitle}>Account Access</Text>
+            <ScreenTabs
+              items={authTabs}
+              activeId={authScreen}
+              onPress={(id) => setAuthScreen(id as typeof authScreen)}
             />
-            <Field
-              label="Password"
-              value={login.password}
-              onChangeText={(value) => setLogin((prev) => ({ ...prev, password: value }))}
-              secureTextEntry
-            />
-            <Button
-              title={isLoading ? 'Signing in...' : 'Sign in'}
-              onPress={onLogin}
-              disabled={isLoading}
-            />
+
+            {authScreen === 'sign-in' ? (
+              <>
+                <Field
+                  label="Email"
+                  value={login.email}
+                  onChangeText={(value) => setLogin((prev) => ({ ...prev, email: value }))}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
+                <Field
+                  label="Password"
+                  value={login.password}
+                  onChangeText={(value) => setLogin((prev) => ({ ...prev, password: value }))}
+                  secureTextEntry
+                />
+                <Button
+                  title={isLoading ? 'Signing in...' : 'Sign in'}
+                  onPress={onLogin}
+                  disabled={isLoading}
+                />
+              </>
+            ) : null}
+
+            {authScreen === 'sign-up' ? (
+              <>
+                <Field
+                  label="Name"
+                  value={signup.name}
+                  onChangeText={(value) => setSignup((prev) => ({ ...prev, name: value }))}
+                />
+                <Field
+                  label="Email"
+                  value={signup.email}
+                  onChangeText={(value) => setSignup((prev) => ({ ...prev, email: value }))}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
+                <Field
+                  label="Password"
+                  value={signup.password}
+                  onChangeText={(value) => setSignup((prev) => ({ ...prev, password: value }))}
+                  secureTextEntry
+                />
+                <Button
+                  title={isLoading ? 'Creating account...' : 'Create account'}
+                  onPress={onSignup}
+                  disabled={isLoading}
+                />
+              </>
+            ) : null}
+
+            {authScreen === 'verify-request' ? (
+              <>
+                <Text style={styles.helperText}>
+                  Request a new email verification token for an existing account.
+                </Text>
+                <Field
+                  label="Email"
+                  value={verifyRequest.email}
+                  onChangeText={(value) => setVerifyRequest((prev) => ({ ...prev, email: value }))}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
+                <Button
+                  title={isLoading ? 'Requesting...' : 'Request verification'}
+                  onPress={onRequestEmailVerification}
+                  disabled={isLoading}
+                />
+              </>
+            ) : null}
+
+            {authScreen === 'verify-confirm' ? (
+              <>
+                <Text style={styles.helperText}>
+                  Paste the verification token from your email.
+                </Text>
+                <Field
+                  label="Verification Token"
+                  value={verifyConfirm.token}
+                  onChangeText={(value) => setVerifyConfirm((prev) => ({ ...prev, token: value }))}
+                  autoCapitalize="none"
+                />
+                <Button
+                  title={isLoading ? 'Verifying...' : 'Verify and sign in'}
+                  onPress={onConfirmEmailVerification}
+                  disabled={isLoading}
+                />
+              </>
+            ) : null}
+
+            {authScreen === 'reset-request' ? (
+              <>
+                <Text style={styles.helperText}>
+                  Request a password reset token for your account.
+                </Text>
+                <Field
+                  label="Email"
+                  value={passwordResetRequest.email}
+                  onChangeText={(value) =>
+                    setPasswordResetRequest((prev) => ({ ...prev, email: value }))
+                  }
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
+                <Button
+                  title={isLoading ? 'Requesting...' : 'Request reset token'}
+                  onPress={onRequestPasswordReset}
+                  disabled={isLoading}
+                />
+              </>
+            ) : null}
+
+            {authScreen === 'reset-confirm' ? (
+              <>
+                <Text style={styles.helperText}>
+                  Paste the reset token and set a new password.
+                </Text>
+                <Field
+                  label="Reset Token"
+                  value={passwordResetConfirm.token}
+                  onChangeText={(value) =>
+                    setPasswordResetConfirm((prev) => ({ ...prev, token: value }))
+                  }
+                  autoCapitalize="none"
+                />
+                <Field
+                  label="New Password"
+                  value={passwordResetConfirm.newPassword}
+                  onChangeText={(value) =>
+                    setPasswordResetConfirm((prev) => ({ ...prev, newPassword: value }))
+                  }
+                  secureTextEntry
+                />
+                <Button
+                  title={isLoading ? 'Resetting...' : 'Reset password and sign in'}
+                  onPress={onConfirmPasswordReset}
+                  disabled={isLoading}
+                />
+              </>
+            ) : null}
           </View>
         ) : (
           <>
@@ -495,223 +266,104 @@ export default function App() {
               <Text>Role: {auth.user.role}</Text>
             </View>
 
-            <View style={styles.tabBar}>
-              {visibleTabs.map((tab) => {
-                const selected = tab.id === activeTab;
-                return (
-                  <Pressable
-                    key={tab.id}
-                    onPress={() => setActiveTab(tab.id)}
-                    style={[styles.tabButton, selected ? styles.tabButtonSelected : undefined]}
-                  >
-                    <Text style={[styles.tabButtonText, selected ? styles.tabButtonTextSelected : undefined]}>
-                      {tab.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            {activeTab === 'create' && (
+            {currentRole === 'admin' ? (
               <View style={styles.card}>
-                <Text style={styles.cardTitle}>Create Waste Request</Text>
-                <Field
-                  label="Requester name"
-                  value={form.requesterName}
-                  onChangeText={(value) => setForm((prev) => ({ ...prev, requesterName: value }))}
-                />
-                <Field
-                  label="Requester email"
-                  value={form.requesterEmail}
-                  onChangeText={(value) => setForm((prev) => ({ ...prev, requesterEmail: value }))}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                />
-                <Field
-                  label="Material type"
-                  value={form.materialType}
-                  onChangeText={(value) => setForm((prev) => ({ ...prev, materialType: value }))}
-                />
-                <Field
-                  label="Custom material (if Material type is Other)"
-                  value={form.customMaterialType}
-                  onChangeText={(value) =>
-                    setForm((prev) => ({ ...prev, customMaterialType: value }))
-                  }
-                />
-                <Field
-                  label="Waste amount"
-                  value={form.wasteAmount}
-                  onChangeText={(value) => setForm((prev) => ({ ...prev, wasteAmount: value }))}
-                  keyboardType="decimal-pad"
-                />
-                <Field
-                  label="Waste unit"
-                  value={form.wasteUnit}
-                  onChangeText={(value) => setForm((prev) => ({ ...prev, wasteUnit: value }))}
-                />
-                <Field
-                  label="Match radius miles"
-                  value={form.matchRadiusMiles}
-                  onChangeText={(value) => setForm((prev) => ({ ...prev, matchRadiusMiles: value }))}
-                  keyboardType="decimal-pad"
-                />
-                <Field
-                  label="Pickup address"
-                  value={form.pickupAddress}
-                  onChangeText={(value) => setForm((prev) => ({ ...prev, pickupAddress: value }))}
-                />
-                <Field
-                  label="Pickup city"
-                  value={form.pickupCity}
-                  onChangeText={(value) => setForm((prev) => ({ ...prev, pickupCity: value }))}
-                />
-                <Field
-                  label="Pickup county"
-                  value={form.pickupCounty}
-                  onChangeText={(value) => setForm((prev) => ({ ...prev, pickupCounty: value }))}
-                />
-                <Field
-                  label="Pickup postcode"
-                  value={form.pickupPostcode}
-                  onChangeText={(value) => setForm((prev) => ({ ...prev, pickupPostcode: value }))}
-                  autoCapitalize="characters"
-                />
-                <Field
-                  label="Scheduled pickup (local)"
-                  value={form.scheduledPickupAtLocal}
-                  onChangeText={(value) =>
-                    setForm((prev) => ({ ...prev, scheduledPickupAtLocal: value }))
-                  }
-                  placeholder="YYYY-MM-DDTHH:mm"
-                />
-                <Field
-                  label="Notes"
-                  value={form.notes}
-                  onChangeText={(value) => setForm((prev) => ({ ...prev, notes: value }))}
-                  multiline
-                />
-
-                <Button
-                  title={isLoading ? 'Submitting...' : 'Submit request'}
-                  onPress={onCreateRequest}
-                  disabled={isLoading}
-                />
-              </View>
-            )}
-
-            {activeTab === 'driver' && (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Driver Controls</Text>
-                <Field
-                  label="Request ID"
-                  value={driver.requestId}
-                  onChangeText={(value) => setDriver((prev) => ({ ...prev, requestId: value }))}
-                  keyboardType="number-pad"
-                />
-                <Field
-                  label="Status"
-                  value={driver.status}
-                  onChangeText={(value) => setDriver((prev) => ({ ...prev, status: value }))}
-                  placeholder="en_route"
-                />
-                <Button
-                  title={isLoading ? 'Updating...' : 'Update status'}
-                  onPress={onUpdateStatus}
-                  disabled={isLoading}
-                />
-
-                <Field
-                  label="Latitude"
-                  value={driver.latitude}
-                  onChangeText={(value) => setDriver((prev) => ({ ...prev, latitude: value }))}
-                  keyboardType="decimal-pad"
-                />
-                <Field
-                  label="Longitude"
-                  value={driver.longitude}
-                  onChangeText={(value) => setDriver((prev) => ({ ...prev, longitude: value }))}
-                  keyboardType="decimal-pad"
-                />
-                <Field
-                  label="Driver ID"
-                  value={driver.driverId}
-                  onChangeText={(value) => setDriver((prev) => ({ ...prev, driverId: value }))}
-                />
-                <Field
-                  label="Vehicle ID"
-                  value={driver.vehicleId}
-                  onChangeText={(value) => setDriver((prev) => ({ ...prev, vehicleId: value }))}
-                />
-                <Button
-                  title={isLoading ? 'Sending...' : 'Push location'}
-                  onPress={onPushLocation}
-                  disabled={isLoading}
-                />
-              </View>
-            )}
-
-            {activeTab === 'track' && (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Track Request</Text>
-                <Field
-                  label="Tracked request ID"
-                  value={trackedRequestId}
-                  onChangeText={setTrackedRequestId}
-                  keyboardType="number-pad"
-                />
-                <Button
-                  title={isLoading ? 'Refreshing...' : 'Refresh now'}
-                  onPress={onRefreshNow}
-                  disabled={isLoading || !hasTrackedRequest}
-                />
-                <View style={styles.pollRow}>
-                  {isPolling ? <ActivityIndicator size="small" /> : null}
-                  <Text>
-                    {hasTrackedRequest
-                      ? 'Auto-refresh every 10s'
-                      : 'Enter request ID to start polling'}
-                  </Text>
+                <Text style={styles.cardTitle}>Admin View Mode</Text>
+                <View style={styles.modeSwitchRow}>
+                  {adminModes.map((mode) => {
+                    const selected = adminViewMode === mode;
+                    return (
+                      <Pressable
+                        key={mode}
+                        onPress={() => setAdminViewMode(mode)}
+                        style={[
+                          styles.modeButton,
+                          selected ? styles.modeButtonSelected : undefined,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.modeButtonText,
+                            selected ? styles.modeButtonTextSelected : undefined,
+                          ]}
+                        >
+                          {mode}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
                 </View>
+              </View>
+            ) : null}
 
-                {created && (
-                  <View style={styles.resultBlock}>
-                    <Text style={styles.blockTitle}>Latest Created Request</Text>
-                    <Text>Request ID: {created.request.id}</Text>
-                    <Text>{statusLine}</Text>
-                    {created.match ? (
-                      <Text>Matched distance: {created.match.distance_miles} miles</Text>
-                    ) : null}
-                    {created.drive_time ? (
-                      <Text>
-                        Drive time: {created.drive_time.duration_text || 'n/a'} (
-                        {created.drive_time.distance_text || 'n/a'})
-                      </Text>
-                    ) : (
-                      <Text>Drive time: unavailable</Text>
-                    )}
-                    {requestDetails?.latest_location ? (
-                      <Text>
-                        Latest location: {requestDetails.latest_location.latitude},{' '}
-                        {requestDetails.latest_location.longitude}
-                      </Text>
-                    ) : (
-                      <Text>Latest location: none yet</Text>
-                    )}
-                  </View>
+            {(currentRole === 'customer' ||
+              (currentRole === 'admin' && adminViewMode === 'customer')) && (
+              <>
+                <ScreenTabs
+                  items={customerTabs}
+                  activeId={customerScreen}
+                  onPress={onSelectCustomerScreen}
+                />
+
+                {customerScreen === 'new-request' ? (
+                  <NewRequestScreen
+                    form={form}
+                    setForm={setForm}
+                    isLoading={isLoading}
+                    onCreateRequest={onCreateRequest}
+                  />
+                ) : (
+                  <RequestStatusScreen
+                    customerRequestId={customerRequestId}
+                    setCustomerRequestId={setCustomerRequestId}
+                    onRefreshNow={onRefreshNow}
+                    isLoading={isLoading}
+                    hasTrackedRequest={hasTrackedCustomerRequest}
+                    isPolling={isPolling}
+                    created={created}
+                    relevantRequestDetails={customerRelevantRequestDetails}
+                  />
                 )}
-              </View>
+              </>
             )}
 
-            {activeTab === 'account' && (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Account</Text>
-                <Text>Email: {auth.user.email}</Text>
-                <Text>Role: {auth.user.role}</Text>
-                <Text>User ID: {auth.user.id}</Text>
-                <Button title="Sign out" onPress={onLogout} disabled={isLoading} />
-              </View>
+            {(currentRole === 'driver' || (currentRole === 'admin' && adminViewMode === 'driver')) && (
+              <>
+                <ScreenTabs
+                  items={driverTabs}
+                  activeId={driverScreen}
+                  onPress={onSelectDriverScreen}
+                />
+
+                {driverScreen === 'offer-inbox' ? (
+                  <OfferInboxScreen
+                    driverOffer={driverOffer}
+                    setDriverOffer={setDriverOffer}
+                    isLoading={isLoading}
+                    onAcceptDispatchOffer={onAcceptDispatchOffer}
+                  />
+                ) : (
+                  <ActiveJobScreen
+                    driverJob={driverJob}
+                    setDriverJob={setDriverJob}
+                    isLoading={isLoading}
+                    onLoadDriverJob={onLoadDriverJob}
+                    onUpdateDriverStatus={onUpdateDriverStatus}
+                    onPushLocation={onPushLocation}
+                    statuses={driverProgressionStatuses}
+                    relevantRequestDetails={driverRelevantRequestDetails}
+                  />
+                )}
+              </>
             )}
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Account</Text>
+              <Text>Email: {auth.user.email}</Text>
+              <Text>Role: {auth.user.role}</Text>
+              <Text>User ID: {auth.user.id}</Text>
+              <Button title="Sign out" onPress={onLogout} disabled={isLoading} />
+            </View>
           </>
         )}
 
@@ -729,56 +381,6 @@ export default function App() {
       </ScrollView>
     </SafeAreaView>
   );
-}
-
-type FieldProps = {
-  label: string;
-  value: string;
-  onChangeText: (value: string) => void;
-  placeholder?: string;
-  keyboardType?: 'default' | 'decimal-pad' | 'number-pad' | 'email-address';
-  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
-  secureTextEntry?: boolean;
-  multiline?: boolean;
-};
-
-function Field(props: FieldProps) {
-  const {
-    label,
-    value,
-    onChangeText,
-    placeholder,
-    keyboardType,
-    autoCapitalize,
-    secureTextEntry,
-    multiline,
-  } = props;
-
-  return (
-    <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        style={[styles.input, multiline ? styles.inputMultiline : undefined]}
-        placeholder={placeholder}
-        keyboardType={keyboardType}
-        autoCapitalize={autoCapitalize || 'sentences'}
-        secureTextEntry={secureTextEntry}
-        multiline={multiline}
-      />
-    </View>
-  );
-}
-
-function normalizeError(err: unknown): string {
-  if (err instanceof ApiError) {
-    return `${err.message} (HTTP ${err.status})`;
-  }
-  if (err instanceof Error) {
-    return err.message;
-  }
-  return 'Unexpected error';
 }
 
 const styles = StyleSheet.create({
@@ -804,6 +406,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#4d4d4d',
   },
+  helperText: {
+    fontSize: 12,
+    color: '#555555',
+  },
   card: {
     borderRadius: 10,
     borderWidth: 1,
@@ -816,12 +422,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
-  tabBar: {
+  modeSwitchRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: 8,
   },
-  tabButton: {
+  modeButton: {
     borderRadius: 999,
     borderWidth: 1,
     borderColor: '#cccccc',
@@ -829,53 +434,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
-  tabButtonSelected: {
+  modeButtonSelected: {
     borderColor: '#1e4f9f',
     backgroundColor: '#dfeaff',
   },
-  tabButtonText: {
+  modeButtonText: {
     fontSize: 13,
     fontWeight: '600',
     color: '#2f2f2f',
+    textTransform: 'capitalize',
   },
-  tabButtonTextSelected: {
+  modeButtonTextSelected: {
     color: '#123b74',
-  },
-  field: {
-    gap: 4,
-  },
-  fieldLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#cfcfcf',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: '#fff',
-  },
-  inputMultiline: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  pollRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 8,
-  },
-  resultBlock: {
-    borderTopWidth: 1,
-    borderColor: '#e5e5e5',
-    marginTop: 8,
-    paddingTop: 8,
-    gap: 4,
-  },
-  blockTitle: {
-    fontSize: 14,
-    fontWeight: '700',
   },
   infoBox: {
     borderRadius: 8,
