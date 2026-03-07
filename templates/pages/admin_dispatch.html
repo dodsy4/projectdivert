@@ -333,6 +333,9 @@
                   <input class="form-control" type="text" name="notes" maxlength="255" placeholder="Owner notes (optional)">
                   <button type="submit" class="btn btn-info btn-sm">Set Owner</button>
                 </form>
+                <p>
+                  <a class="btn btn-link btn-xs" href="/admin/dispatch/timeline/{{ item.request.id }}">Timeline</a>
+                </p>
               </td>
             </tr>
           {% endfor %}

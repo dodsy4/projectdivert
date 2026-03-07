@@ -11,6 +11,7 @@ import hmac
 import hashlib
 import queue
 import threading
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 import dateutil.parser
@@ -383,6 +384,35 @@ class WasteRemovalVehicleLocation(db.Model):
             self.waste_removal_request_id,
             self.latitude,
             self.longitude,
+        )
+
+
+class DispatchIncidentEvent(db.Model):
+    __tablename__ = 'dispatch_incident_events'
+
+    id = db.Column(db.Integer, primary_key=True)
+    waste_removal_request_id = db.Column(
+        db.Integer,
+        db.ForeignKey('waste_removal_requests.id'),
+        nullable=False,
+        index=True,
+    )
+    event_type = db.Column(db.String(64), nullable=False, index=True)
+    actor_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id'),
+        index=True,
+    )
+    actor_email = db.Column(db.String(255), index=True)
+    source = db.Column(db.String(64), nullable=False, default='system')
+    details_json = db.Column(db.JSON, nullable=False, default=dict)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return '<DispatchIncidentEvent request={} event={} actor={}>'.format(
+            self.waste_removal_request_id,
+            self.event_type,
+            self.actor_user_id,
         )
 
 
@@ -1324,6 +1354,335 @@ def _parse_query_datetime_utc(value, label):
     if parsed.tzinfo is not None:
         parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
     return parsed
+
+
+def _ops_health_auth_window_minutes(value=None):
+    if value is None:
+        value = app.config.get('OPS_HEALTH_AUTH_WINDOW_MINUTES', 60)
+    try:
+        return max(5, min(10080, int(value)))
+    except (TypeError, ValueError):
+        return 60
+
+
+def _ops_health_dispatch_limit(value=None):
+    if value is None:
+        value = app.config.get('OPS_HEALTH_DISPATCH_LIMIT', 500)
+    try:
+        return max(1, min(5000, int(value)))
+    except (TypeError, ValueError):
+        return 500
+
+
+def _ops_health_thresholds():
+    def _int_threshold(key, default, min_value=0, max_value=100000):
+        value = app.config.get(key, default)
+        try:
+            return max(min_value, min(max_value, int(value)))
+        except (TypeError, ValueError):
+            return default
+
+    return {
+        'dispatch_backlog_warn': _int_threshold('OPS_HEALTH_DISPATCH_BACKLOG_WARN', 25, min_value=1),
+        'dispatch_backlog_critical': _int_threshold('OPS_HEALTH_DISPATCH_BACKLOG_CRITICAL', 60, min_value=1),
+        'incident_critical_breach_warn': _int_threshold('OPS_HEALTH_INCIDENT_CRITICAL_BREACH_WARN', 1, min_value=1),
+        'incident_total_breach_warn': _int_threshold('OPS_HEALTH_INCIDENT_TOTAL_BREACH_WARN', 5, min_value=1),
+        'lockout_events_warn': _int_threshold('OPS_HEALTH_LOCKOUT_EVENTS_WARN', 5, min_value=1),
+        'admin_rate_limit_events_warn': _int_threshold('OPS_HEALTH_ADMIN_RATE_LIMIT_EVENTS_WARN', 5, min_value=1),
+        'audit_5xx_events_warn': _int_threshold('OPS_HEALTH_AUDIT_5XX_EVENTS_WARN', 1, min_value=1),
+    }
+
+
+def _collect_ops_health_snapshot(auth_window_minutes=None, dispatch_limit=None, now=None):
+    now = now or datetime.utcnow()
+    auth_window_minutes = _ops_health_auth_window_minutes(auth_window_minutes)
+    dispatch_limit = _ops_health_dispatch_limit(dispatch_limit)
+    thresholds = _ops_health_thresholds()
+
+    since = now - timedelta(minutes=auth_window_minutes)
+    auth_rows = (
+        AuthAuditEvent.query.filter(AuthAuditEvent.occurred_at >= since)
+        .order_by(AuthAuditEvent.occurred_at.desc(), AuthAuditEvent.id.desc())
+        .limit(10000)
+        .all()
+    )
+
+    failed_login_events = 0
+    lockout_events = 0
+    blocklist_events = 0
+    rate_limited_events = 0
+    admin_rate_limit_events = 0
+    audit_5xx_events = 0
+    failed_email_buckets = {}
+    failed_ip_buckets = {}
+
+    for row in auth_rows:
+        event_name = str(row.event or '').strip().lower()
+        details = row.details_json or {}
+        reason = str(details.get('reason') or '').strip().lower()
+
+        if row.status_code >= 500:
+            audit_5xx_events += 1
+        if event_name == 'admin_rate_limit' and row.status_code == 429:
+            admin_rate_limit_events += 1
+
+        if event_name == 'login' and not row.success:
+            failed_login_events += 1
+            if reason in {'lockout_triggered', 'lockout_active'}:
+                lockout_events += 1
+            if reason == 'blocklist':
+                blocklist_events += 1
+            if reason == 'rate_limited':
+                rate_limited_events += 1
+
+            if row.email:
+                failed_email_buckets[row.email] = failed_email_buckets.get(row.email, 0) + 1
+            if row.ip:
+                failed_ip_buckets[row.ip] = failed_ip_buckets.get(row.ip, 0) + 1
+
+    top_failed_emails = [
+        {'email': email, 'failed_attempts': attempts}
+        for email, attempts in sorted(
+            failed_email_buckets.items(),
+            key=lambda item: (-item[1], item[0]),
+        )[:10]
+    ]
+    top_failed_ips = [
+        {'ip': ip, 'failed_attempts': attempts}
+        for ip, attempts in sorted(
+            failed_ip_buckets.items(),
+            key=lambda item: (-item[1], item[0]),
+        )[:10]
+    ]
+
+    active_statuses = ['pending_match', 'matched', 'accepted', 'en_route', 'arrived', 'collected']
+    dispatch_rows = (
+        WasteRemovalRequest.query.filter(WasteRemovalRequest.status.in_(active_statuses))
+        .order_by(WasteRemovalRequest.created_at.asc(), WasteRemovalRequest.id.asc())
+        .limit(dispatch_limit)
+        .all()
+    )
+
+    incident_total = 0
+    incident_open = 0
+    incident_acknowledged = 0
+    incident_resolved = 0
+    incident_breach_total = 0
+    incident_breach_critical = 0
+    incident_breach_ack_sla = 0
+    incident_breach_resolve_sla = 0
+    incident_status_counts = {}
+    max_breach_minutes = 0
+    oldest_pending_match_minutes = 0
+    oldest_unassigned_match_minutes = 0
+
+    for booking in dispatch_rows:
+        status_key = (booking.status or '').strip().lower() or 'unknown'
+        incident_status_counts[status_key] = incident_status_counts.get(status_key, 0) + 1
+
+        latest_location = (
+            WasteRemovalVehicleLocation.query.filter_by(waste_removal_request_id=booking.id)
+            .order_by(WasteRemovalVehicleLocation.recorded_at.desc(), WasteRemovalVehicleLocation.id.desc())
+            .first()
+        )
+        queue_item = _serialize_dispatch_queue_item(
+            booking,
+            driver=None,
+            latest_location=latest_location,
+            now=now,
+        )
+
+        incident_flags = queue_item.get('incident_flags') or []
+        incident_info = queue_item.get('incident') or {}
+        if incident_flags:
+            incident_total += 1
+
+        incident_state = str(incident_info.get('state') or '').strip().lower()
+        if incident_state == 'open':
+            incident_open += 1
+        elif incident_state == 'acknowledged':
+            incident_acknowledged += 1
+        elif incident_state == 'resolved':
+            incident_resolved += 1
+
+        breach_type = str(incident_info.get('breach_type') or '').strip().lower()
+        breach_minutes = max(0, int(incident_info.get('breach_minutes') or 0))
+        if breach_type:
+            incident_breach_total += 1
+            if breach_type == 'ack_sla':
+                incident_breach_ack_sla += 1
+            elif breach_type == 'resolve_sla':
+                incident_breach_resolve_sla += 1
+            if (str(incident_info.get('severity') or '').strip().lower()) == 'critical':
+                incident_breach_critical += 1
+            max_breach_minutes = max(max_breach_minutes, breach_minutes)
+
+        age_minutes = int(queue_item.get('age_minutes') or 0)
+        if status_key == 'pending_match':
+            oldest_pending_match_minutes = max(oldest_pending_match_minutes, age_minutes)
+        if status_key in {'matched', 'accepted'} and booking.assigned_driver_user_id is None:
+            oldest_unassigned_match_minutes = max(oldest_unassigned_match_minutes, age_minutes)
+
+    alerts = []
+
+    def _add_alert(code, severity, message, current_value, threshold_value):
+        alerts.append(
+            {
+                'code': str(code),
+                'severity': str(severity),
+                'message': str(message),
+                'current': current_value,
+                'threshold': threshold_value,
+            }
+        )
+
+    backlog_count = len(dispatch_rows)
+    if backlog_count >= thresholds['dispatch_backlog_critical']:
+        _add_alert(
+            'dispatch_backlog_critical',
+            'critical',
+            'Dispatch backlog exceeded critical threshold.',
+            backlog_count,
+            thresholds['dispatch_backlog_critical'],
+        )
+    elif backlog_count >= thresholds['dispatch_backlog_warn']:
+        _add_alert(
+            'dispatch_backlog_warn',
+            'warning',
+            'Dispatch backlog exceeded warning threshold.',
+            backlog_count,
+            thresholds['dispatch_backlog_warn'],
+        )
+
+    if incident_breach_critical >= thresholds['incident_critical_breach_warn']:
+        _add_alert(
+            'incident_critical_breach',
+            'critical',
+            'Critical incident SLA breaches detected.',
+            incident_breach_critical,
+            thresholds['incident_critical_breach_warn'],
+        )
+
+    if incident_breach_total >= thresholds['incident_total_breach_warn']:
+        _add_alert(
+            'incident_breach_total',
+            'warning',
+            'Total incident SLA breaches exceeded warning threshold.',
+            incident_breach_total,
+            thresholds['incident_total_breach_warn'],
+        )
+
+    if lockout_events >= thresholds['lockout_events_warn']:
+        _add_alert(
+            'auth_lockout_events',
+            'warning',
+            'Lockout events exceeded warning threshold.',
+            lockout_events,
+            thresholds['lockout_events_warn'],
+        )
+
+    if admin_rate_limit_events >= thresholds['admin_rate_limit_events_warn']:
+        _add_alert(
+            'auth_admin_rate_limit_events',
+            'warning',
+            'Admin API rate-limit events exceeded warning threshold.',
+            admin_rate_limit_events,
+            thresholds['admin_rate_limit_events_warn'],
+        )
+
+    if audit_5xx_events >= thresholds['audit_5xx_events_warn']:
+        _add_alert(
+            'auth_audit_5xx_events',
+            'warning',
+            'Auth/audit 5xx events exceeded warning threshold.',
+            audit_5xx_events,
+            thresholds['audit_5xx_events_warn'],
+        )
+
+    status = 'ok'
+    if any(alert['severity'] == 'critical' for alert in alerts):
+        status = 'critical'
+    elif alerts:
+        status = 'warning'
+
+    return {
+        'status': status,
+        'generated_at': now.isoformat() + 'Z',
+        'window': {
+            'auth_minutes': auth_window_minutes,
+            'dispatch_rows_limit': dispatch_limit,
+        },
+        'alerts': alerts,
+        'thresholds': thresholds,
+        'metrics': {
+            'auth': {
+                'failed_login_events': failed_login_events,
+                'lockout_events': lockout_events,
+                'blocklist_events': blocklist_events,
+                'rate_limited_events': rate_limited_events,
+                'admin_rate_limit_events': admin_rate_limit_events,
+                'audit_5xx_events': audit_5xx_events,
+                'top_failed_emails': top_failed_emails,
+                'top_failed_ips': top_failed_ips,
+            },
+            'dispatch': {
+                'queue_rows_considered': backlog_count,
+                'status_counts': incident_status_counts,
+                'incident_rows': incident_total,
+                'incident_open': incident_open,
+                'incident_acknowledged': incident_acknowledged,
+                'incident_resolved': incident_resolved,
+                'incident_breach_total': incident_breach_total,
+                'incident_breach_critical': incident_breach_critical,
+                'incident_breach_ack_sla': incident_breach_ack_sla,
+                'incident_breach_resolve_sla': incident_breach_resolve_sla,
+                'max_breach_minutes': max_breach_minutes,
+                'oldest_pending_match_minutes': oldest_pending_match_minutes,
+                'oldest_unassigned_match_minutes': oldest_unassigned_match_minutes,
+            },
+        },
+    }
+
+
+def _format_ops_health_digest_text(snapshot):
+    generated_at = snapshot.get('generated_at') or ''
+    status = str(snapshot.get('status') or 'unknown').upper()
+    alerts = list(snapshot.get('alerts') or [])
+    auth = (snapshot.get('metrics') or {}).get('auth') or {}
+    dispatch = (snapshot.get('metrics') or {}).get('dispatch') or {}
+    lines = [
+        '[Project Divert] Ops Health Digest',
+        'Status: {}'.format(status),
+        'Generated: {}'.format(generated_at),
+        '',
+        'Auth metrics:',
+        '  failed_login_events={}'.format(auth.get('failed_login_events', 0)),
+        '  lockout_events={}'.format(auth.get('lockout_events', 0)),
+        '  admin_rate_limit_events={}'.format(auth.get('admin_rate_limit_events', 0)),
+        '  audit_5xx_events={}'.format(auth.get('audit_5xx_events', 0)),
+        '',
+        'Dispatch metrics:',
+        '  queue_rows_considered={}'.format(dispatch.get('queue_rows_considered', 0)),
+        '  incident_rows={}'.format(dispatch.get('incident_rows', 0)),
+        '  incident_breach_total={}'.format(dispatch.get('incident_breach_total', 0)),
+        '  incident_breach_critical={}'.format(dispatch.get('incident_breach_critical', 0)),
+        '  oldest_pending_match_minutes={}'.format(dispatch.get('oldest_pending_match_minutes', 0)),
+    ]
+    if alerts:
+        lines.extend(['', 'Active alerts:'])
+        for alert in alerts:
+            lines.append(
+                '  - [{severity}] {code}: {message} (current={current}, threshold={threshold})'.format(
+                    severity=str(alert.get('severity') or '').upper(),
+                    code=alert.get('code'),
+                    message=alert.get('message'),
+                    current=alert.get('current'),
+                    threshold=alert.get('threshold'),
+                )
+            )
+    else:
+        lines.extend(['', 'Active alerts: none'])
+    return '\n'.join(lines)
 
 
 def _serialize_auth_lifecycle_token(row):
@@ -2387,6 +2746,134 @@ def auth_token_cleanup(retention_days, batch_size, dry_run):
     click.echo('Deleted rows: {}'.format(deleted))
 
 
+@app.cli.command('ops-health-digest')
+@click.option('--auth-window-minutes', type=int, default=None, help='Auth/audit lookback window.')
+@click.option('--dispatch-limit', type=int, default=None, help='Max active dispatch rows to inspect.')
+@click.option('--include-ok', is_flag=True, help='Send notifications even when status is ok.')
+@click.option('--webhook-url', default=None, help='Override OPS_HEALTH_DIGEST_WEBHOOK_URL.')
+@click.option('--email-to', default=None, help='Override OPS_HEALTH_DIGEST_EMAIL_TO.')
+@click.option('--dry-run', is_flag=True, help='Compute and print digest without sending.')
+@click.option('--fail-on-critical', is_flag=True, help='Return non-zero if status is critical.')
+def ops_health_digest(
+    auth_window_minutes,
+    dispatch_limit,
+    include_ok,
+    webhook_url,
+    email_to,
+    dry_run,
+    fail_on_critical,
+):
+    """Generate and optionally send an ops health digest."""
+    if auth_window_minutes is not None and auth_window_minutes < 5:
+        raise click.BadParameter('auth-window-minutes must be >= 5')
+    if dispatch_limit is not None and dispatch_limit < 1:
+        raise click.BadParameter('dispatch-limit must be >= 1')
+
+    snapshot = _collect_ops_health_snapshot(
+        auth_window_minutes=auth_window_minutes,
+        dispatch_limit=dispatch_limit,
+    )
+    digest_text = _format_ops_health_digest_text(snapshot)
+    click.echo(json.dumps(snapshot, indent=2, sort_keys=True))
+
+    should_include_ok = bool(include_ok or _is_truthy(app.config.get('OPS_HEALTH_DIGEST_INCLUDE_OK', False)))
+    should_notify = should_include_ok or snapshot.get('status') != 'ok'
+    if not should_notify:
+        click.echo('Status is ok and include-ok is disabled; no notifications sent.')
+        return
+
+    if dry_run:
+        click.echo('Dry run: notifications not sent.')
+        click.echo(digest_text)
+        if fail_on_critical and snapshot.get('status') == 'critical':
+            raise click.ClickException('Ops health is critical.')
+        return
+
+    final_webhook_url = str(webhook_url or app.config.get('OPS_HEALTH_DIGEST_WEBHOOK_URL') or '').strip()
+    final_email_to = str(email_to or app.config.get('OPS_HEALTH_DIGEST_EMAIL_TO') or '').strip()
+
+    if final_webhook_url:
+        timeout = app.config.get('OPS_HEALTH_DIGEST_WEBHOOK_TIMEOUT_SECONDS', 8)
+        try:
+            timeout = max(2, int(timeout))
+        except (TypeError, ValueError):
+            timeout = 8
+
+        try:
+            response = requests.post(
+                final_webhook_url,
+                json={'text': digest_text, 'ops_health': snapshot},
+                timeout=timeout,
+            )
+            if response.status_code >= 400:
+                click.echo('Webhook send failed status={} body={}'.format(response.status_code, response.text[:500]))
+            else:
+                click.echo('Webhook digest sent.')
+        except Exception:
+            app.logger.exception('Ops health digest webhook send failed.')
+            click.echo('Webhook digest send failed.')
+
+    if final_email_to:
+        email_subject = '[Project Divert] Ops Health {}'.format(str(snapshot.get('status') or 'unknown').upper())
+        email_sent = _send_account_email(final_email_to, email_subject, digest_text)
+        click.echo('Email digest {}.'.format('sent' if email_sent else 'failed'))
+
+    if fail_on_critical and snapshot.get('status') == 'critical':
+        raise click.ClickException('Ops health is critical.')
+
+
+@app.cli.command('dispatch-incident-maintenance')
+@click.option('--limit', type=int, default=None, help='Max active dispatch rows to inspect.')
+@click.option('--auto-assign', is_flag=True, help='Auto-assign owner for unowned active incidents.')
+@click.option('--auto-resolve-test', is_flag=True, help='Auto-resolve stale test incidents.')
+@click.option('--owner-admin-email', default=None, help='Preferred admin email for owner assignment.')
+@click.option(
+    '--resolve-test-minutes',
+    type=int,
+    default=None,
+    help='Minimum incident age (minutes) before auto-resolving test incidents.',
+)
+@click.option('--dry-run', is_flag=True, help='Compute actions without persisting changes.')
+def dispatch_incident_maintenance(
+    limit,
+    auto_assign,
+    auto_resolve_test,
+    owner_admin_email,
+    resolve_test_minutes,
+    dry_run,
+):
+    """Auto-maintain dispatch incidents (owner assignment and stale test cleanup)."""
+    if limit is not None and limit < 1:
+        raise click.BadParameter('limit must be >= 1')
+    if resolve_test_minutes is not None and resolve_test_minutes < 1:
+        raise click.BadParameter('resolve-test-minutes must be >= 1')
+
+    effective_auto_assign = bool(auto_assign or _dispatch_incident_auto_assign_enabled())
+    effective_auto_resolve_test = bool(
+        auto_resolve_test or _dispatch_incident_auto_resolve_test_enabled()
+    )
+
+    if not effective_auto_assign and not effective_auto_resolve_test:
+        click.echo(
+            'No maintenance actions enabled. '
+            'Pass --auto-assign and/or --auto-resolve-test or enable related config flags.'
+        )
+        return
+
+    result = _run_dispatch_incident_maintenance(
+        auto_assign=effective_auto_assign,
+        auto_resolve_test=effective_auto_resolve_test,
+        resolve_test_minutes=resolve_test_minutes,
+        owner_admin_email=owner_admin_email,
+        limit=limit,
+        dry_run=dry_run,
+        actor_user_id=None,
+        actor_email='dispatch-incident-maintenance@system.local',
+        source='cli_dispatch_incident_maintenance',
+    )
+    click.echo(json.dumps(result, indent=2, sort_keys=True))
+
+
 def _postcode_coordinates(postcode):
     endpoint = "http://api.postcodes.io/postcodes/{}".format(postcode)
     response = requests.get(endpoint, timeout=10)
@@ -2536,6 +3023,42 @@ def _dispatch_escalation_cooldown_minutes():
         return max(1, int(value))
     except (TypeError, ValueError):
         return 30
+
+
+def _dispatch_incident_maintenance_limit(value=None):
+    if value is None:
+        value = app.config.get('DISPATCH_INCIDENT_MAINTENANCE_LIMIT', 500)
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return 500
+
+
+def _dispatch_incident_auto_assign_enabled(value=None):
+    if value is None:
+        value = app.config.get('DISPATCH_INCIDENT_AUTO_ASSIGN_ENABLED', False)
+    return _is_truthy(value)
+
+
+def _dispatch_incident_auto_assign_admin_email(value=None):
+    if value is None:
+        value = app.config.get('DISPATCH_INCIDENT_AUTO_ASSIGN_ADMIN_EMAIL', '')
+    return (_normalize_email(value) or '')
+
+
+def _dispatch_incident_auto_resolve_test_enabled(value=None):
+    if value is None:
+        value = app.config.get('DISPATCH_INCIDENT_AUTO_RESOLVE_TEST_ENABLED', False)
+    return _is_truthy(value)
+
+
+def _dispatch_incident_auto_resolve_test_minutes(value=None):
+    if value is None:
+        value = app.config.get('DISPATCH_INCIDENT_AUTO_RESOLVE_TEST_MINUTES', 720)
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return 720
 
 
 def _select_provider_candidates_within_radius(
@@ -3245,6 +3768,12 @@ def _financial_summary_for_request(request_id):
 _waste_request_event_subscribers = {}
 _waste_request_event_lock = threading.Lock()
 _waste_request_event_queue_size = 100
+_waste_request_event_history = {}
+_waste_request_event_sequence = 0
+_waste_request_event_history_size = max(
+    20,
+    int(app.config.get('WASTE_REQUEST_STREAM_HISTORY_SIZE') or 200),
+)
 
 
 def _serialize_waste_request_snapshot(booking):
@@ -3266,6 +3795,236 @@ def _serialize_waste_request_snapshot(booking):
     }
 
 
+def _record_dispatch_incident_event(
+    waste_removal_request_id,
+    event_type,
+    actor_user_id=None,
+    actor_email=None,
+    source='system',
+    details=None,
+    occurred_at=None,
+):
+    request_id = _to_int_or_none(waste_removal_request_id)
+    if request_id is None:
+        return None
+    normalized_type = (str(event_type or '').strip().lower() or 'unknown')[:64]
+    normalized_source = (str(source or '').strip().lower() or 'system')[:64]
+    row = DispatchIncidentEvent(
+        waste_removal_request_id=request_id,
+        event_type=normalized_type,
+        actor_user_id=_to_int_or_none(actor_user_id),
+        actor_email=(_normalize_email(actor_email) or None),
+        source=normalized_source,
+        details_json=_normalize_auth_audit_details(details),
+        created_at=occurred_at or datetime.utcnow(),
+    )
+    db.session.add(row)
+    return row
+
+
+def _build_dispatch_request_timeline(
+    booking,
+    include_actor_auth=True,
+    auth_window_hours=168,
+    limit=200,
+):
+    if not booking:
+        return [], {'total_events': 0, 'category_counts': {}}
+
+    try:
+        limit = max(1, min(500, int(limit)))
+    except (TypeError, ValueError):
+        limit = 200
+    try:
+        auth_window_hours = max(1, min(24 * 30, int(auth_window_hours)))
+    except (TypeError, ValueError):
+        auth_window_hours = 168
+
+    rows = []
+    actor_user_ids = set()
+
+    def _append_event(
+        category,
+        event_type,
+        occurred_at,
+        source='system',
+        event_id='',
+        actor_user_id=None,
+        actor_email=None,
+        details=None,
+    ):
+        if not occurred_at:
+            return
+        normalized_actor_user_id = _to_int_or_none(actor_user_id)
+        if normalized_actor_user_id is not None:
+            actor_user_ids.add(normalized_actor_user_id)
+
+        rows.append(
+            {
+                '_occurred_at': occurred_at,
+                '_sort_id': str(event_id or ''),
+                'id': str(event_id or ''),
+                'category': str(category or 'system'),
+                'event_type': str(event_type or 'unknown'),
+                'source': str(source or 'system'),
+                'occurred_at': occurred_at.isoformat() + 'Z',
+                'actor_user_id': normalized_actor_user_id,
+                'actor_email': _normalize_email(actor_email) or None,
+                'actor_name': None,
+                'details': _normalize_auth_audit_details(details),
+            }
+        )
+
+    _append_event(
+        'system',
+        'request_created',
+        booking.created_at,
+        source='waste_request',
+        event_id='request_created:{}'.format(booking.id),
+        actor_email=booking.requester_email,
+        details={
+            'status': booking.status,
+            'material_type': booking.material_type,
+            'scheduled_pickup_at': booking.scheduled_pickup_at.isoformat() if booking.scheduled_pickup_at else None,
+        },
+    )
+
+    match_rows = (
+        WasteRemovalMatch.query.filter_by(waste_removal_request_id=booking.id)
+        .order_by(WasteRemovalMatch.created_at.asc(), WasteRemovalMatch.id.asc())
+        .all()
+    )
+    for match_row in match_rows:
+        _append_event(
+            'system',
+            'dispatch_match_created',
+            match_row.created_at,
+            source='matching',
+            event_id='match:{}'.format(match_row.id),
+            details={
+                'provider_name': match_row.provider_name,
+                'provider_type': match_row.provider_type,
+                'distance_miles': match_row.distance_miles,
+                'match_radius_miles': match_row.match_radius_miles,
+            },
+        )
+
+    accepted_offer_rows = (
+        WasteRemovalDispatchOffer.query.filter_by(
+            waste_removal_request_id=booking.id,
+            status='accepted',
+        )
+        .order_by(WasteRemovalDispatchOffer.responded_at.asc(), WasteRemovalDispatchOffer.id.asc())
+        .all()
+    )
+    for offer_row in accepted_offer_rows:
+        _append_event(
+            'system',
+            'dispatch_offer_accepted',
+            offer_row.responded_at or offer_row.created_at,
+            source='dispatch_offer',
+            event_id='offer:{}'.format(offer_row.id),
+            details={
+                'provider_name': offer_row.provider_name,
+                'distance_miles': offer_row.distance_miles,
+                'offer_rank': offer_row.offer_rank,
+            },
+        )
+
+    if booking.incident_acknowledged_at:
+        _append_event(
+            'system',
+            'incident_acknowledged_state',
+            booking.incident_acknowledged_at,
+            source='incident_state',
+            event_id='incident_ack_state:{}'.format(booking.id),
+            actor_user_id=booking.incident_owner_admin_user_id,
+            details={'incident_state': booking.incident_state, 'incident_severity': booking.incident_severity},
+        )
+    if booking.incident_resolved_at:
+        _append_event(
+            'system',
+            'incident_resolved_state',
+            booking.incident_resolved_at,
+            source='incident_state',
+            event_id='incident_resolved_state:{}'.format(booking.id),
+            actor_user_id=booking.incident_owner_admin_user_id,
+            details={'incident_state': booking.incident_state, 'incident_severity': booking.incident_severity},
+        )
+
+    incident_event_rows = (
+        DispatchIncidentEvent.query.filter_by(waste_removal_request_id=booking.id)
+        .order_by(DispatchIncidentEvent.created_at.asc(), DispatchIncidentEvent.id.asc())
+        .all()
+    )
+    for incident_row in incident_event_rows:
+        _append_event(
+            'dispatch',
+            incident_row.event_type,
+            incident_row.created_at,
+            source=incident_row.source,
+            event_id='dispatch_event:{}'.format(incident_row.id),
+            actor_user_id=incident_row.actor_user_id,
+            actor_email=incident_row.actor_email,
+            details=incident_row.details_json or {},
+        )
+
+    if include_actor_auth and actor_user_ids:
+        auth_since = datetime.utcnow() - timedelta(hours=auth_window_hours)
+        auth_rows = (
+            AuthAuditEvent.query.filter(
+                AuthAuditEvent.user_id.in_(sorted(actor_user_ids)),
+                AuthAuditEvent.occurred_at >= auth_since,
+            )
+            .order_by(AuthAuditEvent.occurred_at.asc(), AuthAuditEvent.id.asc())
+            .all()
+        )
+        for auth_row in auth_rows:
+            _append_event(
+                'auth',
+                'auth_{}'.format(auth_row.event),
+                auth_row.occurred_at,
+                source='auth_audit',
+                event_id='auth_audit:{}'.format(auth_row.id),
+                actor_user_id=auth_row.user_id,
+                actor_email=auth_row.email,
+                details={
+                    'success': bool(auth_row.success),
+                    'status_code': auth_row.status_code,
+                    'ip': auth_row.ip,
+                    'user_agent': auth_row.user_agent,
+                    'auth_details': auth_row.details_json or {},
+                },
+            )
+
+    user_map = {}
+    if actor_user_ids:
+        user_rows = User.query.filter(User.id.in_(sorted(actor_user_ids))).all()
+        user_map = {row.id: row for row in user_rows}
+
+    for row in rows:
+        actor_user_id = row.get('actor_user_id')
+        actor_user = user_map.get(actor_user_id) if actor_user_id is not None else None
+        if actor_user:
+            row['actor_name'] = (actor_user.name or actor_user.email or '').strip() or None
+            if not row.get('actor_email'):
+                row['actor_email'] = _normalize_email(actor_user.email) or None
+
+    rows.sort(key=lambda item: (item['_occurred_at'], item['_sort_id']), reverse=True)
+    rows = rows[:limit]
+    category_counts = {}
+    for row in rows:
+        category_key = row.get('category') or 'unknown'
+        category_counts[category_key] = category_counts.get(category_key, 0) + 1
+        row.pop('_occurred_at', None)
+        row.pop('_sort_id', None)
+
+    return rows, {
+        'total_events': len(rows),
+        'category_counts': category_counts,
+    }
+
+
 def _subscribe_waste_request_events(request_id):
     channel = queue.Queue(maxsize=_waste_request_event_queue_size)
     with _waste_request_event_lock:
@@ -3284,15 +4043,46 @@ def _unsubscribe_waste_request_events(request_id, channel):
             _waste_request_event_subscribers.pop(request_id, None)
 
 
-def _publish_waste_request_event(request_id, event_name, payload=None, metadata=None):
-    event_payload = {
-        'event': str(event_name or 'update').strip() or 'update',
-        'request_id': request_id,
-        'occurred_at': datetime.utcnow().isoformat() + 'Z',
-        'payload': payload,
-        'metadata': metadata or {},
-    }
+def _parse_waste_request_last_event_id(value):
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0:
+        return None
+    return parsed
+
+
+def _waste_request_replay_events_since(request_id, event_id):
+    if event_id is None:
+        return []
     with _waste_request_event_lock:
+        history = list(_waste_request_event_history.get(request_id, ()))
+    return [row for row in history if _parse_waste_request_last_event_id(row.get('event_id')) is not None and int(row['event_id']) > event_id]
+
+
+def _publish_waste_request_event(request_id, event_name, payload=None, metadata=None):
+    global _waste_request_event_sequence
+    with _waste_request_event_lock:
+        _waste_request_event_sequence += 1
+        event_payload = {
+            'event_id': _waste_request_event_sequence,
+            'event': str(event_name or 'update').strip() or 'update',
+            'request_id': request_id,
+            'occurred_at': datetime.utcnow().isoformat() + 'Z',
+            'payload': payload,
+            'metadata': metadata or {},
+        }
+        history = _waste_request_event_history.setdefault(
+            request_id,
+            deque(maxlen=_waste_request_event_history_size),
+        )
+        history.append(event_payload)
         channels = list(_waste_request_event_subscribers.get(request_id, set()))
 
     for channel in channels:
@@ -3308,11 +4098,13 @@ def _publish_waste_request_event(request_id, event_name, payload=None, metadata=
             _unsubscribe_waste_request_events(request_id, channel)
 
 
-def _format_sse_event(event_name, payload):
-    return 'event: {event}\ndata: {data}\n\n'.format(
-        event=event_name,
-        data=json.dumps(payload, separators=(',', ':')),
-    )
+def _format_sse_event(event_name, payload, event_id=None):
+    frame_lines = []
+    if event_id is not None:
+        frame_lines.append('id: {}'.format(event_id))
+    frame_lines.append('event: {}'.format(event_name))
+    frame_lines.append('data: {}'.format(json.dumps(payload, separators=(',', ':'))))
+    return '\n'.join(frame_lines) + '\n\n'
 
 
 def _is_truthy(value):
@@ -4343,7 +5135,21 @@ def admin_dispatch_override_form():
         return redirect(redirect_target)
 
     reason = (str(request.form.get('reason') or '').strip()[:255] or None)
+    now = datetime.utcnow()
     booking.assigned_driver_user_id = new_driver_user_id
+    _record_dispatch_incident_event(
+        booking.id,
+        event_type='dispatch_override',
+        actor_user_id=getattr(current_user, 'id', None),
+        actor_email=getattr(current_user, 'email', None),
+        source='web_admin_dispatch',
+        details={
+            'previous_assigned_driver_user_id': previous_driver_user_id,
+            'assigned_driver_user_id': new_driver_user_id,
+            'reason': reason,
+        },
+        occurred_at=now,
+    )
     try:
         db.session.commit()
     except Exception:
@@ -4377,6 +5183,63 @@ def admin_dispatch_override_form():
     return redirect(redirect_target)
 
 
+@app.route('/admin/dispatch/timeline/<int:request_id>', methods=['GET'])
+@login_required
+def admin_dispatch_timeline(request_id):
+    if not _current_user_is_admin():
+        flash('Admin access is required.')
+        return redirect('/login'), 403
+
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        flash('Waste request not found.')
+        return redirect(url_for('admin_dispatch_board'))
+
+    try:
+        include_actor_auth = _parse_optional_bool_query(
+            request.args.get('include_actor_auth'),
+            'include_actor_auth',
+        )
+        auth_window_hours = _parse_optional_int_query(
+            request.args.get('auth_window_hours'),
+            'auth_window_hours',
+            min_value=1,
+            max_value=24 * 30,
+        )
+        limit = _parse_optional_int_query(
+            request.args.get('limit'),
+            'limit',
+            min_value=1,
+            max_value=500,
+        )
+    except ValueError:
+        flash('Invalid timeline filters. Showing defaults.')
+        include_actor_auth = None
+        auth_window_hours = None
+        limit = None
+
+    include_actor_auth = True if include_actor_auth is None else bool(include_actor_auth)
+    auth_window_hours = auth_window_hours or 168
+    limit = limit or 200
+    timeline_rows, timeline_summary = _build_dispatch_request_timeline(
+        booking,
+        include_actor_auth=include_actor_auth,
+        auth_window_hours=auth_window_hours,
+        limit=limit,
+    )
+    return render_template(
+        'pages/admin_dispatch_timeline.html',
+        booking=_serialize_waste_request(booking),
+        timeline_rows=timeline_rows,
+        timeline_summary=timeline_summary,
+        filters={
+            'include_actor_auth': include_actor_auth,
+            'auth_window_hours': auth_window_hours,
+            'limit': limit,
+        },
+    )
+
+
 def _get_dispatch_incident_context(booking, now=None):
     now = now or datetime.utcnow()
     latest_location = (
@@ -4394,6 +5257,319 @@ def _get_dispatch_incident_context(booking, now=None):
         now=now,
     )
     return item
+
+
+def _dispatch_incident_active_statuses():
+    return ['pending_match', 'matched', 'accepted', 'en_route', 'arrived', 'collected']
+
+
+def _resolve_dispatch_incident_owner_candidate(owner_admin_user_id=None, owner_admin_email=None):
+    candidate_id = _to_int_or_none(owner_admin_user_id)
+    if candidate_id is not None:
+        candidate = db.session.get(User, candidate_id)
+        if candidate and (candidate.role or '').strip().lower() == 'admin' and candidate.is_active_user:
+            return candidate
+        return None
+
+    normalized_email = _normalize_email(owner_admin_email or _dispatch_incident_auto_assign_admin_email())
+    if normalized_email:
+        candidate = User.query.filter(func.lower(User.email) == normalized_email).first()
+        if candidate and (candidate.role or '').strip().lower() == 'admin' and candidate.is_active_user:
+            return candidate
+        return None
+
+    return (
+        User.query.filter(
+            func.lower(User.role) == 'admin',
+            User.is_active_user.is_(True),
+        )
+        .order_by(User.id.asc())
+        .first()
+    )
+
+
+def _dispatch_incident_is_test_candidate(booking):
+    email = _normalize_email(getattr(booking, 'requester_email', None))
+    if email:
+        if email.endswith('@example.com'):
+            return True
+        domain = email.split('@')[-1] if '@' in email else ''
+        if domain in {'localhost', 'projectdivert.local'} or domain.endswith('.test'):
+            return True
+
+    requester_name = (str(getattr(booking, 'requester_name', '') or '').strip().lower())
+    if requester_name.startswith(('smoke', 'test', 'qa')):
+        return True
+
+    notes = (str(getattr(booking, 'incident_notes', '') or '').strip().lower())
+    if 'smoke' in notes or 'test incident' in notes:
+        return True
+
+    return False
+
+
+def _run_dispatch_incident_maintenance(
+    *,
+    auto_assign=False,
+    auto_resolve_test=False,
+    resolve_test_minutes=None,
+    owner_admin_user_id=None,
+    owner_admin_email=None,
+    limit=None,
+    dry_run=False,
+    actor_user_id=None,
+    actor_email=None,
+    source='system_dispatch_incident_maintenance',
+    now=None,
+):
+    now = now or datetime.utcnow()
+    limit = _dispatch_incident_maintenance_limit(limit)
+    resolve_test_minutes = _dispatch_incident_auto_resolve_test_minutes(resolve_test_minutes)
+    auto_assign = bool(auto_assign)
+    auto_resolve_test = bool(auto_resolve_test)
+
+    owner_user = None
+    if auto_assign or auto_resolve_test:
+        owner_user = _resolve_dispatch_incident_owner_candidate(
+            owner_admin_user_id=owner_admin_user_id,
+            owner_admin_email=owner_admin_email,
+        )
+
+    query = WasteRemovalRequest.query.filter(
+        WasteRemovalRequest.status.in_(_dispatch_incident_active_statuses())
+    )
+    rows = (
+        query.order_by(WasteRemovalRequest.created_at.asc(), WasteRemovalRequest.id.asc())
+        .limit(limit)
+        .all()
+    )
+
+    scanned = 0
+    incident_rows = 0
+    actions_planned = 0
+    actions_applied = 0
+    auto_assigned = 0
+    auto_resolved = 0
+    skipped_owner_unavailable = 0
+    changed_request_ids = []
+    items = []
+    publish_jobs = []
+
+    for booking in rows:
+        scanned += 1
+        queue_item = _get_dispatch_incident_context(booking, now=now)
+        incident_flags = list(queue_item.get('incident_flags') or [])
+        if not incident_flags:
+            continue
+
+        incident_rows += 1
+        incident_info = queue_item.get('incident') or {}
+        incident_state = str(incident_info.get('state') or '').strip().lower()
+        created_age_minutes = _minutes_since(getattr(booking, 'created_at', None), now=now) or 0
+        is_test_candidate = _dispatch_incident_is_test_candidate(booking)
+
+        can_assign_owner = (
+            auto_assign
+            and booking.incident_owner_admin_user_id is None
+            and incident_state != 'resolved'
+            and owner_user is not None
+        )
+        can_resolve_test = (
+            auto_resolve_test
+            and incident_state != 'resolved'
+            and is_test_candidate
+            and created_age_minutes >= resolve_test_minutes
+        )
+
+        if auto_assign and booking.incident_owner_admin_user_id is None and owner_user is None:
+            skipped_owner_unavailable += 1
+
+        planned_actions = []
+        if can_assign_owner:
+            planned_actions.append('auto_assign_owner')
+        if can_resolve_test:
+            planned_actions.append('auto_resolve_test')
+        if not planned_actions:
+            continue
+
+        actions_planned += len(planned_actions)
+        item_summary = {
+            'request_id': booking.id,
+            'status': booking.status,
+            'incident_state': incident_state,
+            'incident_flags': incident_flags,
+            'created_age_minutes': created_age_minutes,
+            'test_candidate': is_test_candidate,
+            'planned_actions': planned_actions,
+            'applied_actions': [],
+        }
+        items.append(item_summary)
+
+        if dry_run:
+            continue
+
+        if can_assign_owner:
+            previous_owner_user_id = booking.incident_owner_admin_user_id
+            booking.incident_owner_admin_user_id = owner_user.id
+            booking.incident_updated_at = now
+            _record_dispatch_incident_event(
+                booking.id,
+                event_type='incident_owner_auto_assign',
+                actor_user_id=actor_user_id,
+                actor_email=actor_email,
+                source=source,
+                details={
+                    'previous_owner_admin_user_id': previous_owner_user_id,
+                    'owner_admin_user_id': owner_user.id,
+                    'automation': True,
+                },
+                occurred_at=now,
+            )
+            publish_jobs.append(
+                {
+                    'request_id': booking.id,
+                    'event_name': 'admin_dispatch_incident_owner_reassign',
+                    'metadata': {
+                        'action': 'owner_reassign',
+                        'previous_owner_admin_user_id': previous_owner_user_id,
+                        'owner_admin_user_id': owner_user.id,
+                        'admin_user_id': actor_user_id,
+                        'automation': True,
+                    },
+                }
+            )
+            item_summary['applied_actions'].append('auto_assign_owner')
+            auto_assigned += 1
+            actions_applied += 1
+
+        if can_resolve_test:
+            if booking.incident_owner_admin_user_id is None and owner_user is not None:
+                previous_owner_user_id = booking.incident_owner_admin_user_id
+                booking.incident_owner_admin_user_id = owner_user.id
+                _record_dispatch_incident_event(
+                    booking.id,
+                    event_type='incident_owner_auto_assign',
+                    actor_user_id=actor_user_id,
+                    actor_email=actor_email,
+                    source=source,
+                    details={
+                        'previous_owner_admin_user_id': previous_owner_user_id,
+                        'owner_admin_user_id': owner_user.id,
+                        'automation': True,
+                        'reason': 'auto_resolve_test',
+                    },
+                    occurred_at=now,
+                )
+                publish_jobs.append(
+                    {
+                        'request_id': booking.id,
+                        'event_name': 'admin_dispatch_incident_owner_reassign',
+                        'metadata': {
+                            'action': 'owner_reassign',
+                            'previous_owner_admin_user_id': previous_owner_user_id,
+                            'owner_admin_user_id': owner_user.id,
+                            'admin_user_id': actor_user_id,
+                            'automation': True,
+                            'reason': 'auto_resolve_test',
+                        },
+                    }
+                )
+                auto_assigned += 1
+                actions_applied += 1
+                item_summary['applied_actions'].append('auto_assign_owner')
+
+            booking.incident_state = 'resolved'
+            booking.incident_updated_at = now
+            booking.incident_resolved_at = now
+            if not booking.incident_acknowledged_at:
+                booking.incident_acknowledged_at = now
+
+            existing_notes = (booking.incident_notes or '').strip()
+            note_prefix = '[{} AUTO-RESOLVE] '.format(now.isoformat())
+            auto_note = (
+                'Resolved stale test incident automatically '
+                '(age_minutes={}, threshold_minutes={}).'
+            ).format(created_age_minutes, resolve_test_minutes)
+            booking.incident_notes = (existing_notes + '\n' if existing_notes else '') + note_prefix + auto_note
+
+            _record_dispatch_incident_event(
+                booking.id,
+                event_type='incident_auto_resolve_test',
+                actor_user_id=actor_user_id,
+                actor_email=actor_email,
+                source=source,
+                details={
+                    'incident_state': booking.incident_state,
+                    'incident_severity': booking.incident_severity,
+                    'incident_flags': incident_flags,
+                    'age_minutes': created_age_minutes,
+                    'threshold_minutes': resolve_test_minutes,
+                    'automation': True,
+                },
+                occurred_at=now,
+            )
+            publish_jobs.append(
+                {
+                    'request_id': booking.id,
+                    'event_name': 'admin_dispatch_incident_resolve',
+                    'metadata': {
+                        'action': 'resolve',
+                        'admin_user_id': actor_user_id,
+                        'incident_state': booking.incident_state,
+                        'incident_severity': booking.incident_severity,
+                        'automation': True,
+                        'reason': 'stale_test_incident',
+                    },
+                }
+            )
+            item_summary['applied_actions'].append('auto_resolve_test')
+            auto_resolved += 1
+            actions_applied += 1
+
+        if item_summary['applied_actions']:
+            changed_request_ids.append(booking.id)
+
+    if not dry_run and changed_request_ids:
+        db.session.commit()
+        for job in publish_jobs:
+            booking = db.session.get(WasteRemovalRequest, job['request_id'])
+            if not booking:
+                continue
+            _publish_waste_request_event(
+                booking.id,
+                job['event_name'],
+                payload=_serialize_waste_request_snapshot(booking),
+                metadata=job['metadata'],
+            )
+            _notify_mobile_push_for_waste_event(
+                booking,
+                job['event_name'],
+                metadata=job['metadata'],
+            )
+
+    return {
+        'executed_at': now.isoformat() + 'Z',
+        'dry_run': bool(dry_run),
+        'options': {
+            'auto_assign': auto_assign,
+            'auto_resolve_test': auto_resolve_test,
+            'resolve_test_minutes': resolve_test_minutes,
+            'limit': limit,
+            'owner_admin_user_id': owner_user.id if owner_user else None,
+            'owner_admin_email': _normalize_email(getattr(owner_user, 'email', None)) if owner_user else None,
+        },
+        'summary': {
+            'scanned': scanned,
+            'incident_rows': incident_rows,
+            'actions_planned': actions_planned,
+            'actions_applied': actions_applied if not dry_run else 0,
+            'auto_assigned': auto_assigned if not dry_run else 0,
+            'auto_resolved_test': auto_resolved if not dry_run else 0,
+            'skipped_owner_unavailable': skipped_owner_unavailable,
+            'changed_request_count': len(set(changed_request_ids)) if not dry_run else 0,
+        },
+        'items': items,
+    }
 
 
 @app.route('/admin/dispatch/incident', methods=['POST'])
@@ -4451,6 +5627,21 @@ def admin_dispatch_incident_form():
         existing = (booking.incident_notes or '').strip()
         prefix = '[{} {}] '.format(now.isoformat(), action.upper())
         booking.incident_notes = (existing + '\n' if existing else '') + prefix + notes
+
+    _record_dispatch_incident_event(
+        booking.id,
+        event_type='incident_{}'.format(action),
+        actor_user_id=getattr(current_user, 'id', None),
+        actor_email=getattr(current_user, 'email', None),
+        source='web_admin_dispatch',
+        details={
+            'incident_state': booking.incident_state,
+            'incident_severity': booking.incident_severity,
+            'notes': notes,
+            'incident_flags': flags,
+        },
+        occurred_at=now,
+    )
 
     try:
         db.session.commit()
@@ -4541,6 +5732,20 @@ def admin_dispatch_incident_owner_form():
         existing = (booking.incident_notes or '').strip()
         prefix = '[{} OWNER] '.format(now.isoformat())
         booking.incident_notes = (existing + '\n' if existing else '') + prefix + notes
+
+    _record_dispatch_incident_event(
+        booking.id,
+        event_type='incident_owner_reassign',
+        actor_user_id=getattr(current_user, 'id', None),
+        actor_email=getattr(current_user, 'email', None),
+        source='web_admin_dispatch',
+        details={
+            'previous_owner_admin_user_id': previous_owner_user_id,
+            'owner_admin_user_id': new_owner_user_id,
+            'notes': notes,
+        },
+        occurred_at=now,
+    )
 
     try:
         db.session.commit()
@@ -6479,6 +7684,37 @@ def api_admin_auth_security_telemetry():
     )
 
 
+@app.route('/api/v1/admin/ops/health', methods=['GET'])
+@jwt_required(roles={'admin'})
+def api_admin_ops_health():
+    try:
+        auth_window_minutes = _parse_optional_int_query(
+            request.args.get('auth_window_minutes'),
+            'auth_window_minutes',
+            min_value=5,
+            max_value=10080,
+        )
+        dispatch_limit = _parse_optional_int_query(
+            request.args.get('dispatch_limit'),
+            'dispatch_limit',
+            min_value=1,
+            max_value=5000,
+        )
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    try:
+        snapshot = _collect_ops_health_snapshot(
+            auth_window_minutes=auth_window_minutes,
+            dispatch_limit=dispatch_limit,
+        )
+    except SQLAlchemyError:
+        app.logger.exception('Failed to collect ops health snapshot.')
+        return jsonify({'error': 'Failed to collect ops health'}), 500
+
+    return jsonify(snapshot)
+
+
 @app.route('/api/v1/admin/auth-tokens', methods=['GET'])
 @jwt_required(roles={'admin'})
 def api_admin_auth_tokens():
@@ -6932,6 +8168,73 @@ def api_admin_dispatch_incidents():
     )
 
 
+@app.route('/api/v1/admin/dispatch/incidents/maintenance', methods=['POST'])
+@jwt_required(roles={'admin'})
+def api_admin_dispatch_incident_maintenance():
+    payload = request.get_json(silent=True) or {}
+    raw_limit = payload.get('limit')
+    raw_resolve_test_minutes = payload.get('resolve_test_minutes')
+    raw_owner_admin_user_id = payload.get('owner_admin_user_id')
+    owner_admin_email = _normalize_email(payload.get('owner_admin_email'))
+
+    limit = _to_int_or_none(raw_limit)
+    resolve_test_minutes = _to_int_or_none(raw_resolve_test_minutes)
+    owner_admin_user_id = _to_int_or_none(raw_owner_admin_user_id)
+
+    if raw_limit not in (None, '') and limit is None:
+        return jsonify({'error': 'limit must be an integer >= 1'}), 400
+    if limit is not None and limit < 1:
+        return jsonify({'error': 'limit must be an integer >= 1'}), 400
+    if raw_resolve_test_minutes not in (None, '') and resolve_test_minutes is None:
+        return jsonify({'error': 'resolve_test_minutes must be an integer >= 1'}), 400
+    if resolve_test_minutes is not None and resolve_test_minutes < 1:
+        return jsonify({'error': 'resolve_test_minutes must be an integer >= 1'}), 400
+    if raw_owner_admin_user_id not in (None, '') and owner_admin_user_id is None:
+        return jsonify({'error': 'owner_admin_user_id must be an integer'}), 400
+
+    if 'auto_assign' in payload:
+        auto_assign = _is_truthy(payload.get('auto_assign'))
+    else:
+        auto_assign = _dispatch_incident_auto_assign_enabled()
+
+    if 'auto_resolve_test' in payload:
+        auto_resolve_test = _is_truthy(payload.get('auto_resolve_test'))
+    else:
+        auto_resolve_test = _dispatch_incident_auto_resolve_test_enabled()
+
+    dry_run = _is_truthy(payload.get('dry_run'))
+    if not auto_assign and not auto_resolve_test:
+        return (
+            jsonify(
+                {
+                    'error': 'No maintenance actions enabled.',
+                    'hint': 'Set auto_assign and/or auto_resolve_test to true.',
+                }
+            ),
+            400,
+        )
+
+    try:
+        result = _run_dispatch_incident_maintenance(
+            auto_assign=auto_assign,
+            auto_resolve_test=auto_resolve_test,
+            resolve_test_minutes=resolve_test_minutes,
+            owner_admin_user_id=owner_admin_user_id,
+            owner_admin_email=owner_admin_email,
+            limit=limit,
+            dry_run=dry_run,
+            actor_user_id=_current_jwt_user_id(),
+            actor_email=_current_jwt_email(),
+            source='api_admin_dispatch_incident_maintenance',
+        )
+    except SQLAlchemyError:
+        db.session.rollback()
+        app.logger.exception('Dispatch incident maintenance failed.')
+        return jsonify({'error': 'Failed to run dispatch incident maintenance'}), 500
+
+    return jsonify(result)
+
+
 @app.route('/api/v1/admin/dispatch/incidents/<int:request_id>/ack', methods=['POST'])
 @jwt_required(roles={'admin'})
 def api_admin_dispatch_incident_ack(request_id):
@@ -6957,6 +8260,21 @@ def api_admin_dispatch_incident_ack(request_id):
         existing = (booking.incident_notes or '').strip()
         prefix = '[{} ACK] '.format(now.isoformat())
         booking.incident_notes = (existing + '\n' if existing else '') + prefix + notes
+
+    _record_dispatch_incident_event(
+        booking.id,
+        event_type='incident_ack',
+        actor_user_id=_current_jwt_user_id(),
+        actor_email=_current_jwt_email(),
+        source='api_admin_dispatch',
+        details={
+            'incident_state': booking.incident_state,
+            'incident_severity': booking.incident_severity,
+            'notes': notes,
+            'incident_flags': flags,
+        },
+        occurred_at=now,
+    )
 
     try:
         db.session.commit()
@@ -7019,6 +8337,21 @@ def api_admin_dispatch_incident_resolve(request_id):
         existing = (booking.incident_notes or '').strip()
         prefix = '[{} RESOLVE] '.format(now.isoformat())
         booking.incident_notes = (existing + '\n' if existing else '') + prefix + notes
+
+    _record_dispatch_incident_event(
+        booking.id,
+        event_type='incident_resolve',
+        actor_user_id=_current_jwt_user_id(),
+        actor_email=_current_jwt_email(),
+        source='api_admin_dispatch',
+        details={
+            'incident_state': booking.incident_state,
+            'incident_severity': booking.incident_severity,
+            'notes': notes,
+            'incident_flags': flags,
+        },
+        occurred_at=now,
+    )
 
     try:
         db.session.commit()
@@ -7106,6 +8439,20 @@ def api_admin_dispatch_incident_owner(request_id):
         existing = (booking.incident_notes or '').strip()
         prefix = '[{} OWNER] '.format(now.isoformat())
         booking.incident_notes = (existing + '\n' if existing else '') + prefix + notes
+
+    _record_dispatch_incident_event(
+        booking.id,
+        event_type='incident_owner_reassign',
+        actor_user_id=_current_jwt_user_id(),
+        actor_email=_current_jwt_email(),
+        source='api_admin_dispatch',
+        details={
+            'previous_owner_admin_user_id': previous_owner_user_id,
+            'owner_admin_user_id': new_owner_user_id,
+            'notes': notes,
+        },
+        occurred_at=now,
+    )
 
     try:
         db.session.commit()
@@ -7351,7 +8698,21 @@ def api_admin_dispatch_override(request_id):
             }
         )
 
+    now = datetime.utcnow()
     booking.assigned_driver_user_id = new_driver_user_id
+    _record_dispatch_incident_event(
+        booking.id,
+        event_type='dispatch_override',
+        actor_user_id=_current_jwt_user_id(),
+        actor_email=_current_jwt_email(),
+        source='api_admin_dispatch',
+        details={
+            'previous_assigned_driver_user_id': previous_driver_user_id,
+            'assigned_driver_user_id': new_driver_user_id,
+            'reason': reason,
+        },
+        occurred_at=now,
+    )
     try:
         db.session.commit()
     except Exception:
@@ -7386,6 +8747,57 @@ def api_admin_dispatch_override(request_id):
             'previous_assigned_driver_user_id': previous_driver_user_id,
             'assigned_driver_user_id': booking.assigned_driver_user_id,
             'reason': reason,
+        }
+    )
+
+
+@app.route('/api/v1/admin/waste-requests/<int:request_id>/timeline', methods=['GET'])
+@jwt_required(roles={'admin'})
+def api_admin_waste_request_timeline(request_id):
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        return jsonify({'error': 'Waste request not found'}), 404
+
+    try:
+        include_actor_auth = _parse_optional_bool_query(
+            request.args.get('include_actor_auth'),
+            'include_actor_auth',
+        )
+        auth_window_hours = _parse_optional_int_query(
+            request.args.get('auth_window_hours'),
+            'auth_window_hours',
+            min_value=1,
+            max_value=24 * 30,
+        )
+        limit = _parse_optional_int_query(
+            request.args.get('limit'),
+            'limit',
+            min_value=1,
+            max_value=500,
+        )
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    include_actor_auth = True if include_actor_auth is None else bool(include_actor_auth)
+    auth_window_hours = auth_window_hours or 168
+    limit = limit or 200
+
+    timeline_rows, timeline_summary = _build_dispatch_request_timeline(
+        booking,
+        include_actor_auth=include_actor_auth,
+        auth_window_hours=auth_window_hours,
+        limit=limit,
+    )
+    return jsonify(
+        {
+            'request': _serialize_waste_request_snapshot(booking),
+            'timeline': timeline_rows,
+            'summary': timeline_summary,
+            'filters': {
+                'include_actor_auth': include_actor_auth,
+                'auth_window_hours': auth_window_hours,
+                'limit': limit,
+            },
         }
     )
 
@@ -8283,6 +9695,10 @@ def api_stream_waste_request_events(request_id):
     heartbeat_seconds = int(app.config.get('WASTE_REQUEST_STREAM_HEARTBEAT_SECONDS') or 20)
     heartbeat_seconds = max(5, heartbeat_seconds)
     channel = _subscribe_waste_request_events(request_id)
+    last_event_id = _parse_waste_request_last_event_id(
+        request.args.get('last_event_id') or request.headers.get('Last-Event-ID')
+    )
+    replay_events = _waste_request_replay_events_since(request_id, last_event_id)
     initial_event = {
         'event': 'snapshot',
         'request_id': request_id,
@@ -8295,10 +9711,14 @@ def api_stream_waste_request_events(request_id):
     def _event_stream():
         try:
             yield _format_sse_event('waste_request', initial_event)
+            for replay_event in replay_events:
+                replay_event_id = _parse_waste_request_last_event_id(replay_event.get('event_id'))
+                yield _format_sse_event('waste_request', replay_event, event_id=replay_event_id)
             while True:
                 try:
                     event_payload = channel.get(timeout=heartbeat_seconds)
-                    yield _format_sse_event('waste_request', event_payload)
+                    event_id = _parse_waste_request_last_event_id(event_payload.get('event_id'))
+                    yield _format_sse_event('waste_request', event_payload, event_id=event_id)
                 except queue.Empty:
                     yield ': keepalive\n\n'
         except GeneratorExit:

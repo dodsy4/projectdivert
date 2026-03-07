@@ -1164,6 +1164,111 @@ def test_admin_auth_security_telemetry_reports_failed_login_activity(client, app
     assert any(row['email'] == 'telemetryuser@example.com' for row in payload['top_failed_emails'])
 
 
+def test_admin_ops_health_endpoint_returns_summary(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(
+        app_context,
+        '_drive_time_between_points',
+        lambda *args, **kwargs: {'minutes': 10.0, 'text': '10 mins'},
+    )
+    _create_user(app_context, 'opshealthadmin@example.com', 'Password123!', role='admin', name='Ops Health Admin')
+    _create_user(app_context, 'opshealthcustomer@example.com', 'Password123!', role='customer', name='Ops Customer')
+    admin_headers = _auth_header(client, 'opshealthadmin@example.com', 'Password123!')
+    customer_headers = _auth_header(client, 'opshealthcustomer@example.com', 'Password123!')
+
+    original_pending = app_context.app.config.get('DISPATCH_PENDING_MATCH_SLA_MINUTES')
+    app_context.app.config['DISPATCH_PENDING_MATCH_SLA_MINUTES'] = 0
+
+    try:
+        client.post(
+            '/api/v1/auth/login',
+            json={'email': 'opshealthcustomer@example.com', 'password': 'WrongPass123'},
+        )
+
+        scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+        create_response = client.post(
+            '/api/v1/waste-requests',
+            json={
+                'requester_name': 'Ops Customer',
+                'requester_email': 'opshealthcustomer@example.com',
+                'material_type': 'Glass',
+                'waste_amount': 1.0,
+                'waste_unit': 'Tonnes',
+                'match_radius_miles': 25,
+                'pickup_address': '1 Example Road',
+                'pickup_postcode': 'SW1A1AA',
+                'scheduled_pickup_at': scheduled_time,
+            },
+            headers=customer_headers,
+        )
+        assert create_response.status_code == 201
+        request_id = create_response.get_json()['request']['id']
+        with app_context.app.app_context():
+            booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
+            booking.created_at = datetime.utcnow() - timedelta(minutes=4)
+            app_context.db.session.commit()
+
+        response = client.get(
+            '/api/v1/admin/ops/health?auth_window_minutes=120&dispatch_limit=200',
+            headers=admin_headers,
+        )
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload['status'] in {'ok', 'warning', 'critical'}
+        assert 'metrics' in payload
+        assert 'auth' in payload['metrics']
+        assert 'dispatch' in payload['metrics']
+        assert isinstance(payload.get('alerts'), list)
+        assert payload['metrics']['auth']['failed_login_events'] >= 1
+    finally:
+        app_context.app.config['DISPATCH_PENDING_MATCH_SLA_MINUTES'] = original_pending
+
+
+def test_ops_health_digest_cli_dry_run_outputs_snapshot(app_context):
+    runner = app_context.app.test_cli_runner()
+    result = runner.invoke(
+        args=['ops-health-digest', '--dry-run', '--include-ok', '--auth-window-minutes', '60', '--dispatch-limit', '100'],
+    )
+    assert result.exit_code == 0
+    assert '"status"' in result.output
+    assert 'Dry run: notifications not sent.' in result.output
+
+
+def test_waste_request_event_replay_respects_last_event_id(app_context):
+    request_id = 991001
+
+    with app_context._waste_request_event_lock:
+        app_context._waste_request_event_history.pop(request_id, None)
+        app_context._waste_request_event_subscribers.pop(request_id, None)
+
+    app_context._publish_waste_request_event(
+        request_id,
+        'status_updated',
+        payload={'request': {'id': request_id, 'status': 'pending_match'}},
+        metadata={'previous_status': 'pending_match', 'new_status': 'matched'},
+    )
+    app_context._publish_waste_request_event(
+        request_id,
+        'status_updated',
+        payload={'request': {'id': request_id, 'status': 'matched'}},
+        metadata={'previous_status': 'pending_match', 'new_status': 'matched'},
+    )
+
+    replay_all = app_context._waste_request_replay_events_since(request_id, 0)
+    assert len(replay_all) == 2
+    first_event_id = int(replay_all[0]['event_id'])
+    second_event_id = int(replay_all[1]['event_id'])
+    assert second_event_id > first_event_id
+
+    replay_after_first = app_context._waste_request_replay_events_since(request_id, first_event_id)
+    assert len(replay_after_first) == 1
+    assert int(replay_after_first[0]['event_id']) == second_event_id
+
+    replay_after_second = app_context._waste_request_replay_events_since(request_id, second_event_id)
+    assert replay_after_second == []
+
+
 def test_admin_dispatch_incident_ack_resolve_flow(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
     monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
@@ -1375,5 +1480,204 @@ def test_admin_dispatch_incident_owner_reassignment_flow(client, app_context, mo
         )
         assert invalid_owner.status_code == 400
         assert invalid_owner.get_json()['error'] == 'Selected user is not an admin'
+    finally:
+        app_context.app.config['DISPATCH_PENDING_MATCH_SLA_MINUTES'] = original_pending
+
+
+def test_admin_dispatch_incident_maintenance_dry_run_and_apply(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(
+        app_context,
+        '_drive_time_between_points',
+        lambda *args, **kwargs: {'minutes': 9.0, 'text': '9 mins'},
+    )
+    _create_user(app_context, 'opsmaint@example.com', 'Password123!', role='admin', name='Ops Maint Admin')
+    _create_user(app_context, 'smokecustomer@example.com', 'Password123!', role='customer', name='Smoke Customer')
+    admin_headers = _auth_header(client, 'opsmaint@example.com', 'Password123!')
+    customer_headers = _auth_header(client, 'smokecustomer@example.com', 'Password123!')
+
+    original_pending = app_context.app.config.get('DISPATCH_PENDING_MATCH_SLA_MINUTES')
+    app_context.app.config['DISPATCH_PENDING_MATCH_SLA_MINUTES'] = 0
+
+    try:
+        scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+        create_response = client.post(
+            '/api/v1/waste-requests',
+            json={
+                'requester_name': 'Smoke Customer',
+                'requester_email': 'smokecustomer@example.com',
+                'material_type': 'Glass',
+                'waste_amount': 1.0,
+                'waste_unit': 'Tonnes',
+                'match_radius_miles': 25,
+                'pickup_address': '1 Example Road',
+                'pickup_postcode': 'SW1A1AA',
+                'scheduled_pickup_at': scheduled_time,
+            },
+            headers=customer_headers,
+        )
+        assert create_response.status_code == 201
+        request_id = create_response.get_json()['request']['id']
+
+        with app_context.app.app_context():
+            booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
+            booking.created_at = datetime.utcnow() - timedelta(minutes=90)
+            app_context.db.session.commit()
+
+        dry_run = client.post(
+            '/api/v1/admin/dispatch/incidents/maintenance',
+            json={
+                'dry_run': True,
+                'auto_assign': True,
+                'auto_resolve_test': True,
+                'resolve_test_minutes': 30,
+                'limit': 100,
+            },
+            headers=admin_headers,
+        )
+        assert dry_run.status_code == 200
+        dry_payload = dry_run.get_json()
+        assert dry_payload['dry_run'] is True
+        assert dry_payload['summary']['actions_planned'] >= 1
+        assert dry_payload['summary']['actions_applied'] == 0
+
+        apply_run = client.post(
+            '/api/v1/admin/dispatch/incidents/maintenance',
+            json={
+                'dry_run': False,
+                'auto_assign': True,
+                'auto_resolve_test': True,
+                'resolve_test_minutes': 30,
+                'limit': 100,
+            },
+            headers=admin_headers,
+        )
+        assert apply_run.status_code == 200
+        apply_payload = apply_run.get_json()
+        assert apply_payload['dry_run'] is False
+        assert apply_payload['summary']['actions_applied'] >= 1
+        assert apply_payload['summary']['auto_resolved_test'] >= 1
+
+        with app_context.app.app_context():
+            booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
+            assert booking.incident_state == 'resolved'
+            assert booking.incident_owner_admin_user_id is not None
+            event_types = {
+                row.event_type
+                for row in (
+                    app_context.DispatchIncidentEvent.query.filter_by(
+                        waste_removal_request_id=request_id
+                    )
+                    .order_by(app_context.DispatchIncidentEvent.id.asc())
+                    .all()
+                )
+            }
+            assert 'incident_auto_resolve_test' in event_types
+    finally:
+        app_context.app.config['DISPATCH_PENDING_MATCH_SLA_MINUTES'] = original_pending
+
+
+def test_dispatch_incident_maintenance_cli_dry_run_outputs_summary(app_context):
+    runner = app_context.app.test_cli_runner()
+    result = runner.invoke(
+        args=[
+            'dispatch-incident-maintenance',
+            '--dry-run',
+            '--auto-assign',
+            '--auto-resolve-test',
+            '--resolve-test-minutes',
+            '30',
+            '--limit',
+            '100',
+        ],
+    )
+    assert result.exit_code == 0
+    assert '"summary"' in result.output
+
+
+def test_admin_dispatch_request_timeline_includes_dispatch_and_auth_events(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(
+        app_context,
+        '_drive_time_between_points',
+        lambda *args, **kwargs: {'minutes': 11.0, 'text': '11 mins'},
+    )
+    _create_user(app_context, 'opsadmintimeline@example.com', 'Password123!', role='admin', name='Ops Timeline')
+    _create_user(app_context, 'opsadmintimeline2@example.com', 'Password123!', role='admin', name='Ops Timeline 2')
+    _create_user(app_context, 'timelinedriver@example.com', 'Password123!', role='driver', name='Timeline Driver')
+    _create_user(app_context, 'timelinecustomer@example.com', 'Password123!', role='customer', name='Timeline Customer')
+    admin_headers = _auth_header(client, 'opsadmintimeline@example.com', 'Password123!')
+    customer_headers = _auth_header(client, 'timelinecustomer@example.com', 'Password123!')
+
+    original_pending = app_context.app.config.get('DISPATCH_PENDING_MATCH_SLA_MINUTES')
+    app_context.app.config['DISPATCH_PENDING_MATCH_SLA_MINUTES'] = 0
+
+    try:
+        scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+        create_response = client.post(
+            '/api/v1/waste-requests',
+            json={
+                'requester_name': 'Timeline Customer',
+                'requester_email': 'timelinecustomer@example.com',
+                'material_type': 'Glass',
+                'waste_amount': 1.0,
+                'waste_unit': 'Tonnes',
+                'match_radius_miles': 25,
+                'pickup_address': '1 Example Road',
+                'pickup_postcode': 'SW1A1AA',
+                'scheduled_pickup_at': scheduled_time,
+            },
+            headers=customer_headers,
+        )
+        assert create_response.status_code == 201
+        request_id = create_response.get_json()['request']['id']
+        with app_context.app.app_context():
+            booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
+            booking.created_at = datetime.utcnow() - timedelta(minutes=3)
+            app_context.db.session.commit()
+            owner_two_id = app_context.User.query.filter_by(email='opsadmintimeline2@example.com').first().id
+            driver_id = app_context.User.query.filter_by(email='timelinedriver@example.com').first().id
+            admin_user_id = app_context.User.query.filter_by(email='opsadmintimeline@example.com').first().id
+
+        ack = client.post(
+            f'/api/v1/admin/dispatch/incidents/{request_id}/ack',
+            json={'notes': 'timeline ack'},
+            headers=admin_headers,
+        )
+        assert ack.status_code == 200
+
+        owner = client.post(
+            f'/api/v1/admin/dispatch/incidents/{request_id}/owner',
+            json={'owner_admin_user_id': owner_two_id, 'notes': 'timeline owner change'},
+            headers=admin_headers,
+        )
+        assert owner.status_code == 200
+
+        override = client.post(
+            f'/api/v1/admin/waste-requests/{request_id}/dispatch/override',
+            json={'driver_user_id': driver_id, 'reason': 'timeline assign'},
+            headers=admin_headers,
+        )
+        assert override.status_code == 200
+
+        timeline_response = client.get(
+            f'/api/v1/admin/waste-requests/{request_id}/timeline?include_actor_auth=true&auth_window_hours=168&limit=200',
+            headers=admin_headers,
+        )
+        assert timeline_response.status_code == 200
+        payload = timeline_response.get_json()
+        timeline = payload.get('timeline') or []
+        event_types = {row.get('event_type') for row in timeline}
+
+        assert 'incident_ack' in event_types
+        assert 'incident_owner_reassign' in event_types
+        assert 'dispatch_override' in event_types
+        assert payload.get('summary', {}).get('category_counts', {}).get('dispatch', 0) >= 3
+        assert any(
+            row.get('category') == 'auth' and row.get('actor_user_id') == admin_user_id
+            for row in timeline
+        )
     finally:
         app_context.app.config['DISPATCH_PENDING_MATCH_SLA_MINUTES'] = original_pending

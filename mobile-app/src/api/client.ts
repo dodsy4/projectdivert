@@ -142,9 +142,14 @@ export type WasteRequestRealtimeEventName =
   | 'location_updated'
   | 'payment_succeeded'
   | 'refund_processed'
-  | 'payout_processed';
+  | 'payout_processed'
+  | 'admin_dispatch_override'
+  | 'admin_dispatch_incident_ack'
+  | 'admin_dispatch_incident_resolve'
+  | 'admin_dispatch_incident_owner_reassign';
 
 export type WasteRequestRealtimeEvent = {
+  event_id?: number | string;
   event: WasteRequestRealtimeEventName;
   request_id: number;
   occurred_at: string;
@@ -246,11 +251,26 @@ const apiBaseUrl =
 const paymentsEnabled = ['1', 'true', 'yes', 'on'].includes(
   (process.env.EXPO_PUBLIC_PAYMENTS_ENABLED || '0').trim().toLowerCase(),
 );
+const realtimeReconnectDelayMs = Number.parseInt(
+  (process.env.EXPO_PUBLIC_REALTIME_RECONNECT_DELAY_MS || '2500').trim(),
+  10,
+);
+const realtimeFallbackPollIntervalMs = Number.parseInt(
+  (process.env.EXPO_PUBLIC_REALTIME_POLL_FALLBACK_INTERVAL_MS || '10000').trim(),
+  10,
+);
+const normalizedRealtimeReconnectDelayMs = Number.isFinite(realtimeReconnectDelayMs) && realtimeReconnectDelayMs > 0
+  ? realtimeReconnectDelayMs
+  : 2500;
+const normalizedRealtimeFallbackPollIntervalMs = Number.isFinite(realtimeFallbackPollIntervalMs) && realtimeFallbackPollIntervalMs > 0
+  ? realtimeFallbackPollIntervalMs
+  : 10000;
 
 type StreamWasteRequestEventsOptions = {
   signal?: AbortSignal;
   onOpen?: () => void;
   onEvent: (event: WasteRequestRealtimeEvent) => void;
+  lastEventId?: string | null;
 };
 
 type RequestJsonOptions = {
@@ -272,9 +292,10 @@ function setAuthLifecycleHooks(hooks: AuthLifecycleHooks | null) {
   authLifecycleHooks = hooks;
 }
 
-function parseSseFrame(frame: string): { event: string; data: string } | null {
+function parseSseFrame(frame: string): { event: string; data: string; id: string | null } | null {
   const lines = frame.replace(/\r/g, '').split('\n');
   let eventName = 'message';
+  let eventId: string | null = null;
   const dataLines: string[] = [];
 
   for (const line of lines) {
@@ -283,6 +304,11 @@ function parseSseFrame(frame: string): { event: string; data: string } | null {
     }
     if (line.startsWith('event:')) {
       eventName = line.slice('event:'.length).trim() || 'message';
+      continue;
+    }
+    if (line.startsWith('id:')) {
+      const parsed = line.slice('id:'.length).trim();
+      eventId = parsed || null;
       continue;
     }
     if (line.startsWith('data:')) {
@@ -296,6 +322,7 @@ function parseSseFrame(frame: string): { event: string; data: string } | null {
   return {
     event: eventName,
     data: dataLines.join('\n'),
+    id: eventId,
   };
 }
 
@@ -399,6 +426,8 @@ async function runRefreshFlow(): Promise<AuthResponse | null> {
 export const apiClient = {
   apiBaseUrl,
   paymentsEnabled,
+  realtimeReconnectDelayMs: normalizedRealtimeReconnectDelayMs,
+  realtimeFallbackPollIntervalMs: normalizedRealtimeFallbackPollIntervalMs,
 
   configureAuthLifecycle(hooks: AuthLifecycleHooks | null) {
     setAuthLifecycleHooks(hooks);
@@ -589,12 +618,18 @@ export const apiClient = {
     token: string,
     options: StreamWasteRequestEventsOptions,
   ): Promise<void> {
+    const encodedLastEventId = options.lastEventId
+      ? encodeURIComponent(options.lastEventId)
+      : '';
+    const querySuffix = encodedLastEventId ? `?last_event_id=${encodedLastEventId}` : '';
+
     const openStream = (accessToken: string) =>
-      fetch(`${apiBaseUrl}/api/v1/waste-requests/${requestId}/events`, {
+      fetch(`${apiBaseUrl}/api/v1/waste-requests/${requestId}/events${querySuffix}`, {
         method: 'GET',
         headers: {
           Accept: 'text/event-stream',
           Authorization: `Bearer ${accessToken}`,
+          ...(options.lastEventId ? { 'Last-Event-ID': options.lastEventId } : {}),
         },
         signal: options.signal,
       });
@@ -655,6 +690,10 @@ export const apiClient = {
 
         try {
           const payload = JSON.parse(parsed.data) as WasteRequestRealtimeEvent;
+          if (parsed.id && payload.event_id === undefined) {
+            const numericId = Number.parseInt(parsed.id, 10);
+            payload.event_id = Number.isFinite(numericId) ? numericId : parsed.id;
+          }
           options.onEvent(payload);
         } catch {
           // Ignore malformed frames to keep stream alive.

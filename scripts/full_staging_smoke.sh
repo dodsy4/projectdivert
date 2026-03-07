@@ -217,6 +217,53 @@ else
   echo "WARN: Request is not currently in active incidents list; skipping ack/resolve smoke."
 fi
 
+log "Incident maintenance smoke (dry-run)"
+MAINT_BODY="$TMP_DIR/inc_maint.json"
+MAINT_STATUS="$TMP_DIR/inc_maint.status"
+http_json POST "/api/v1/admin/dispatch/incidents/maintenance" \
+  "{\"dry_run\":true,\"auto_assign\":true,\"auto_resolve_test\":true,\"resolve_test_minutes\":60,\"limit\":100}" \
+  "$ADMIN_TOKEN" "$MAINT_BODY" "$MAINT_STATUS"
+assert_status "$(cat "$MAINT_STATUS")" "200" "Dispatch incident maintenance (dry-run)" "$MAINT_BODY"
+python - <<PY "$MAINT_BODY"
+import json,sys
+payload=json.load(open(sys.argv[1]))
+if "summary" not in payload:
+    print("maintenance summary missing")
+    sys.exit(1)
+print("Maintenance dry-run summary:", payload.get("summary"))
+PY
+
+log "Incident timeline smoke"
+TIMELINE_BODY="$TMP_DIR/timeline.json"
+TIMELINE_STATUS="$TMP_DIR/timeline.status"
+http_json GET "/api/v1/admin/waste-requests/$REQUEST_ID/timeline?include_actor_auth=true&auth_window_hours=168&limit=200" "" "$ADMIN_TOKEN" "$TIMELINE_BODY" "$TIMELINE_STATUS"
+assert_status "$(cat "$TIMELINE_STATUS")" "200" "Incident timeline endpoint" "$TIMELINE_BODY"
+python - <<PY "$TIMELINE_BODY"
+import json,sys
+payload=json.load(open(sys.argv[1]))
+if not isinstance(payload.get("timeline"), list):
+    print("timeline field missing or not an array")
+    sys.exit(1)
+if "summary" not in payload:
+    print("summary field missing")
+    sys.exit(1)
+print("Timeline endpoint returned", len(payload.get("timeline", [])), "events")
+PY
+
+log "Ops health smoke"
+OPS_HEALTH_BODY="$TMP_DIR/ops_health.json"
+OPS_HEALTH_STATUS="$TMP_DIR/ops_health.status"
+http_json GET "/api/v1/admin/ops/health?auth_window_minutes=60&dispatch_limit=200" "" "$ADMIN_TOKEN" "$OPS_HEALTH_BODY" "$OPS_HEALTH_STATUS"
+assert_status "$(cat "$OPS_HEALTH_STATUS")" "200" "Ops health endpoint" "$OPS_HEALTH_BODY"
+python - <<PY "$OPS_HEALTH_BODY"
+import json,sys
+payload=json.load(open(sys.argv[1]))
+if "status" not in payload or "metrics" not in payload:
+    print("Missing status/metrics in ops health payload")
+    sys.exit(1)
+print("Ops health status:", payload.get("status"))
+PY
+
 log "Payments readiness smoke"
 PAY_BODY="$TMP_DIR/payments_get.json"
 PAY_STATUS="$TMP_DIR/payments_get.status"

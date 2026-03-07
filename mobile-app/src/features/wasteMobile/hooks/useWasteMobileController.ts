@@ -81,7 +81,7 @@ export function useWasteMobileController() {
       return;
     }
 
-    const eventLabelByType: Record<WasteRequestRealtimeEvent['event'], string> = {
+    const eventLabelByType: Record<string, string> = {
       snapshot: 'Snapshot synced',
       request_created: 'Request created',
       dispatch_offer_accepted: 'Offer accepted',
@@ -90,9 +90,15 @@ export function useWasteMobileController() {
       payment_succeeded: 'Payment succeeded',
       refund_processed: 'Refund processed',
       payout_processed: 'Payout processed',
+      admin_dispatch_override: 'Dispatch override applied',
+      admin_dispatch_incident_ack: 'Incident acknowledged',
+      admin_dispatch_incident_resolve: 'Incident resolved',
+      admin_dispatch_incident_owner_reassign: 'Incident owner updated',
     };
+    const eventLabel =
+      eventLabelByType[event.event] || event.event.replace(/_/g, ' ').trim() || 'Event update';
     const requestStatus = event.payload?.request?.status || 'unknown';
-    const message = `${eventLabelByType[event.event]} for request #${event.request_id} (${requestStatus}).`;
+    const message = `${eventLabel} for request #${event.request_id} (${requestStatus}).`;
 
     setInfo(message);
     Alert.alert('Live update', message);
@@ -102,6 +108,9 @@ export function useWasteMobileController() {
     requestDetails,
     setRequestDetails,
     isPolling,
+    isRealtimeConnected,
+    isFallbackPolling,
+    syncState,
     fetchRequestSnapshot,
   } = useRequestPolling({
     auth,
@@ -220,6 +229,9 @@ export function useWasteMobileController() {
     setAdminViewMode,
     isLoading,
     isPolling,
+    isRealtimeConnected,
+    isFallbackPolling,
+    syncState,
     isBootstrappingSession,
     info,
     error,

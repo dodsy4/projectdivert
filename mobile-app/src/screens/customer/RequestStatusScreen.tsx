@@ -11,6 +11,8 @@ type RequestStatusScreenProps = {
   isLoading: boolean;
   hasTrackedRequest: boolean;
   isPolling: boolean;
+  isRealtimeConnected: boolean;
+  isFallbackPolling: boolean;
   created: CreateWasteRequestResponse | null;
   relevantRequestDetails: WasteRequestDetails | null;
 };
@@ -23,6 +25,8 @@ export function RequestStatusScreen(props: RequestStatusScreenProps) {
     isLoading,
     hasTrackedRequest,
     isPolling,
+    isRealtimeConnected,
+    isFallbackPolling,
     created,
     relevantRequestDetails,
   } = props;
@@ -44,9 +48,13 @@ export function RequestStatusScreen(props: RequestStatusScreenProps) {
       <View style={styles.pollRow}>
         {isPolling ? <ActivityIndicator size="small" /> : null}
         <Text>
-          {hasTrackedRequest
-            ? 'Live stream connected'
-            : 'Enter a request ID to start the live stream'}
+          {!hasTrackedRequest
+            ? 'Enter a request ID to start realtime tracking'
+            : isRealtimeConnected
+              ? 'Live stream connected'
+              : isFallbackPolling
+                ? 'Realtime unavailable, using polling fallback'
+                : 'Connecting live stream'}
         </Text>
       </View>
 

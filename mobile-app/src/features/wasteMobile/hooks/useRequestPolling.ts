@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AuthResponse,
   WasteRequestDetails,
@@ -17,7 +17,7 @@ type UseRequestPollingParams = {
   onRealtimeEvent?: (event: WasteRequestRealtimeEvent) => void;
 };
 
-const realtimeReconnectDelayMs = 2500;
+type RealtimeSyncState = 'idle' | 'connecting' | 'realtime' | 'fallback_polling';
 
 export function useRequestPolling(params: UseRequestPollingParams) {
   const {
@@ -30,7 +30,8 @@ export function useRequestPolling(params: UseRequestPollingParams) {
   } = params;
 
   const [requestDetails, setRequestDetails] = useState<WasteRequestDetails | null>(null);
-  const [isPolling, setIsPolling] = useState(false);
+  const [syncState, setSyncState] = useState<RealtimeSyncState>('idle');
+  const lastEventIdRef = useRef<string | null>(null);
 
   const pollingRequestId = useMemo(() => {
     if (!auth) {
@@ -69,32 +70,78 @@ export function useRequestPolling(params: UseRequestPollingParams) {
 
   useEffect(() => {
     if (!auth || !pollingRequestId) {
-      setIsPolling(false);
+      lastEventIdRef.current = null;
+      setSyncState('idle');
       return;
     }
 
+    lastEventIdRef.current = null;
     let cancelled = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let fallbackInterval: ReturnType<typeof setInterval> | null = null;
     const abortController = new AbortController();
+
+    const stopFallbackPolling = () => {
+      if (!fallbackInterval) {
+        return;
+      }
+      clearInterval(fallbackInterval);
+      fallbackInterval = null;
+    };
+
+    const pollSnapshotOnce = async () => {
+      if (cancelled) {
+        return;
+      }
+      try {
+        const snapshot = await fetchRequestSnapshot(pollingRequestId, auth.access_token);
+        if (!cancelled) {
+          setRequestDetails(snapshot);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(normalizeError(err));
+        }
+      }
+    };
+
+    const startFallbackPolling = () => {
+      if (cancelled) {
+        return;
+      }
+      setSyncState('fallback_polling');
+      if (fallbackInterval) {
+        return;
+      }
+      void pollSnapshotOnce();
+      fallbackInterval = setInterval(() => {
+        void pollSnapshotOnce();
+      }, apiClient.realtimeFallbackPollIntervalMs);
+    };
 
     const connect = async () => {
       if (cancelled) {
         return;
       }
 
-      setIsPolling(true);
+      setSyncState('connecting');
       try {
         await apiClient.streamWasteRequestEvents(pollingRequestId, auth.access_token, {
           signal: abortController.signal,
+          lastEventId: lastEventIdRef.current,
           onOpen: () => {
             if (!cancelled) {
+              stopFallbackPolling();
               setError(null);
-              setIsPolling(false);
+              setSyncState('realtime');
             }
           },
           onEvent: (event) => {
             if (cancelled) {
               return;
+            }
+            if (event.event_id !== undefined && event.event_id !== null) {
+              lastEventIdRef.current = String(event.event_id);
             }
             if (event.payload) {
               setRequestDetails(event.payload);
@@ -104,14 +151,16 @@ export function useRequestPolling(params: UseRequestPollingParams) {
         });
 
         if (!cancelled && !abortController.signal.aborted) {
-          reconnectTimer = setTimeout(connect, realtimeReconnectDelayMs);
+          startFallbackPolling();
+          reconnectTimer = setTimeout(connect, apiClient.realtimeReconnectDelayMs);
         }
       } catch (err) {
         if (cancelled || abortController.signal.aborted) {
           return;
         }
         setError(normalizeError(err));
-        reconnectTimer = setTimeout(connect, realtimeReconnectDelayMs);
+        startFallbackPolling();
+        reconnectTimer = setTimeout(connect, apiClient.realtimeReconnectDelayMs);
       }
     };
 
@@ -140,13 +189,21 @@ export function useRequestPolling(params: UseRequestPollingParams) {
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
       }
+      stopFallbackPolling();
     };
   }, [auth, fetchRequestSnapshot, onRealtimeEvent, pollingRequestId, setError]);
+
+  const isPolling = syncState === 'connecting' || syncState === 'fallback_polling';
+  const isRealtimeConnected = syncState === 'realtime';
+  const isFallbackPolling = syncState === 'fallback_polling';
 
   return {
     requestDetails,
     setRequestDetails,
     isPolling,
+    isRealtimeConnected,
+    isFallbackPolling,
+    syncState,
     fetchRequestSnapshot,
   };
 }

@@ -1,0 +1,83 @@
+{% extends 'layouts/main.html' %}
+{% block title %}Dispatch Timeline{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h2>Dispatch Timeline - Request #{{ booking.id }}</h2>
+  <p>
+    status: <strong>{{ booking.status or '-' }}</strong>
+    | incident: <strong>{{ booking.incident_state or 'none' }}</strong>
+    {% if booking.incident_severity %}
+      ({{ booking.incident_severity }})
+    {% endif %}
+  </p>
+  <p>
+    <a class="btn btn-default btn-sm" href="/admin/dispatch">Back to Dispatch Board</a>
+    <a class="btn btn-primary btn-sm" href="/api/v1/admin/waste-requests/{{ booking.id }}/timeline?include_actor_auth={% if filters.include_actor_auth %}true{% else %}false{% endif %}&auth_window_hours={{ filters.auth_window_hours }}&limit={{ filters.limit }}">View JSON</a>
+  </p>
+</div>
+
+<div class="panel panel-default">
+  <div class="panel-heading">
+    <strong>Summary</strong>
+  </div>
+  <div class="panel-body">
+    <p>Total events: {{ timeline_summary.total_events }}</p>
+    <p>
+      Categories:
+      dispatch {{ timeline_summary.category_counts.get('dispatch', 0) }},
+      auth {{ timeline_summary.category_counts.get('auth', 0) }},
+      system {{ timeline_summary.category_counts.get('system', 0) }}
+    </p>
+    <p>
+      Filters:
+      include actor auth={{ filters.include_actor_auth }},
+      auth window={{ filters.auth_window_hours }}h,
+      limit={{ filters.limit }}
+    </p>
+  </div>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-striped table-condensed">
+    <thead>
+      <tr>
+        <th>Time (UTC)</th>
+        <th>Category</th>
+        <th>Event</th>
+        <th>Actor</th>
+        <th>Source</th>
+        <th>Details</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% if timeline_rows %}
+        {% for row in timeline_rows %}
+          <tr>
+            <td>{{ row.occurred_at }}</td>
+            <td>{{ row.category }}</td>
+            <td>{{ row.event_type }}</td>
+            <td>
+              {% if row.actor_name %}
+                {{ row.actor_name }}
+              {% elif row.actor_email %}
+                {{ row.actor_email }}
+              {% else %}
+                -
+              {% endif %}
+              {% if row.actor_user_id %}
+                (#{{ row.actor_user_id }})
+              {% endif %}
+            </td>
+            <td>{{ row.source }}</td>
+            <td><code>{{ row.details | tojson }}</code></td>
+          </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="6"><em>No timeline events recorded yet.</em></td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

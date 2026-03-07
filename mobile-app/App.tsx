@@ -67,6 +67,9 @@ export default function App() {
     setAdminViewMode,
     isLoading,
     isPolling,
+    isRealtimeConnected,
+    isFallbackPolling,
+    syncState,
     isBootstrappingSession,
     info,
     error,
@@ -107,6 +110,9 @@ export default function App() {
         <Text style={styles.caption}>API Base URL: {apiClient.apiBaseUrl}</Text>
         <Text style={styles.caption}>
           Payments: {apiClient.paymentsEnabled ? 'Enabled' : 'Disabled (feature flag)'}
+        </Text>
+        <Text style={styles.caption}>
+          Realtime: {syncState.replace('_', ' ')} | Reconnect: {apiClient.realtimeReconnectDelayMs}ms
         </Text>
 
         {!auth ? (
@@ -320,6 +326,8 @@ export default function App() {
                     isLoading={isLoading}
                     hasTrackedRequest={hasTrackedCustomerRequest}
                     isPolling={isPolling}
+                    isRealtimeConnected={isRealtimeConnected}
+                    isFallbackPolling={isFallbackPolling}
                     created={created}
                     relevantRequestDetails={customerRelevantRequestDetails}
                   />

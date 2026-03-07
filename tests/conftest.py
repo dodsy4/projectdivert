@@ -12,7 +12,19 @@ import app as app_module
 @pytest.fixture
 def app_context():
     app = app_module.app
-    app.config.update(TESTING=True, WTF_CSRF_ENABLED=False)
+    app.config.update(
+        TESTING=True,
+        WTF_CSRF_ENABLED=False,
+        AUTH_RATE_LIMIT_ENABLED=False,
+        AUTH_LOGIN_LOCKOUT_ENABLED=False,
+    )
+
+    with app_module._auth_rate_limit_lock:
+        app_module._auth_rate_limit_events.clear()
+    with app_module._auth_login_lockout_lock:
+        app_module._auth_login_lockouts.clear()
+    app_module._auth_rate_limit_redis_client = None
+    app_module._auth_rate_limit_redis_disabled = False
 
     with app.app_context():
         app_module.db.session.remove()
@@ -20,6 +32,13 @@ def app_context():
         app_module.db.create_all()
 
     yield app_module
+
+    with app_module._auth_rate_limit_lock:
+        app_module._auth_rate_limit_events.clear()
+    with app_module._auth_login_lockout_lock:
+        app_module._auth_login_lockouts.clear()
+    app_module._auth_rate_limit_redis_client = None
+    app_module._auth_rate_limit_redis_disabled = False
 
     with app.app_context():
         app_module.db.session.remove()
