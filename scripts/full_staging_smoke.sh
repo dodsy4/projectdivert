@@ -183,6 +183,40 @@ TELEM_STATUS="$TMP_DIR/telemetry.status"
 http_json GET "/api/v1/admin/dispatch/telemetry?limit=20" "" "$ADMIN_TOKEN" "$TELEM_BODY" "$TELEM_STATUS"
 assert_status "$(cat "$TELEM_STATUS")" "200" "Dispatch telemetry" "$TELEM_BODY"
 
+log "Incident workflow smoke (list + ack + resolve)"
+INCIDENTS_BODY="$TMP_DIR/incidents.json"
+INCIDENTS_STATUS="$TMP_DIR/incidents.status"
+http_json GET "/api/v1/admin/dispatch/incidents?active_only=true&limit=50" "" "$ADMIN_TOKEN" "$INCIDENTS_BODY" "$INCIDENTS_STATUS"
+assert_status "$(cat "$INCIDENTS_STATUS")" "200" "Dispatch incidents list" "$INCIDENTS_BODY"
+INCIDENT_PRESENT="$(python - <<PY "$INCIDENTS_BODY" "$REQUEST_ID"
+import json,sys
+payload=json.load(open(sys.argv[1]))
+rid=int(sys.argv[2])
+ids=[item.get("request",{}).get("id") for item in payload.get("items",[])]
+print("yes" if rid in ids else "no")
+PY
+)"
+
+if [[ "$INCIDENT_PRESENT" == "yes" ]]; then
+  echo "Incidents list includes created request"
+
+  ACK_BODY="$TMP_DIR/inc_ack.json"
+  ACK_STATUS="$TMP_DIR/inc_ack.status"
+  http_json POST "/api/v1/admin/dispatch/incidents/$REQUEST_ID/ack" \
+    "{\"notes\":\"full staging smoke ack\"}" \
+    "$ADMIN_TOKEN" "$ACK_BODY" "$ACK_STATUS"
+  assert_status "$(cat "$ACK_STATUS")" "200" "Incident acknowledge" "$ACK_BODY"
+
+  RESOLVE_BODY="$TMP_DIR/inc_resolve.json"
+  RESOLVE_STATUS="$TMP_DIR/inc_resolve.status"
+  http_json POST "/api/v1/admin/dispatch/incidents/$REQUEST_ID/resolve" \
+    "{\"notes\":\"full staging smoke resolve\"}" \
+    "$ADMIN_TOKEN" "$RESOLVE_BODY" "$RESOLVE_STATUS"
+  assert_status "$(cat "$RESOLVE_STATUS")" "200" "Incident resolve" "$RESOLVE_BODY"
+else
+  echo "WARN: Request is not currently in active incidents list; skipping ack/resolve smoke."
+fi
+
 log "Payments readiness smoke"
 PAY_BODY="$TMP_DIR/payments_get.json"
 PAY_STATUS="$TMP_DIR/payments_get.status"

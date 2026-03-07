@@ -998,3 +998,127 @@ def test_admin_auth_security_telemetry_reports_failed_login_activity(client, app
     assert payload['considered_events'] >= 1
     assert isinstance(payload['top_failed_emails'], list)
     assert any(row['email'] == 'telemetryuser@example.com' for row in payload['top_failed_emails'])
+
+
+def test_admin_dispatch_incident_ack_resolve_flow(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(
+        app_context,
+        '_drive_time_between_points',
+        lambda *args, **kwargs: {'minutes': 15.0, 'text': '15 mins'},
+    )
+    _create_user(app_context, 'opsadmin@example.com', 'Password123!', role='admin', name='Ops Admin')
+    _create_user(app_context, 'incustomer@example.com', 'Password123!', role='customer', name='Incident Customer')
+    admin_headers = _auth_header(client, 'opsadmin@example.com', 'Password123!')
+    customer_headers = _auth_header(client, 'incustomer@example.com', 'Password123!')
+
+    original_pending = app_context.app.config.get('DISPATCH_PENDING_MATCH_SLA_MINUTES')
+    app_context.app.config['DISPATCH_PENDING_MATCH_SLA_MINUTES'] = 0
+
+    try:
+        scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+        create_response = client.post(
+            '/api/v1/waste-requests',
+            json={
+                'requester_name': 'Incident Customer',
+                'requester_email': 'incustomer@example.com',
+                'material_type': 'Glass',
+                'waste_amount': 1.0,
+                'waste_unit': 'Tonnes',
+                'match_radius_miles': 25,
+                'pickup_address': '1 Example Road',
+                'pickup_postcode': 'SW1A1AA',
+                'scheduled_pickup_at': scheduled_time,
+            },
+            headers=customer_headers,
+        )
+        assert create_response.status_code == 201
+        request_id = create_response.get_json()['request']['id']
+        with app_context.app.app_context():
+            booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
+            booking.created_at = datetime.utcnow() - timedelta(minutes=2)
+            app_context.db.session.commit()
+
+        incidents = client.get('/api/v1/admin/dispatch/incidents?active_only=false&limit=50', headers=admin_headers)
+        assert incidents.status_code == 200
+        assert 'items' in incidents.get_json()
+
+        ack = client.post(
+            f'/api/v1/admin/dispatch/incidents/{request_id}/ack',
+            json={'notes': 'triage acknowledged'},
+            headers=admin_headers,
+        )
+        assert ack.status_code == 200
+        assert ack.get_json()['incident']['state'] == 'acknowledged'
+
+        resolve = client.post(
+            f'/api/v1/admin/dispatch/incidents/{request_id}/resolve',
+            json={'notes': 'resolved for now'},
+            headers=admin_headers,
+        )
+        assert resolve.status_code == 200
+        assert resolve.get_json()['incident']['state'] == 'resolved'
+
+        queue = client.get(
+            '/api/v1/admin/dispatch/queue?incident_state=resolved&incidents_only=true&limit=50',
+            headers=admin_headers,
+        )
+        assert queue.status_code == 200
+        queue_ids = [item['request']['id'] for item in queue.get_json()['items']]
+        assert request_id in queue_ids
+
+        telemetry = client.get('/api/v1/admin/dispatch/telemetry?limit=50', headers=admin_headers)
+        assert telemetry.status_code == 200
+        summary = telemetry.get_json()['summary']
+        assert 'incident_state_counts' in summary
+        assert 'incident_severity_counts' in summary
+    finally:
+        app_context.app.config['DISPATCH_PENDING_MATCH_SLA_MINUTES'] = original_pending
+
+
+def test_admin_dispatch_incident_ack_requires_active_incident(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(
+        app_context,
+        '_drive_time_between_points',
+        lambda *args, **kwargs: {'minutes': 10.0, 'text': '10 mins'},
+    )
+    _create_user(app_context, 'opsadmin2@example.com', 'Password123!', role='admin', name='Ops Admin 2')
+    _create_user(app_context, 'quietcustomer@example.com', 'Password123!', role='customer', name='Quiet Customer')
+    admin_headers = _auth_header(client, 'opsadmin2@example.com', 'Password123!')
+    customer_headers = _auth_header(client, 'quietcustomer@example.com', 'Password123!')
+
+    original_pending = app_context.app.config.get('DISPATCH_PENDING_MATCH_SLA_MINUTES')
+    app_context.app.config['DISPATCH_PENDING_MATCH_SLA_MINUTES'] = 9999
+
+    try:
+        scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+        create_response = client.post(
+            '/api/v1/waste-requests',
+            json={
+                'requester_name': 'Quiet Customer',
+                'requester_email': 'quietcustomer@example.com',
+                'material_type': 'Glass',
+                'waste_amount': 1.0,
+                'waste_unit': 'Tonnes',
+                'match_radius_miles': 25,
+                'pickup_address': '1 Example Road',
+                'pickup_postcode': 'SW1A1AA',
+                'scheduled_pickup_at': scheduled_time,
+            },
+            headers=customer_headers,
+        )
+        assert create_response.status_code == 201
+        request_id = create_response.get_json()['request']['id']
+
+        ack = client.post(
+            f'/api/v1/admin/dispatch/incidents/{request_id}/ack',
+            json={'notes': 'should fail'},
+            headers=admin_headers,
+        )
+        assert ack.status_code == 409
+        assert ack.get_json()['error'] == 'No active incident to acknowledge'
+    finally:
+        app_context.app.config['DISPATCH_PENDING_MATCH_SLA_MINUTES'] = original_pending

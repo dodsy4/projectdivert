@@ -279,6 +279,17 @@ class WasteRemovalRequest(db.Model):
         db.ForeignKey('users.id'),
         index=True,
     )
+    incident_state = db.Column(db.String(32), index=True)
+    incident_severity = db.Column(db.String(16), index=True)
+    incident_owner_admin_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id'),
+        index=True,
+    )
+    incident_acknowledged_at = db.Column(db.DateTime, index=True)
+    incident_resolved_at = db.Column(db.DateTime, index=True)
+    incident_notes = db.Column(db.Text)
+    incident_updated_at = db.Column(db.DateTime, index=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     def __repr__(self):
@@ -2644,6 +2655,15 @@ def _serialize_waste_request(booking):
         'notes': booking.notes,
         'status': booking.status,
         'assigned_driver_user_id': booking.assigned_driver_user_id,
+        'incident_state': booking.incident_state,
+        'incident_severity': booking.incident_severity,
+        'incident_owner_admin_user_id': booking.incident_owner_admin_user_id,
+        'incident_acknowledged_at': (
+            booking.incident_acknowledged_at.isoformat() if booking.incident_acknowledged_at else None
+        ),
+        'incident_resolved_at': booking.incident_resolved_at.isoformat() if booking.incident_resolved_at else None,
+        'incident_notes': booking.incident_notes,
+        'incident_updated_at': booking.incident_updated_at.isoformat() if booking.incident_updated_at else None,
         'created_at': booking.created_at.isoformat() if booking.created_at else None,
     }
 
@@ -2760,11 +2780,61 @@ def _dispatch_incident_flags(booking, latest_location=None, now=None):
     return flags
 
 
+def _dispatch_incident_severity(flags):
+    flags = list(flags or [])
+    if not flags:
+        return None
+    if 'pickup_overdue' in flags:
+        return 'critical'
+    if 'stale_pending_match' in flags or 'matched_without_driver' in flags:
+        return 'high'
+    if 'stale_driver_location' in flags:
+        return 'medium'
+    return 'low'
+
+
+def _dispatch_effective_incident_state(booking, flags):
+    flags = list(flags or [])
+    stored_state = str(getattr(booking, 'incident_state', '') or '').strip().lower()
+    if flags:
+        if stored_state in {'acknowledged', 'resolved'}:
+            return stored_state
+        return 'open'
+    if stored_state in {'open', 'acknowledged', 'resolved'}:
+        return 'resolved'
+    return None
+
+
+def _dispatch_incident_summary(booking, flags, now=None):
+    now = now or datetime.utcnow()
+    flags = list(flags or [])
+    state = _dispatch_effective_incident_state(booking, flags)
+    severity = _dispatch_incident_severity(flags)
+    ack_minutes = _minutes_since(getattr(booking, 'incident_acknowledged_at', None), now=now)
+    resolve_minutes = _minutes_since(getattr(booking, 'incident_resolved_at', None), now=now)
+    return {
+        'state': state,
+        'severity': severity,
+        'owner_admin_user_id': booking.incident_owner_admin_user_id,
+        'acknowledged_at': (
+            booking.incident_acknowledged_at.isoformat() if booking.incident_acknowledged_at else None
+        ),
+        'resolved_at': booking.incident_resolved_at.isoformat() if booking.incident_resolved_at else None,
+        'notes': booking.incident_notes,
+        'updated_at': booking.incident_updated_at.isoformat() if booking.incident_updated_at else None,
+        'ack_age_minutes': ack_minutes,
+        'resolve_age_minutes': resolve_minutes,
+    }
+
+
 def _serialize_dispatch_queue_item(booking, driver=None, latest_location=None, now=None):
     now = now or datetime.utcnow()
     pickup_due_minutes = None
     if booking.scheduled_pickup_at:
         pickup_due_minutes = int((now - booking.scheduled_pickup_at).total_seconds() // 60)
+
+    incident_flags = _dispatch_incident_flags(booking, latest_location=latest_location, now=now)
+    incident = _dispatch_incident_summary(booking, incident_flags, now=now)
 
     return {
         'request': _serialize_waste_request(booking),
@@ -2772,7 +2842,8 @@ def _serialize_dispatch_queue_item(booking, driver=None, latest_location=None, n
         'latest_location': _serialize_vehicle_location(latest_location),
         'age_minutes': _minutes_since(booking.created_at, now=now),
         'pickup_due_minutes': pickup_due_minutes,
-        'incident_flags': _dispatch_incident_flags(booking, latest_location=latest_location, now=now),
+        'incident_flags': incident_flags,
+        'incident': incident,
     }
 
 
@@ -3799,10 +3870,16 @@ def admin_dispatch_board():
     try:
         assigned_filter = _parse_optional_bool_query(request.args.get('assigned'), 'assigned')
         incidents_only = bool(_parse_optional_bool_query(request.args.get('incidents_only'), 'incidents_only'))
+        incident_state_filter = (
+            str(request.args.get('incident_state') or '').strip().lower() or 'all'
+        )
+        if incident_state_filter not in {'all', 'open', 'acknowledged', 'resolved'}:
+            raise ValueError('incident_state must be one of all, open, acknowledged, resolved')
     except ValueError:
         flash('Invalid filters supplied. Showing default queue.')
         assigned_filter = None
         incidents_only = False
+        incident_state_filter = 'all'
 
     drivers = (
         User.query.filter(func.lower(User.role) == 'driver', User.is_active_user.is_(True))
@@ -3844,6 +3921,12 @@ def admin_dispatch_board():
         queue_items.append(queue_item)
     if incidents_only:
         queue_items = [item for item in queue_items if item.get('incident_flags')]
+    if incident_state_filter != 'all':
+        queue_items = [
+            item
+            for item in queue_items
+            if (item.get('incident') or {}).get('state') == incident_state_filter
+        ]
 
     # Prioritize incident rows for triage.
     def _incident_sort_key(item):
@@ -3862,6 +3945,15 @@ def admin_dispatch_board():
     )
     requests_with_incidents = len([item for item in queue_items if item.get('incident_flags')])
     incident_total = sum(len(item.get('incident_flags') or []) for item in queue_items)
+    incident_state_counts = {}
+    incident_severity_counts = {}
+    for item in queue_items:
+        state = (item.get('incident') or {}).get('state')
+        severity = (item.get('incident') or {}).get('severity')
+        if state:
+            incident_state_counts[state] = incident_state_counts.get(state, 0) + 1
+        if severity:
+            incident_severity_counts[severity] = incident_severity_counts.get(severity, 0) + 1
 
     return render_template(
         'pages/admin_dispatch.html',
@@ -3874,12 +3966,15 @@ def admin_dispatch_board():
             'requests_overdue': requests_overdue,
             'status_counts': status_counts,
             'incident_counts': incident_counts,
+            'incident_state_counts': incident_state_counts,
+            'incident_severity_counts': incident_severity_counts,
         },
         drivers=[_serialize_dispatch_driver(row) for row in drivers],
         statuses=selected_statuses,
         status_options=status_options,
         assigned_filter=assigned_filter,
         incidents_only=incidents_only,
+        incident_state_filter=incident_state_filter,
         filter_query_string=(request.query_string or b'').decode('utf-8'),
         sla_thresholds={
             'pending_match_minutes': _dispatch_pending_match_sla_minutes(),
@@ -3969,6 +4064,116 @@ def admin_dispatch_override_form():
     else:
         flash('Driver assignment removed for request #{}.'.format(booking.id))
     return redirect(redirect_target)
+
+
+def _get_dispatch_incident_context(booking, now=None):
+    now = now or datetime.utcnow()
+    latest_location = (
+        WasteRemovalVehicleLocation.query.filter_by(waste_removal_request_id=booking.id)
+        .order_by(WasteRemovalVehicleLocation.recorded_at.desc(), WasteRemovalVehicleLocation.id.desc())
+        .first()
+    )
+    flags = _dispatch_incident_flags(booking, latest_location=latest_location, now=now)
+    incident = _dispatch_incident_summary(booking, flags, now=now)
+    driver = db.session.get(User, booking.assigned_driver_user_id) if booking.assigned_driver_user_id else None
+    item = _serialize_dispatch_queue_item(
+        booking,
+        driver=driver,
+        latest_location=latest_location,
+        now=now,
+    )
+    return item
+
+
+@app.route('/admin/dispatch/incident', methods=['POST'])
+@login_required
+def admin_dispatch_incident_form():
+    if not _current_user_is_admin():
+        flash('Admin access is required.')
+        return redirect('/login'), 403
+
+    request_id = _to_int_or_none(request.form.get('request_id'))
+    action = (str(request.form.get('action') or '').strip().lower() or '')
+    notes = (str(request.form.get('notes') or '').strip()[:1000] or None)
+    return_query = str(request.form.get('return_query') or '').strip()
+    redirect_target = url_for('admin_dispatch_board')
+    if return_query:
+        redirect_target = '{}?{}'.format(redirect_target, return_query.lstrip('?'))
+
+    if action not in {'ack', 'resolve'}:
+        flash('Unsupported incident action.')
+        return redirect(redirect_target)
+    if request_id is None:
+        flash('request_id is required.')
+        return redirect(redirect_target)
+
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        flash('Waste request not found.')
+        return redirect(redirect_target)
+
+    queue_item = _get_dispatch_incident_context(booking)
+    flags = queue_item.get('incident_flags') or []
+    if action == 'ack' and not flags:
+        flash('No active incident to acknowledge for request #{}.'.format(request_id))
+        return redirect(redirect_target)
+
+    now = datetime.utcnow()
+    if action == 'ack':
+        booking.incident_state = 'acknowledged'
+        booking.incident_severity = _dispatch_incident_severity(flags)
+        booking.incident_owner_admin_user_id = getattr(current_user, 'id', None)
+        booking.incident_acknowledged_at = now
+        booking.incident_resolved_at = None
+        booking.incident_updated_at = now
+    else:
+        booking.incident_state = 'resolved'
+        booking.incident_owner_admin_user_id = getattr(current_user, 'id', None)
+        booking.incident_resolved_at = now
+        booking.incident_updated_at = now
+        if not booking.incident_acknowledged_at:
+            booking.incident_acknowledged_at = now
+        if not flags:
+            booking.incident_severity = None
+
+    if notes:
+        existing = (booking.incident_notes or '').strip()
+        prefix = '[{} {}] '.format(now.isoformat(), action.upper())
+        booking.incident_notes = (existing + '\n' if existing else '') + prefix + notes
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Failed admin incident action %s for request %s.', action, request_id)
+        flash('Failed to update incident state.')
+        return redirect(redirect_target)
+
+    metadata = {
+        'action': action,
+        'admin_user_id': getattr(current_user, 'id', None),
+        'incident_state': booking.incident_state,
+        'incident_severity': booking.incident_severity,
+        'notes': notes,
+    }
+    _publish_waste_request_event(
+        booking.id,
+        'admin_dispatch_incident_{}'.format(action),
+        payload=_serialize_waste_request_snapshot(booking),
+        metadata=metadata,
+    )
+    _notify_mobile_push_for_waste_event(
+        booking,
+        'admin_dispatch_incident_{}'.format(action),
+        metadata=metadata,
+    )
+
+    if action == 'ack':
+        flash('Incident acknowledged for request #{}.'.format(request_id))
+    else:
+        flash('Incident resolved for request #{}.'.format(request_id))
+    return redirect(redirect_target)
+
 
 @app.route('/output', methods=['GET'])
 def create_output_form():
@@ -6052,11 +6257,16 @@ def api_admin_dispatch_queue():
         limit = _parse_optional_int_query(request.args.get('limit'), 'limit', min_value=1, max_value=500)
         offset = _parse_optional_int_query(request.args.get('offset'), 'offset', min_value=0)
         assigned = _parse_optional_bool_query(request.args.get('assigned'), 'assigned')
+        incidents_only = _parse_optional_bool_query(request.args.get('incidents_only'), 'incidents_only')
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
 
     limit = limit or 50
     offset = offset or 0
+    incidents_only = bool(incidents_only)
+    incident_state = (str(request.args.get('incident_state') or '').strip().lower() or 'all')
+    if incident_state not in {'all', 'open', 'acknowledged', 'resolved'}:
+        return jsonify({'error': 'incident_state must be one of all, open, acknowledged, resolved'}), 400
     allowed_statuses = {
         'pending_match',
         'matched',
@@ -6117,6 +6327,8 @@ def api_admin_dispatch_queue():
     items = []
     status_counts = {}
     incident_counts = {}
+    incident_state_counts = {}
+    incident_severity_counts = {}
     for booking in rows:
         status_key = (booking.status or '').strip().lower() or 'unknown'
         status_counts[status_key] = status_counts.get(status_key, 0) + 1
@@ -6135,7 +6347,18 @@ def api_admin_dispatch_queue():
         )
         for flag in queue_item['incident_flags']:
             incident_counts[flag] = incident_counts.get(flag, 0) + 1
+        state = (queue_item.get('incident') or {}).get('state')
+        severity = (queue_item.get('incident') or {}).get('severity')
+        if state:
+            incident_state_counts[state] = incident_state_counts.get(state, 0) + 1
+        if severity:
+            incident_severity_counts[severity] = incident_severity_counts.get(severity, 0) + 1
         items.append(queue_item)
+
+    if incidents_only:
+        items = [item for item in items if item.get('incident_flags')]
+    if incident_state != 'all':
+        items = [item for item in items if (item.get('incident') or {}).get('state') == incident_state]
 
     return jsonify(
         {
@@ -6150,6 +6373,8 @@ def api_admin_dispatch_queue():
             'filters': {
                 'statuses': statuses,
                 'assigned': assigned,
+                'incidents_only': incidents_only,
+                'incident_state': incident_state,
             },
             'sla_thresholds': {
                 'pending_match_minutes': _dispatch_pending_match_sla_minutes(),
@@ -6159,7 +6384,226 @@ def api_admin_dispatch_queue():
             'summary': {
                 'status_counts': status_counts,
                 'incident_counts': incident_counts,
+                'incident_state_counts': incident_state_counts,
+                'incident_severity_counts': incident_severity_counts,
             },
+        }
+    )
+
+
+@app.route('/api/v1/admin/dispatch/incidents', methods=['GET'])
+@jwt_required(roles={'admin'})
+def api_admin_dispatch_incidents():
+    try:
+        limit = _parse_optional_int_query(request.args.get('limit'), 'limit', min_value=1, max_value=500)
+        offset = _parse_optional_int_query(request.args.get('offset'), 'offset', min_value=0)
+        active_only = _parse_optional_bool_query(request.args.get('active_only'), 'active_only')
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    limit = limit or 50
+    offset = offset or 0
+    active_only = True if active_only is None else bool(active_only)
+    incident_state = (str(request.args.get('incident_state') or '').strip().lower() or 'all')
+    if incident_state not in {'all', 'open', 'acknowledged', 'resolved'}:
+        return jsonify({'error': 'incident_state must be one of all, open, acknowledged, resolved'}), 400
+
+    allowed_statuses = {
+        'pending_match',
+        'matched',
+        'accepted',
+        'rejected',
+        'en_route',
+        'arrived',
+        'collected',
+        'completed',
+        'cancelled',
+    }
+    statuses_raw = str(request.args.get('statuses') or '').strip().lower()
+    if statuses_raw:
+        statuses = [part.strip() for part in statuses_raw.split(',') if part.strip()]
+        invalid_statuses = sorted({status for status in statuses if status not in allowed_statuses})
+        if invalid_statuses:
+            return jsonify(
+                {
+                    'error': 'Invalid status value(s).',
+                    'invalid_statuses': invalid_statuses,
+                    'allowed_statuses': sorted(allowed_statuses),
+                }
+            ), 400
+    else:
+        statuses = ['pending_match', 'matched', 'accepted', 'en_route', 'arrived', 'collected']
+
+    try:
+        query = WasteRemovalRequest.query.filter(WasteRemovalRequest.status.in_(statuses))
+        rows = query.order_by(WasteRemovalRequest.created_at.asc(), WasteRemovalRequest.id.asc()).all()
+    except SQLAlchemyError:
+        app.logger.exception('Failed to query dispatch incidents.')
+        return jsonify({'error': 'Failed to query dispatch incidents'}), 500
+
+    now = datetime.utcnow()
+    items = []
+    for booking in rows:
+        queue_item = _get_dispatch_incident_context(booking, now=now)
+        has_flags = bool(queue_item.get('incident_flags'))
+        state = (queue_item.get('incident') or {}).get('state')
+        if active_only and (not has_flags or state == 'resolved'):
+            continue
+        if incident_state != 'all' and state != incident_state:
+            continue
+        items.append(queue_item)
+
+    def _incident_sort_key(item):
+        flags = item.get('incident_flags') or []
+        incident_state_value = (item.get('incident') or {}).get('state') or ''
+        state_rank = {'open': 0, 'acknowledged': 1, 'resolved': 2}.get(incident_state_value, 3)
+        pickup_due = item.get('pickup_due_minutes')
+        overdue_rank = pickup_due if isinstance(pickup_due, int) and pickup_due > 0 else -1
+        age = item.get('age_minutes') or 0
+        return (state_rank, -len(flags), -overdue_rank, -age, item.get('request', {}).get('id') or 0)
+
+    items = sorted(items, key=_incident_sort_key)
+    total = len(items)
+    page_items = items[offset : offset + limit]
+    return jsonify(
+        {
+            'items': page_items,
+            'pagination': {
+                'limit': limit,
+                'offset': offset,
+                'returned': len(page_items),
+                'total': total,
+                'has_more': (offset + len(page_items)) < total,
+            },
+            'filters': {
+                'statuses': statuses,
+                'active_only': active_only,
+                'incident_state': incident_state,
+            },
+        }
+    )
+
+
+@app.route('/api/v1/admin/dispatch/incidents/<int:request_id>/ack', methods=['POST'])
+@jwt_required(roles={'admin'})
+def api_admin_dispatch_incident_ack(request_id):
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        return jsonify({'error': 'Waste request not found'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    notes = (str(payload.get('notes') or '').strip()[:1000] or None)
+    now = datetime.utcnow()
+    queue_item = _get_dispatch_incident_context(booking, now=now)
+    flags = queue_item.get('incident_flags') or []
+    if not flags:
+        return jsonify({'error': 'No active incident to acknowledge'}), 409
+
+    booking.incident_state = 'acknowledged'
+    booking.incident_severity = _dispatch_incident_severity(flags)
+    booking.incident_owner_admin_user_id = _current_jwt_user_id()
+    booking.incident_acknowledged_at = now
+    booking.incident_resolved_at = None
+    booking.incident_updated_at = now
+    if notes:
+        existing = (booking.incident_notes or '').strip()
+        prefix = '[{} ACK] '.format(now.isoformat())
+        booking.incident_notes = (existing + '\n' if existing else '') + prefix + notes
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Failed to acknowledge incident for request %s.', request_id)
+        return jsonify({'error': 'Failed to acknowledge incident'}), 500
+
+    metadata = {
+        'action': 'ack',
+        'admin_user_id': _current_jwt_user_id(),
+        'incident_state': booking.incident_state,
+        'incident_severity': booking.incident_severity,
+        'notes': notes,
+    }
+    _publish_waste_request_event(
+        booking.id,
+        'admin_dispatch_incident_ack',
+        payload=_serialize_waste_request_snapshot(booking),
+        metadata=metadata,
+    )
+    _notify_mobile_push_for_waste_event(
+        booking,
+        'admin_dispatch_incident_ack',
+        metadata=metadata,
+    )
+    refreshed_item = _get_dispatch_incident_context(booking)
+    return jsonify(
+        {
+            'updated': True,
+            'request': _serialize_waste_request_snapshot(booking),
+            'incident': refreshed_item.get('incident'),
+            'incident_flags': refreshed_item.get('incident_flags'),
+        }
+    )
+
+
+@app.route('/api/v1/admin/dispatch/incidents/<int:request_id>/resolve', methods=['POST'])
+@jwt_required(roles={'admin'})
+def api_admin_dispatch_incident_resolve(request_id):
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        return jsonify({'error': 'Waste request not found'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    notes = (str(payload.get('notes') or '').strip()[:1000] or None)
+    now = datetime.utcnow()
+    queue_item = _get_dispatch_incident_context(booking, now=now)
+    flags = queue_item.get('incident_flags') or []
+
+    booking.incident_state = 'resolved'
+    booking.incident_owner_admin_user_id = _current_jwt_user_id()
+    booking.incident_resolved_at = now
+    booking.incident_updated_at = now
+    if not booking.incident_acknowledged_at:
+        booking.incident_acknowledged_at = now
+    if not flags:
+        booking.incident_severity = None
+    if notes:
+        existing = (booking.incident_notes or '').strip()
+        prefix = '[{} RESOLVE] '.format(now.isoformat())
+        booking.incident_notes = (existing + '\n' if existing else '') + prefix + notes
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Failed to resolve incident for request %s.', request_id)
+        return jsonify({'error': 'Failed to resolve incident'}), 500
+
+    metadata = {
+        'action': 'resolve',
+        'admin_user_id': _current_jwt_user_id(),
+        'incident_state': booking.incident_state,
+        'incident_severity': booking.incident_severity,
+        'notes': notes,
+    }
+    _publish_waste_request_event(
+        booking.id,
+        'admin_dispatch_incident_resolve',
+        payload=_serialize_waste_request_snapshot(booking),
+        metadata=metadata,
+    )
+    _notify_mobile_push_for_waste_event(
+        booking,
+        'admin_dispatch_incident_resolve',
+        metadata=metadata,
+    )
+    refreshed_item = _get_dispatch_incident_context(booking)
+    return jsonify(
+        {
+            'updated': True,
+            'request': _serialize_waste_request_snapshot(booking),
+            'incident': refreshed_item.get('incident'),
+            'incident_flags': refreshed_item.get('incident_flags'),
         }
     )
 
@@ -6176,6 +6620,9 @@ def api_admin_dispatch_telemetry():
 
     limit = limit or 50
     incidents_only = bool(incidents_only)
+    incident_state = (str(request.args.get('incident_state') or '').strip().lower() or 'all')
+    if incident_state not in {'all', 'open', 'acknowledged', 'resolved'}:
+        return jsonify({'error': 'incident_state must be one of all, open, acknowledged, resolved'}), 400
     allowed_statuses = {
         'pending_match',
         'matched',
@@ -6219,6 +6666,10 @@ def api_admin_dispatch_telemetry():
     items = []
     status_counts = {}
     incident_counts = {}
+    incident_state_counts = {}
+    incident_severity_counts = {}
+    ack_latency_values = []
+    resolve_latency_values = []
     for booking in rows:
         status_key = (booking.status or '').strip().lower() or 'unknown'
         status_counts[status_key] = status_counts.get(status_key, 0) + 1
@@ -6237,10 +6688,27 @@ def api_admin_dispatch_telemetry():
         )
         for flag in queue_item.get('incident_flags') or []:
             incident_counts[flag] = incident_counts.get(flag, 0) + 1
+        incident_info = queue_item.get('incident') or {}
+        state = incident_info.get('state')
+        severity = incident_info.get('severity')
+        if state:
+            incident_state_counts[state] = incident_state_counts.get(state, 0) + 1
+        if severity:
+            incident_severity_counts[severity] = incident_severity_counts.get(severity, 0) + 1
+        if booking.incident_acknowledged_at and booking.created_at:
+            ack_latency_values.append(
+                max(0, int((booking.incident_acknowledged_at - booking.created_at).total_seconds() // 60))
+            )
+        if booking.incident_resolved_at and booking.created_at:
+            resolve_latency_values.append(
+                max(0, int((booking.incident_resolved_at - booking.created_at).total_seconds() // 60))
+            )
         items.append(queue_item)
 
     if incidents_only:
         items = [item for item in items if item.get('incident_flags')]
+    if incident_state != 'all':
+        items = [item for item in items if (item.get('incident') or {}).get('state') == incident_state]
 
     def _incident_sort_key(item):
         flags = item.get('incident_flags') or []
@@ -6268,11 +6736,22 @@ def api_admin_dispatch_telemetry():
                 'requests_overdue': requests_overdue,
                 'status_counts': status_counts,
                 'incident_counts': incident_counts,
+                'incident_state_counts': incident_state_counts,
+                'incident_severity_counts': incident_severity_counts,
+                'ack_latency_minutes_avg': (
+                    round(sum(ack_latency_values) / len(ack_latency_values), 1) if ack_latency_values else None
+                ),
+                'resolve_latency_minutes_avg': (
+                    round(sum(resolve_latency_values) / len(resolve_latency_values), 1)
+                    if resolve_latency_values
+                    else None
+                ),
             },
             'filters': {
                 'statuses': statuses,
                 'assigned': assigned,
                 'incidents_only': incidents_only,
+                'incident_state': incident_state,
                 'limit': limit,
             },
             'sla_thresholds': {

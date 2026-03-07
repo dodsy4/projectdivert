@@ -96,6 +96,9 @@
     <span class="label label-danger">requests with incidents: {{ summary.requests_with_incidents }}</span>
     <span class="label label-warning">incident flags: {{ summary.incident_total }}</span>
     <span class="label label-info">pickup overdue: {{ summary.requests_overdue }}</span>
+    <span class="label label-default">open: {{ summary.incident_state_counts.get('open', 0) }}</span>
+    <span class="label label-default">acknowledged: {{ summary.incident_state_counts.get('acknowledged', 0) }}</span>
+    <span class="label label-default">resolved: {{ summary.incident_state_counts.get('resolved', 0) }}</span>
   </div>
 
   <form class="dispatch-filter-bar" method="get" action="/admin/dispatch">
@@ -130,6 +133,26 @@
       </div>
     </div>
     <div class="row" style="margin-top:10px;">
+      <div class="col-sm-3">
+        <label for="incident_state">Incident State</label>
+        <select id="incident_state" class="form-control" name="incident_state">
+          <option value="all" {% if incident_state_filter == 'all' %}selected{% endif %}>All</option>
+          <option value="open" {% if incident_state_filter == 'open' %}selected{% endif %}>Open</option>
+          <option value="acknowledged" {% if incident_state_filter == 'acknowledged' %}selected{% endif %}>Acknowledged</option>
+          <option value="resolved" {% if incident_state_filter == 'resolved' %}selected{% endif %}>Resolved</option>
+        </select>
+      </div>
+      <div class="col-sm-9 dispatch-cell-tight">
+        <p>
+          <strong>Severity mix:</strong>
+          critical {{ summary.incident_severity_counts.get('critical', 0) }},
+          high {{ summary.incident_severity_counts.get('high', 0) }},
+          medium {{ summary.incident_severity_counts.get('medium', 0) }},
+          low {{ summary.incident_severity_counts.get('low', 0) }}
+        </p>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px;">
       <div class="col-sm-12">
         <button type="submit" class="btn btn-default btn-sm">Apply Filters</button>
         <a class="btn btn-link btn-sm" href="/admin/dispatch">Reset</a>
@@ -145,6 +168,7 @@
           <tr>
             <th>Request</th>
             <th>Status</th>
+            <th>Incident State</th>
             <th>Driver</th>
             <th>Incident Flags</th>
             <th>Overdue</th>
@@ -155,6 +179,13 @@
             <tr>
               <td>#{{ item.request.id }} {{ item.request.material_type }}</td>
               <td><span class="label label-primary">{{ item.request.status }}</span></td>
+              <td>
+                {% if item.incident and item.incident.state %}
+                  <span class="label label-default">{{ item.incident.state }}</span>
+                {% else %}
+                  -
+                {% endif %}
+              </td>
               <td>
                 {% if item.driver %}
                   {{ item.driver.name or item.driver.email }}
@@ -187,11 +218,12 @@
         <tr>
           <th>Request</th>
           <th>Status</th>
+          <th>Incident</th>
           <th>Schedule</th>
           <th>Driver</th>
           <th>Latest Location</th>
           <th>Incident Flags</th>
-          <th>Override</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -205,6 +237,19 @@
               </td>
               <td>
                 <span class="label label-primary">{{ item.request.status }}</span>
+              </td>
+              <td class="dispatch-cell-tight">
+                {% if item.incident and item.incident.state %}
+                  <p>
+                    <span class="label label-default">{{ item.incident.state }}</span>
+                    {% if item.incident.severity %}
+                      <span class="label label-warning">{{ item.incident.severity }}</span>
+                    {% endif %}
+                  </p>
+                  <p>owner: {{ item.incident.owner_admin_user_id or '-' }}</p>
+                {% else %}
+                  <span class="label label-success">no incident</span>
+                {% endif %}
               </td>
               <td class="dispatch-cell-tight">
                 <p>{{ item.request.scheduled_pickup_at or '-' }}</p>
@@ -260,12 +305,26 @@
                   <input class="form-control" type="text" name="reason" maxlength="255" placeholder="Reason (optional)">
                   <button type="submit" class="btn btn-primary btn-sm">Apply</button>
                 </form>
+                <form class="dispatch-form" method="post" action="/admin/dispatch/incident">
+                  <input type="hidden" name="request_id" value="{{ item.request.id }}">
+                  <input type="hidden" name="return_query" value="{{ filter_query_string }}">
+                  <input type="hidden" name="action" value="ack">
+                  <input class="form-control" type="text" name="notes" maxlength="255" placeholder="Ack notes (optional)">
+                  <button type="submit" class="btn btn-warning btn-sm">Acknowledge</button>
+                </form>
+                <form class="dispatch-form" method="post" action="/admin/dispatch/incident">
+                  <input type="hidden" name="request_id" value="{{ item.request.id }}">
+                  <input type="hidden" name="return_query" value="{{ filter_query_string }}">
+                  <input type="hidden" name="action" value="resolve">
+                  <input class="form-control" type="text" name="notes" maxlength="255" placeholder="Resolve notes (optional)">
+                  <button type="submit" class="btn btn-default btn-sm">Resolve</button>
+                </form>
               </td>
             </tr>
           {% endfor %}
         {% else %}
           <tr>
-            <td colspan="7">
+            <td colspan="8">
               <em>No dispatch rows found for current statuses.</em>
             </td>
           </tr>
