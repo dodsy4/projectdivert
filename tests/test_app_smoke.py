@@ -921,6 +921,170 @@ def test_auth_login_rate_limit_applies_before_credentials_check(client, app_cont
         _reset_auth_security_runtime_state(app_context)
 
 
+def test_auth_login_lockout_escalates_duration_on_repeated_lockouts(client, app_context):
+    _create_user(app_context, 'escalate@example.com', 'Password123!', role='customer', name='Escalate User')
+
+    overrides = {
+        'AUTH_RATE_LIMIT_ENABLED': False,
+        'AUTH_LOGIN_LOCKOUT_ENABLED': True,
+        'AUTH_LOGIN_LOCKOUT_MAX_ATTEMPTS': 2,
+        'AUTH_LOGIN_LOCKOUT_WINDOW_SECONDS': 300,
+        'AUTH_LOGIN_LOCKOUT_DURATION_SECONDS': 60,
+        'AUTH_LOGIN_LOCKOUT_ESCALATION_ENABLED': True,
+        'AUTH_LOGIN_LOCKOUT_ESCALATION_FACTOR': 2,
+        'AUTH_LOGIN_LOCKOUT_ESCALATION_RESET_SECONDS': 3600,
+        'AUTH_LOGIN_LOCKOUT_MAX_DURATION_SECONDS': 300,
+        'AUTH_REQUIRE_EMAIL_VERIFICATION': False,
+    }
+    original = {key: app_context.app.config.get(key) for key in overrides}
+    app_context.app.config.update(overrides)
+    _reset_auth_security_runtime_state(app_context)
+
+    try:
+        first_attempt = client.post(
+            '/api/v1/auth/login',
+            json={'email': 'escalate@example.com', 'password': 'WrongPass123'},
+        )
+        first_lock = client.post(
+            '/api/v1/auth/login',
+            json={'email': 'escalate@example.com', 'password': 'WrongPass123'},
+        )
+        assert first_attempt.status_code == 401
+        assert first_lock.status_code == 429
+        first_retry_after = int(first_lock.headers['Retry-After'])
+
+        # Simulate lockout expiry without waiting so we can trigger a second lockout cycle.
+        with app_context._auth_login_lockout_lock:
+            for key, state in list(app_context._auth_login_lockouts.items()):
+                if not key.startswith('ip:') and not key.endswith('escalate@example.com'):
+                    continue
+                state['locked_until'] = datetime.utcnow() - timedelta(seconds=1)
+                state['count'] = 0
+                state['first_failed_at'] = None
+                app_context._auth_login_lockouts[key] = state
+
+        second_attempt = client.post(
+            '/api/v1/auth/login',
+            json={'email': 'escalate@example.com', 'password': 'WrongPass123'},
+        )
+        second_lock = client.post(
+            '/api/v1/auth/login',
+            json={'email': 'escalate@example.com', 'password': 'WrongPass123'},
+        )
+        assert second_attempt.status_code == 401
+        assert second_lock.status_code == 429
+        second_retry_after = int(second_lock.headers['Retry-After'])
+        assert second_retry_after > first_retry_after
+
+        with app_context.app.app_context():
+            latest = (
+                app_context.AuthAuditEvent.query.filter_by(event='login', email='escalate@example.com')
+                .order_by(app_context.AuthAuditEvent.id.desc())
+                .first()
+            )
+            details = latest.details_json or {}
+
+        assert details.get('reason') == 'lockout_triggered'
+        assert int(details.get('lockout_level') or 0) >= 2
+    finally:
+        app_context.app.config.update(original)
+        _reset_auth_security_runtime_state(app_context)
+
+
+def test_auth_lockout_revokes_sessions_when_suspicious_activity_enabled(client, app_context):
+    _create_user(app_context, 'suspicious@example.com', 'Password123!', role='customer', name='Suspicious User')
+    login = client.post(
+        '/api/v1/auth/login',
+        json={'email': 'suspicious@example.com', 'password': 'Password123!'},
+    )
+    assert login.status_code == 200
+
+    overrides = {
+        'AUTH_RATE_LIMIT_ENABLED': False,
+        'AUTH_LOGIN_LOCKOUT_ENABLED': True,
+        'AUTH_LOGIN_LOCKOUT_MAX_ATTEMPTS': 2,
+        'AUTH_LOGIN_LOCKOUT_WINDOW_SECONDS': 300,
+        'AUTH_LOGIN_LOCKOUT_DURATION_SECONDS': 120,
+        'AUTH_LOGIN_LOCKOUT_ESCALATION_ENABLED': False,
+        'AUTH_SUSPICIOUS_ACTIVITY_REVOKE_SESSIONS': True,
+        'AUTH_SUSPICIOUS_ACTIVITY_REVOKE_MIN_LOCKOUT_LEVEL': 1,
+        'AUTH_REQUIRE_EMAIL_VERIFICATION': False,
+    }
+    original = {key: app_context.app.config.get(key) for key in overrides}
+    app_context.app.config.update(overrides)
+    _reset_auth_security_runtime_state(app_context)
+
+    try:
+        first = client.post(
+            '/api/v1/auth/login',
+            json={'email': 'suspicious@example.com', 'password': 'WrongPass123'},
+        )
+        lockout = client.post(
+            '/api/v1/auth/login',
+            json={'email': 'suspicious@example.com', 'password': 'WrongPass123'},
+        )
+        assert first.status_code == 401
+        assert lockout.status_code == 429
+
+        with app_context.app.app_context():
+            user = app_context.User.query.filter_by(email='suspicious@example.com').first()
+            assert user is not None
+            assert user.access_token_revoked_at is not None
+
+            active_refresh = (
+                app_context.AuthLifecycleToken.query.filter_by(
+                    user_id=user.id,
+                    token_type='refresh',
+                )
+                .filter(app_context.AuthLifecycleToken.revoked_at.is_(None))
+                .count()
+            )
+            assert active_refresh == 0
+
+            latest = (
+                app_context.AuthAuditEvent.query.filter_by(event='login', email='suspicious@example.com')
+                .order_by(app_context.AuthAuditEvent.id.desc())
+                .first()
+            )
+            details = latest.details_json or {}
+
+        assert details.get('reason') == 'lockout_triggered'
+        assert details.get('sessions_revoked') is True
+    finally:
+        app_context.app.config.update(original)
+        _reset_auth_security_runtime_state(app_context)
+
+
+def test_admin_api_rate_limit_applies_per_ip_and_user(client, app_context):
+    _create_user(app_context, 'adminratelimit@example.com', 'Password123!', role='admin', name='Admin Limit')
+    admin_headers = _auth_header(client, 'adminratelimit@example.com', 'Password123!')
+
+    overrides = {
+        'AUTH_RATE_LIMIT_ENABLED': True,
+        'AUTH_RATE_LIMIT_ADMIN_ENABLED': True,
+        'AUTH_RATE_LIMIT_WINDOW_SECONDS': 120,
+        'AUTH_RATE_LIMIT_ADMIN_MAX_ATTEMPTS': 2,
+        'AUTH_REQUIRE_EMAIL_VERIFICATION': False,
+    }
+    original = {key: app_context.app.config.get(key) for key in overrides}
+    app_context.app.config.update(overrides)
+    _reset_auth_security_runtime_state(app_context)
+
+    try:
+        first = client.get('/api/v1/admin/auth-audit?limit=1', headers=admin_headers)
+        second = client.get('/api/v1/admin/auth-audit?limit=1', headers=admin_headers)
+        third = client.get('/api/v1/admin/auth-audit?limit=1', headers=admin_headers)
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert third.status_code == 429
+        assert third.get_json()['error'] == 'Too many admin API requests. Please try again later.'
+        assert 'Retry-After' in third.headers
+    finally:
+        app_context.app.config.update(original)
+        _reset_auth_security_runtime_state(app_context)
+
+
 def test_admin_auth_blocklist_can_block_and_unblock_login(client, app_context):
     _create_user(app_context, 'adminsec@example.com', 'Password123!', role='admin', name='Security Admin')
     _create_user(app_context, 'blocked@example.com', 'Password123!', role='customer', name='Blocked User')
@@ -1120,5 +1284,96 @@ def test_admin_dispatch_incident_ack_requires_active_incident(client, app_contex
         )
         assert ack.status_code == 409
         assert ack.get_json()['error'] == 'No active incident to acknowledge'
+    finally:
+        app_context.app.config['DISPATCH_PENDING_MATCH_SLA_MINUTES'] = original_pending
+
+
+def test_admin_dispatch_incident_owner_reassignment_flow(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(
+        app_context,
+        '_drive_time_between_points',
+        lambda *args, **kwargs: {'minutes': 12.0, 'text': '12 mins'},
+    )
+    _create_user(app_context, 'opsowner1@example.com', 'Password123!', role='admin', name='Ops Owner 1')
+    _create_user(app_context, 'opsowner2@example.com', 'Password123!', role='admin', name='Ops Owner 2')
+    _create_user(app_context, 'ownercustomer@example.com', 'Password123!', role='customer', name='Owner Customer')
+    _create_user(app_context, 'notadminowner@example.com', 'Password123!', role='customer', name='Not Admin')
+    admin_headers = _auth_header(client, 'opsowner1@example.com', 'Password123!')
+    customer_headers = _auth_header(client, 'ownercustomer@example.com', 'Password123!')
+
+    original_pending = app_context.app.config.get('DISPATCH_PENDING_MATCH_SLA_MINUTES')
+    app_context.app.config['DISPATCH_PENDING_MATCH_SLA_MINUTES'] = 0
+
+    try:
+        scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+        create_response = client.post(
+            '/api/v1/waste-requests',
+            json={
+                'requester_name': 'Owner Customer',
+                'requester_email': 'ownercustomer@example.com',
+                'material_type': 'Glass',
+                'waste_amount': 1.0,
+                'waste_unit': 'Tonnes',
+                'match_radius_miles': 25,
+                'pickup_address': '1 Example Road',
+                'pickup_postcode': 'SW1A1AA',
+                'scheduled_pickup_at': scheduled_time,
+            },
+            headers=customer_headers,
+        )
+        assert create_response.status_code == 201
+        request_id = create_response.get_json()['request']['id']
+        with app_context.app.app_context():
+            booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
+            booking.created_at = datetime.utcnow() - timedelta(minutes=3)
+            app_context.db.session.commit()
+            owner_two_id = app_context.User.query.filter_by(email='opsowner2@example.com').first().id
+            customer_id = app_context.User.query.filter_by(email='notadminowner@example.com').first().id
+
+        ack = client.post(
+            f'/api/v1/admin/dispatch/incidents/{request_id}/ack',
+            json={'notes': 'set initial owner'},
+            headers=admin_headers,
+        )
+        assert ack.status_code == 200
+        assert ack.get_json()['incident']['state'] == 'acknowledged'
+
+        reassign = client.post(
+            f'/api/v1/admin/dispatch/incidents/{request_id}/owner',
+            json={'owner_admin_user_id': owner_two_id, 'notes': 'handoff to on-call admin'},
+            headers=admin_headers,
+        )
+        assert reassign.status_code == 200
+        reassign_payload = reassign.get_json()
+        assert reassign_payload['updated'] is True
+        assert reassign_payload['owner_admin_user_id'] == owner_two_id
+        assert reassign_payload['request']['request']['incident_owner_admin_user_id'] == owner_two_id
+
+        noop = client.post(
+            f'/api/v1/admin/dispatch/incidents/{request_id}/owner',
+            json={'owner_admin_user_id': owner_two_id},
+            headers=admin_headers,
+        )
+        assert noop.status_code == 200
+        assert noop.get_json()['updated'] is False
+
+        unassign = client.post(
+            f'/api/v1/admin/dispatch/incidents/{request_id}/owner',
+            json={'owner_admin_user_id': None, 'notes': 'clear owner'},
+            headers=admin_headers,
+        )
+        assert unassign.status_code == 200
+        assert unassign.get_json()['updated'] is True
+        assert unassign.get_json()['owner_admin_user_id'] is None
+
+        invalid_owner = client.post(
+            f'/api/v1/admin/dispatch/incidents/{request_id}/owner',
+            json={'owner_admin_user_id': customer_id},
+            headers=admin_headers,
+        )
+        assert invalid_owner.status_code == 400
+        assert invalid_owner.get_json()['error'] == 'Selected user is not an admin'
     finally:
         app_context.app.config['DISPATCH_PENDING_MATCH_SLA_MINUTES'] = original_pending

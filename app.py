@@ -290,6 +290,8 @@ class WasteRemovalRequest(db.Model):
     incident_resolved_at = db.Column(db.DateTime, index=True)
     incident_notes = db.Column(db.Text)
     incident_updated_at = db.Column(db.DateTime, index=True)
+    incident_last_escalation_key = db.Column(db.String(120), index=True)
+    incident_last_escalated_at = db.Column(db.DateTime, index=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     def __repr__(self):
@@ -700,7 +702,11 @@ def _auth_rate_limit_enabled():
     return _is_truthy(app.config.get('AUTH_RATE_LIMIT_ENABLED', True))
 
 
-def _auth_rate_limit_window_seconds():
+def _auth_rate_limit_admin_enabled():
+    return _is_truthy(app.config.get('AUTH_RATE_LIMIT_ADMIN_ENABLED', True))
+
+
+def _auth_rate_limit_window_seconds(action=''):
     value = app.config.get('AUTH_RATE_LIMIT_WINDOW_SECONDS', 300)
     try:
         return max(10, int(value))
@@ -727,6 +733,7 @@ def _auth_rate_limit_max_attempts(action):
         'password_reset_request': 'AUTH_RATE_LIMIT_PASSWORD_RESET_REQUEST_MAX_ATTEMPTS',
         'password_reset_confirm': 'AUTH_RATE_LIMIT_PASSWORD_RESET_CONFIRM_MAX_ATTEMPTS',
         'logout': 'AUTH_RATE_LIMIT_REFRESH_MAX_ATTEMPTS',
+        'admin_api': 'AUTH_RATE_LIMIT_ADMIN_MAX_ATTEMPTS',
     }.get(action, 'AUTH_RATE_LIMIT_LOGIN_MAX_ATTEMPTS')
     value = app.config.get(config_key, 10)
     try:
@@ -761,6 +768,46 @@ def _auth_login_lockout_duration_seconds():
         return max(60, int(value))
     except (TypeError, ValueError):
         return 900
+
+
+def _auth_login_lockout_escalation_enabled():
+    return _is_truthy(app.config.get('AUTH_LOGIN_LOCKOUT_ESCALATION_ENABLED', True))
+
+
+def _auth_login_lockout_escalation_factor():
+    value = app.config.get('AUTH_LOGIN_LOCKOUT_ESCALATION_FACTOR', 2)
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return 2
+
+
+def _auth_login_lockout_escalation_reset_seconds():
+    value = app.config.get('AUTH_LOGIN_LOCKOUT_ESCALATION_RESET_SECONDS', 86400)
+    try:
+        return max(60, int(value))
+    except (TypeError, ValueError):
+        return 86400
+
+
+def _auth_login_lockout_max_duration_seconds():
+    value = app.config.get('AUTH_LOGIN_LOCKOUT_MAX_DURATION_SECONDS', 86400)
+    try:
+        return max(60, int(value))
+    except (TypeError, ValueError):
+        return 86400
+
+
+def _auth_suspicious_activity_revoke_sessions_enabled():
+    return _is_truthy(app.config.get('AUTH_SUSPICIOUS_ACTIVITY_REVOKE_SESSIONS', True))
+
+
+def _auth_suspicious_activity_revoke_min_lockout_level():
+    value = app.config.get('AUTH_SUSPICIOUS_ACTIVITY_REVOKE_MIN_LOCKOUT_LEVEL', 1)
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return 1
 
 
 def _normalize_email(email):
@@ -812,12 +859,15 @@ def _auth_login_lockout_retry_after(identifier):
         if not state:
             return 0
 
+        locked_until = state.get('locked_until')
+        if locked_until and locked_until > now:
+            return max(1, int((locked_until - now).total_seconds()))
+
         first_failed_at = state.get('first_failed_at')
         if first_failed_at and (now - first_failed_at).total_seconds() > window_seconds:
             _auth_login_lockouts.pop(bucket, None)
             return 0
 
-        locked_until = state.get('locked_until')
         if not locked_until:
             return 0
         if locked_until <= now:
@@ -826,7 +876,19 @@ def _auth_login_lockout_retry_after(identifier):
             state['locked_until'] = None
             _auth_login_lockouts[bucket] = state
             return 0
-        return max(1, int((locked_until - now).total_seconds()))
+        return 0
+
+
+def _auth_login_lockout_level(identifier):
+    bucket = str(identifier or '').strip()
+    if not bucket:
+        return 0
+    with _auth_login_lockout_lock:
+        state = _auth_login_lockouts.get(bucket) or {}
+        try:
+            return max(0, int(state.get('lockout_level') or 0))
+        except (TypeError, ValueError):
+            return 0
 
 
 def _record_auth_login_failure(identifier):
@@ -846,6 +908,8 @@ def _record_auth_login_failure(identifier):
             'count': 0,
             'first_failed_at': None,
             'locked_until': None,
+            'lockout_level': 0,
+            'last_lockout_at': None,
         }
         first_failed_at = state.get('first_failed_at')
         locked_until = state.get('locked_until')
@@ -862,8 +926,31 @@ def _record_auth_login_failure(identifier):
 
         retry_after = 0
         if state['count'] >= max_attempts:
-            state['locked_until'] = now + timedelta(seconds=lockout_seconds)
-            retry_after = lockout_seconds
+            lockout_level = 1
+            if _auth_login_lockout_escalation_enabled():
+                last_lockout_at = state.get('last_lockout_at')
+                reset_seconds = _auth_login_lockout_escalation_reset_seconds()
+                previous_level = max(0, _to_int_or_none(state.get('lockout_level')) or 0)
+                if (
+                    isinstance(last_lockout_at, datetime)
+                    and (now - last_lockout_at).total_seconds() <= reset_seconds
+                ):
+                    lockout_level = previous_level + 1
+                else:
+                    lockout_level = 1
+
+            factor = _auth_login_lockout_escalation_factor()
+            if lockout_level <= 1:
+                duration_seconds = lockout_seconds
+            else:
+                duration_seconds = lockout_seconds * (factor ** (lockout_level - 1))
+            duration_seconds = min(duration_seconds, _auth_login_lockout_max_duration_seconds())
+            duration_seconds = max(60, int(duration_seconds))
+
+            state['lockout_level'] = lockout_level
+            state['last_lockout_at'] = now
+            state['locked_until'] = now + timedelta(seconds=duration_seconds)
+            retry_after = duration_seconds
 
         _auth_login_lockouts[bucket] = state
         return retry_after
@@ -923,7 +1010,7 @@ def _get_auth_rate_limit_redis_client():
 
 def _check_auth_rate_limit_memory(action, identifier):
     now = datetime.utcnow()
-    window_seconds = _auth_rate_limit_window_seconds()
+    window_seconds = _auth_rate_limit_window_seconds(action=action)
     max_attempts = _auth_rate_limit_max_attempts(action)
     cutoff = now - timedelta(seconds=window_seconds)
     bucket = '{}:{}'.format(action, identifier)
@@ -950,7 +1037,7 @@ def _check_auth_rate_limit_redis(action, identifier):
     if client is None:
         return None
 
-    window_seconds = _auth_rate_limit_window_seconds()
+    window_seconds = _auth_rate_limit_window_seconds(action=action)
     max_attempts = _auth_rate_limit_max_attempts(action)
     now_ms = int(datetime.utcnow().timestamp() * 1000)
     oldest_allowed_ms = now_ms - (window_seconds * 1000)
@@ -1011,6 +1098,31 @@ def _auth_rate_limit_response(action, email=None):
 
     retry_after = max(retry_values)
     response = jsonify({'error': 'Too many attempts. Please try again later.'})
+    response.status_code = 429
+    response.headers['Retry-After'] = str(retry_after)
+    return response
+
+
+def _auth_admin_rate_limit_response(user_id=None):
+    if not _auth_rate_limit_enabled() or not _auth_rate_limit_admin_enabled():
+        return None
+
+    retry_values = []
+    ip_retry = _check_auth_rate_limit('admin_api', 'ip:{}'.format(_request_client_ip()))
+    if ip_retry:
+        retry_values.append(ip_retry)
+
+    normalized_user_id = _to_int_or_none(user_id)
+    if normalized_user_id is not None:
+        user_retry = _check_auth_rate_limit('admin_api', 'user:{}'.format(normalized_user_id))
+        if user_retry:
+            retry_values.append(user_retry)
+
+    if not retry_values:
+        return None
+
+    retry_after = max(retry_values)
+    response = jsonify({'error': 'Too many admin API requests. Please try again later.'})
     response.status_code = 429
     response.headers['Retry-After'] = str(retry_after)
     return response
@@ -1746,6 +1858,15 @@ def _revoke_all_access_tokens_for_user(user_id, reason='revoked'):
     return True
 
 
+def _revoke_sessions_for_suspicious_activity(user_id, reason='suspicious_activity'):
+    normalized_user_id = _to_int_or_none(user_id)
+    if normalized_user_id is None:
+        return False
+    _revoke_all_refresh_tokens_for_user(normalized_user_id)
+    revoked = _revoke_all_access_tokens_for_user(normalized_user_id, reason=reason)
+    return bool(revoked)
+
+
 def _access_token_revocation_reason(claims):
     user_id = _to_int_or_none((claims or {}).get('sub'))
     if user_id is None:
@@ -1828,6 +1949,23 @@ def jwt_required(roles=None):
             role = str(claims.get('role') or '').strip().lower()
             if roles and role not in roles:
                 return jsonify({'error': 'Forbidden'}), 403
+
+            if role == 'admin' and request.path.startswith('/api/v1/admin/'):
+                admin_rate_limited = _auth_admin_rate_limit_response(user_id=claims.get('sub'))
+                if admin_rate_limited:
+                    _audit_auth_event(
+                        'admin_rate_limit',
+                        success=False,
+                        status_code=429,
+                        email=claims.get('email'),
+                        user_id=claims.get('sub'),
+                        details={
+                            'reason': 'rate_limited',
+                            'path': request.path,
+                            'method': request.method,
+                        },
+                    )
+                    return admin_rate_limited
 
             g.jwt_claims = claims
             return fn(*args, **kwargs)
@@ -2350,6 +2488,56 @@ def _dispatch_location_stale_minutes():
         return 20
 
 
+def _dispatch_escalation_ack_sla_minutes(severity):
+    severity = str(severity or '').strip().lower()
+    config_map = {
+        'critical': 'DISPATCH_ESCALATION_ACK_SLA_CRITICAL_MINUTES',
+        'high': 'DISPATCH_ESCALATION_ACK_SLA_HIGH_MINUTES',
+        'medium': 'DISPATCH_ESCALATION_ACK_SLA_MEDIUM_MINUTES',
+        'low': 'DISPATCH_ESCALATION_ACK_SLA_LOW_MINUTES',
+    }
+    value = app.config.get(config_map.get(severity, 'DISPATCH_ESCALATION_ACK_SLA_LOW_MINUTES'), 90)
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return 90
+
+
+def _dispatch_escalation_resolve_sla_minutes(severity):
+    severity = str(severity or '').strip().lower()
+    config_map = {
+        'critical': 'DISPATCH_ESCALATION_RESOLVE_SLA_CRITICAL_MINUTES',
+        'high': 'DISPATCH_ESCALATION_RESOLVE_SLA_HIGH_MINUTES',
+        'medium': 'DISPATCH_ESCALATION_RESOLVE_SLA_MEDIUM_MINUTES',
+        'low': 'DISPATCH_ESCALATION_RESOLVE_SLA_LOW_MINUTES',
+    }
+    value = app.config.get(config_map.get(severity, 'DISPATCH_ESCALATION_RESOLVE_SLA_LOW_MINUTES'), 720)
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return 720
+
+
+def _dispatch_escalation_webhook_url():
+    return (str(app.config.get('DISPATCH_ESCALATION_WEBHOOK_URL') or '').strip() or '')
+
+
+def _dispatch_escalation_webhook_timeout_seconds():
+    value = app.config.get('DISPATCH_ESCALATION_WEBHOOK_TIMEOUT_SECONDS', 8)
+    try:
+        return max(2, int(value))
+    except (TypeError, ValueError):
+        return 8
+
+
+def _dispatch_escalation_cooldown_minutes():
+    value = app.config.get('DISPATCH_ESCALATION_COOLDOWN_MINUTES', 30)
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return 30
+
+
 def _select_provider_candidates_within_radius(
     pickup_latitude,
     pickup_longitude,
@@ -2664,6 +2852,10 @@ def _serialize_waste_request(booking):
         'incident_resolved_at': booking.incident_resolved_at.isoformat() if booking.incident_resolved_at else None,
         'incident_notes': booking.incident_notes,
         'incident_updated_at': booking.incident_updated_at.isoformat() if booking.incident_updated_at else None,
+        'incident_last_escalation_key': booking.incident_last_escalation_key,
+        'incident_last_escalated_at': (
+            booking.incident_last_escalated_at.isoformat() if booking.incident_last_escalated_at else None
+        ),
         'created_at': booking.created_at.isoformat() if booking.created_at else None,
     }
 
@@ -2812,6 +3004,21 @@ def _dispatch_incident_summary(booking, flags, now=None):
     severity = _dispatch_incident_severity(flags)
     ack_minutes = _minutes_since(getattr(booking, 'incident_acknowledged_at', None), now=now)
     resolve_minutes = _minutes_since(getattr(booking, 'incident_resolved_at', None), now=now)
+    created_age_minutes = _minutes_since(getattr(booking, 'created_at', None), now=now) or 0
+    ack_sla_minutes = _dispatch_escalation_ack_sla_minutes(severity) if severity else None
+    resolve_sla_minutes = _dispatch_escalation_resolve_sla_minutes(severity) if severity else None
+
+    breach_type = None
+    breach_minutes = 0
+    if state == 'open' and ack_sla_minutes is not None and created_age_minutes > ack_sla_minutes:
+        breach_type = 'ack_sla'
+        breach_minutes = created_age_minutes - ack_sla_minutes
+    elif state == 'acknowledged' and resolve_sla_minutes is not None:
+        resolve_window_age = ack_minutes if ack_minutes is not None else created_age_minutes
+        if resolve_window_age > resolve_sla_minutes:
+            breach_type = 'resolve_sla'
+            breach_minutes = resolve_window_age - resolve_sla_minutes
+
     return {
         'state': state,
         'severity': severity,
@@ -2824,7 +3031,96 @@ def _dispatch_incident_summary(booking, flags, now=None):
         'updated_at': booking.incident_updated_at.isoformat() if booking.incident_updated_at else None,
         'ack_age_minutes': ack_minutes,
         'resolve_age_minutes': resolve_minutes,
+        'ack_sla_minutes': ack_sla_minutes,
+        'resolve_sla_minutes': resolve_sla_minutes,
+        'breach_type': breach_type,
+        'breach_minutes': breach_minutes if breach_type else 0,
     }
+
+
+def _dispatch_escalation_key_for_item(queue_item):
+    incident = queue_item.get('incident') or {}
+    breach_type = str(incident.get('breach_type') or '').strip().lower()
+    severity = str(incident.get('severity') or '').strip().lower()
+    request_id = (queue_item.get('request') or {}).get('id')
+    if not breach_type or not severity or request_id is None:
+        return ''
+    return '{}:{}:{}'.format(breach_type, severity, request_id)
+
+
+def _dispatch_send_escalation_webhook(booking, queue_item, now=None, source=''):
+    webhook_url = _dispatch_escalation_webhook_url()
+    if not webhook_url:
+        return False
+
+    incident = queue_item.get('incident') or {}
+    breach_type = str(incident.get('breach_type') or '').strip().lower()
+    severity = str(incident.get('severity') or '').strip().lower()
+    if not breach_type or not severity:
+        return False
+
+    now = now or datetime.utcnow()
+    escalation_key = _dispatch_escalation_key_for_item(queue_item)
+    if not escalation_key:
+        return False
+
+    cooldown_minutes = _dispatch_escalation_cooldown_minutes()
+    if (
+        booking.incident_last_escalation_key == escalation_key
+        and booking.incident_last_escalated_at
+        and (now - booking.incident_last_escalated_at).total_seconds() < (cooldown_minutes * 60)
+    ):
+        return False
+
+    request_data = queue_item.get('request') or {}
+    payload = {
+        'text': (
+            '[Project Divert] Dispatch incident escalation: request #{request_id} '
+            '{severity} {breach_type} breach (+{breach_minutes}m)'
+        ).format(
+            request_id=request_data.get('id'),
+            severity=severity.upper(),
+            breach_type=breach_type,
+            breach_minutes=int(incident.get('breach_minutes') or 0),
+        ),
+        'request_id': request_data.get('id'),
+        'request_status': request_data.get('status'),
+        'severity': severity,
+        'incident_state': incident.get('state'),
+        'breach_type': breach_type,
+        'breach_minutes': int(incident.get('breach_minutes') or 0),
+        'incident_flags': queue_item.get('incident_flags') or [],
+        'assigned_driver_user_id': request_data.get('assigned_driver_user_id'),
+        'pickup_postcode': request_data.get('pickup_postcode'),
+        'owner_admin_user_id': incident.get('owner_admin_user_id'),
+        'source': str(source or ''),
+        'occurred_at': now.isoformat() + 'Z',
+    }
+
+    try:
+        response = requests.post(
+            webhook_url,
+            json=payload,
+            timeout=_dispatch_escalation_webhook_timeout_seconds(),
+        )
+        if response.status_code >= 400:
+            app.logger.warning(
+                'Dispatch escalation webhook failed status=%s request_id=%s',
+                response.status_code,
+                request_data.get('id'),
+            )
+            return False
+    except Exception:
+        app.logger.exception(
+            'Dispatch escalation webhook request failed for request_id=%s',
+            request_data.get('id'),
+        )
+        return False
+
+    booking.incident_last_escalation_key = escalation_key
+    booking.incident_last_escalated_at = now
+    booking.incident_updated_at = now
+    return True
 
 
 def _serialize_dispatch_queue_item(booking, driver=None, latest_location=None, now=None):
@@ -3886,6 +4182,11 @@ def admin_dispatch_board():
         .order_by(func.lower(func.coalesce(User.name, User.email)).asc(), User.id.asc())
         .all()
     )
+    admins = (
+        User.query.filter(func.lower(User.role) == 'admin', User.is_active_user.is_(True))
+        .order_by(func.lower(func.coalesce(User.name, User.email)).asc(), User.id.asc())
+        .all()
+    )
 
     query = WasteRemovalRequest.query.filter(WasteRemovalRequest.status.in_(selected_statuses))
     if assigned_filter is True:
@@ -3899,6 +4200,7 @@ def admin_dispatch_board():
     queue_items = []
     status_counts = {}
     incident_counts = {}
+    escalation_dirty = False
     for booking in rows:
         status_key = (booking.status or '').strip().lower() or 'unknown'
         status_counts[status_key] = status_counts.get(status_key, 0) + 1
@@ -3918,7 +4220,15 @@ def admin_dispatch_board():
         )
         for flag in queue_item.get('incident_flags') or []:
             incident_counts[flag] = incident_counts.get(flag, 0) + 1
+        if _dispatch_send_escalation_webhook(booking, queue_item, now=now, source='admin_dispatch_board'):
+            escalation_dirty = True
         queue_items.append(queue_item)
+    if escalation_dirty:
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            app.logger.exception('Failed to persist dispatch board escalation markers.')
     if incidents_only:
         queue_items = [item for item in queue_items if item.get('incident_flags')]
     if incident_state_filter != 'all':
@@ -3970,6 +4280,7 @@ def admin_dispatch_board():
             'incident_severity_counts': incident_severity_counts,
         },
         drivers=[_serialize_dispatch_driver(row) for row in drivers],
+        admins=[_serialize_dispatch_driver(row) for row in admins],
         statuses=selected_statuses,
         status_options=status_options,
         assigned_filter=assigned_filter,
@@ -4172,6 +4483,96 @@ def admin_dispatch_incident_form():
         flash('Incident acknowledged for request #{}.'.format(request_id))
     else:
         flash('Incident resolved for request #{}.'.format(request_id))
+    return redirect(redirect_target)
+
+
+@app.route('/admin/dispatch/incident-owner', methods=['POST'])
+@login_required
+def admin_dispatch_incident_owner_form():
+    if not _current_user_is_admin():
+        flash('Admin access is required.')
+        return redirect('/login'), 403
+
+    request_id = _to_int_or_none(request.form.get('request_id'))
+    raw_owner_user_id = str(request.form.get('owner_admin_user_id') or '').strip()
+    notes = (str(request.form.get('notes') or '').strip()[:1000] or None)
+    return_query = str(request.form.get('return_query') or '').strip()
+    redirect_target = url_for('admin_dispatch_board')
+    if return_query:
+        redirect_target = '{}?{}'.format(redirect_target, return_query.lstrip('?'))
+
+    if request_id is None:
+        flash('request_id is required.')
+        return redirect(redirect_target)
+
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        flash('Waste request not found.')
+        return redirect(redirect_target)
+
+    if not raw_owner_user_id:
+        new_owner_user_id = None
+        owner_user = None
+    else:
+        new_owner_user_id = _to_int_or_none(raw_owner_user_id)
+        if new_owner_user_id is None:
+            flash('owner_admin_user_id must be an integer or empty.')
+            return redirect(redirect_target)
+        owner_user = db.session.get(User, new_owner_user_id)
+        if not owner_user:
+            flash('Owner admin user not found.')
+            return redirect(redirect_target)
+        if (owner_user.role or '').strip().lower() != 'admin':
+            flash('Selected user is not an admin.')
+            return redirect(redirect_target)
+        if not owner_user.is_active_user:
+            flash('Selected admin user is inactive.')
+            return redirect(redirect_target)
+
+    previous_owner_user_id = booking.incident_owner_admin_user_id
+    if previous_owner_user_id == new_owner_user_id:
+        flash('No owner change.')
+        return redirect(redirect_target)
+
+    now = datetime.utcnow()
+    booking.incident_owner_admin_user_id = new_owner_user_id
+    booking.incident_updated_at = now
+    if notes:
+        existing = (booking.incident_notes or '').strip()
+        prefix = '[{} OWNER] '.format(now.isoformat())
+        booking.incident_notes = (existing + '\n' if existing else '') + prefix + notes
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Failed incident owner reassignment for request %s.', request_id)
+        flash('Failed to update incident owner.')
+        return redirect(redirect_target)
+
+    metadata = {
+        'action': 'owner_reassign',
+        'previous_owner_admin_user_id': previous_owner_user_id,
+        'owner_admin_user_id': booking.incident_owner_admin_user_id,
+        'admin_user_id': getattr(current_user, 'id', None),
+        'notes': notes,
+    }
+    _publish_waste_request_event(
+        booking.id,
+        'admin_dispatch_incident_owner_reassign',
+        payload=_serialize_waste_request_snapshot(booking),
+        metadata=metadata,
+    )
+    _notify_mobile_push_for_waste_event(
+        booking,
+        'admin_dispatch_incident_owner_reassign',
+        metadata=metadata,
+    )
+
+    if booking.incident_owner_admin_user_id:
+        flash('Incident owner updated for request #{}.'.format(request_id))
+    else:
+        flash('Incident owner cleared for request #{}.'.format(request_id))
     return redirect(redirect_target)
 
 
@@ -5010,9 +5411,33 @@ def api_auth_login():
     user = User.query.filter(func.lower(User.email) == email).first()
     if not user or not user.is_active or not check_password_hash(user.password_hash, password):
         lockout_retry_after = 0
-        for identifier in _auth_login_lockout_identifiers(email=email):
+        lockout_level = 0
+        lockout_identifiers = _auth_login_lockout_identifiers(email=email)
+        for identifier in lockout_identifiers:
             lockout_retry_after = max(lockout_retry_after, _record_auth_login_failure(identifier))
+            lockout_level = max(lockout_level, _auth_login_lockout_level(identifier))
         if lockout_retry_after > 0:
+            sessions_revoked = False
+            suspicious_revocation_enabled = (
+                user is not None
+                and _auth_suspicious_activity_revoke_sessions_enabled()
+                and lockout_level >= _auth_suspicious_activity_revoke_min_lockout_level()
+            )
+            if suspicious_revocation_enabled:
+                try:
+                    sessions_revoked = _revoke_sessions_for_suspicious_activity(
+                        user.id,
+                        reason='suspicious_login_lockout',
+                    )
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+                    sessions_revoked = False
+                    app.logger.exception(
+                        'Failed revoking sessions for suspicious login lockout user_id=%s.',
+                        user.id,
+                    )
+
             response = jsonify({'error': 'Too many failed login attempts. Please try again later.'})
             response.status_code = 429
             response.headers['Retry-After'] = str(lockout_retry_after)
@@ -5022,7 +5447,12 @@ def api_auth_login():
                 status_code=429,
                 email=email,
                 user_id=user.id if user else None,
-                details={'reason': 'lockout_triggered', 'retry_after_seconds': lockout_retry_after},
+                details={
+                    'reason': 'lockout_triggered',
+                    'retry_after_seconds': lockout_retry_after,
+                    'lockout_level': lockout_level,
+                    'sessions_revoked': sessions_revoked,
+                },
             )
             return response
 
@@ -6329,6 +6759,7 @@ def api_admin_dispatch_queue():
     incident_counts = {}
     incident_state_counts = {}
     incident_severity_counts = {}
+    escalation_dirty = False
     for booking in rows:
         status_key = (booking.status or '').strip().lower() or 'unknown'
         status_counts[status_key] = status_counts.get(status_key, 0) + 1
@@ -6353,7 +6784,15 @@ def api_admin_dispatch_queue():
             incident_state_counts[state] = incident_state_counts.get(state, 0) + 1
         if severity:
             incident_severity_counts[severity] = incident_severity_counts.get(severity, 0) + 1
+        if _dispatch_send_escalation_webhook(booking, queue_item, now=now, source='api_admin_dispatch_queue'):
+            escalation_dirty = True
         items.append(queue_item)
+    if escalation_dirty:
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            app.logger.exception('Failed to persist dispatch queue escalation markers.')
 
     if incidents_only:
         items = [item for item in items if item.get('incident_flags')]
@@ -6443,6 +6882,7 @@ def api_admin_dispatch_incidents():
 
     now = datetime.utcnow()
     items = []
+    escalation_dirty = False
     for booking in rows:
         queue_item = _get_dispatch_incident_context(booking, now=now)
         has_flags = bool(queue_item.get('incident_flags'))
@@ -6451,7 +6891,15 @@ def api_admin_dispatch_incidents():
             continue
         if incident_state != 'all' and state != incident_state:
             continue
+        if _dispatch_send_escalation_webhook(booking, queue_item, now=now, source='api_admin_dispatch_incidents'):
+            escalation_dirty = True
         items.append(queue_item)
+    if escalation_dirty:
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            app.logger.exception('Failed to persist dispatch incidents escalation markers.')
 
     def _incident_sort_key(item):
         flags = item.get('incident_flags') or []
@@ -6608,6 +7056,95 @@ def api_admin_dispatch_incident_resolve(request_id):
     )
 
 
+@app.route('/api/v1/admin/dispatch/incidents/<int:request_id>/owner', methods=['POST'])
+@jwt_required(roles={'admin'})
+def api_admin_dispatch_incident_owner(request_id):
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        return jsonify({'error': 'Waste request not found'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    if 'owner_admin_user_id' not in payload:
+        return jsonify({'error': 'owner_admin_user_id is required (set null to unassign)'}), 400
+
+    raw_owner_user_id = payload.get('owner_admin_user_id')
+    if raw_owner_user_id in (None, ''):
+        new_owner_user_id = None
+        owner_user = None
+    else:
+        new_owner_user_id = _to_int_or_none(raw_owner_user_id)
+        if new_owner_user_id is None:
+            return jsonify({'error': 'owner_admin_user_id must be an integer or null'}), 400
+        owner_user = db.session.get(User, new_owner_user_id)
+        if not owner_user:
+            return jsonify({'error': 'Owner admin user not found'}), 404
+        if (owner_user.role or '').strip().lower() != 'admin':
+            return jsonify({'error': 'Selected user is not an admin'}), 400
+        if not owner_user.is_active_user:
+            return jsonify({'error': 'Selected admin user is inactive'}), 409
+
+    notes = (str(payload.get('notes') or '').strip()[:1000] or None)
+    previous_owner_user_id = booking.incident_owner_admin_user_id
+    if previous_owner_user_id == new_owner_user_id:
+        queue_item = _get_dispatch_incident_context(booking)
+        return jsonify(
+            {
+                'updated': False,
+                'message': 'No owner change',
+                'request': _serialize_waste_request_snapshot(booking),
+                'incident': queue_item.get('incident'),
+                'incident_flags': queue_item.get('incident_flags'),
+                'previous_owner_admin_user_id': previous_owner_user_id,
+                'owner_admin_user_id': booking.incident_owner_admin_user_id,
+            }
+        )
+
+    now = datetime.utcnow()
+    booking.incident_owner_admin_user_id = new_owner_user_id
+    booking.incident_updated_at = now
+    if notes:
+        existing = (booking.incident_notes or '').strip()
+        prefix = '[{} OWNER] '.format(now.isoformat())
+        booking.incident_notes = (existing + '\n' if existing else '') + prefix + notes
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Failed to update incident owner for request %s.', request_id)
+        return jsonify({'error': 'Failed to update incident owner'}), 500
+
+    metadata = {
+        'action': 'owner_reassign',
+        'previous_owner_admin_user_id': previous_owner_user_id,
+        'owner_admin_user_id': booking.incident_owner_admin_user_id,
+        'admin_user_id': _current_jwt_user_id(),
+        'notes': notes,
+    }
+    _publish_waste_request_event(
+        booking.id,
+        'admin_dispatch_incident_owner_reassign',
+        payload=_serialize_waste_request_snapshot(booking),
+        metadata=metadata,
+    )
+    _notify_mobile_push_for_waste_event(
+        booking,
+        'admin_dispatch_incident_owner_reassign',
+        metadata=metadata,
+    )
+    refreshed_item = _get_dispatch_incident_context(booking)
+    return jsonify(
+        {
+            'updated': True,
+            'request': _serialize_waste_request_snapshot(booking),
+            'incident': refreshed_item.get('incident'),
+            'incident_flags': refreshed_item.get('incident_flags'),
+            'previous_owner_admin_user_id': previous_owner_user_id,
+            'owner_admin_user_id': booking.incident_owner_admin_user_id,
+        }
+    )
+
+
 @app.route('/api/v1/admin/dispatch/telemetry', methods=['GET'])
 @jwt_required(roles={'admin'})
 def api_admin_dispatch_telemetry():
@@ -6670,6 +7207,7 @@ def api_admin_dispatch_telemetry():
     incident_severity_counts = {}
     ack_latency_values = []
     resolve_latency_values = []
+    escalation_dirty = False
     for booking in rows:
         status_key = (booking.status or '').strip().lower() or 'unknown'
         status_counts[status_key] = status_counts.get(status_key, 0) + 1
@@ -6703,7 +7241,15 @@ def api_admin_dispatch_telemetry():
             resolve_latency_values.append(
                 max(0, int((booking.incident_resolved_at - booking.created_at).total_seconds() // 60))
             )
+        if _dispatch_send_escalation_webhook(booking, queue_item, now=now, source='api_admin_dispatch_telemetry'):
+            escalation_dirty = True
         items.append(queue_item)
+    if escalation_dirty:
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            app.logger.exception('Failed to persist dispatch telemetry escalation markers.')
 
     if incidents_only:
         items = [item for item in items if item.get('incident_flags')]

@@ -319,6 +319,20 @@
                   <input class="form-control" type="text" name="notes" maxlength="255" placeholder="Resolve notes (optional)">
                   <button type="submit" class="btn btn-default btn-sm">Resolve</button>
                 </form>
+                <form class="dispatch-form" method="post" action="/admin/dispatch/incident-owner">
+                  <input type="hidden" name="request_id" value="{{ item.request.id }}">
+                  <input type="hidden" name="return_query" value="{{ filter_query_string }}">
+                  <select class="form-control" name="owner_admin_user_id">
+                    <option value="">No owner</option>
+                    {% for admin in admins %}
+                      <option value="{{ admin.id }}" {% if item.request.incident_owner_admin_user_id == admin.id %}selected{% endif %}>
+                        {{ admin.name or admin.email }} (#{{ admin.id }})
+                      </option>
+                    {% endfor %}
+                  </select>
+                  <input class="form-control" type="text" name="notes" maxlength="255" placeholder="Owner notes (optional)">
+                  <button type="submit" class="btn btn-info btn-sm">Set Owner</button>
+                </form>
               </td>
             </tr>
           {% endfor %}
