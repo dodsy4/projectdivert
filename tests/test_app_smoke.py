@@ -153,6 +153,88 @@ def test_provider_dispatch_parses_numeric_flags(app_context, monkeypatch):
     assert best['provider_name'] == 'Provider Rebate'
 
 
+def test_provider_dispatch_uses_stable_name_tiebreaker(app_context, monkeypatch):
+    monkeypatch.setattr(
+        app_context,
+        'suppliers',
+        pd.DataFrame(
+            [
+                {
+                    'name': 'Provider Zulu',
+                    'sup_type': 'Waste Carrier',
+                    'city': 'London',
+                    'postcode': 'E11AA',
+                    'lat': 51.5072,
+                    'long': -0.1276,
+                    'percent_recyclablenum': 80,
+                    'percent_efwnum': 10,
+                    'supplier_auditislist_yes_no_na': 'yes',
+                    'provides_a_rebateyn': '1',
+                },
+                {
+                    'name': 'Provider Alpha',
+                    'sup_type': 'Waste Carrier',
+                    'city': 'London',
+                    'postcode': 'E11AA',
+                    'lat': 51.5072,
+                    'long': -0.1276,
+                    'percent_recyclablenum': 80,
+                    'percent_efwnum': 10,
+                    'supplier_auditislist_yes_no_na': 'yes',
+                    'provides_a_rebateyn': '1',
+                },
+            ]
+        ),
+    )
+
+    candidates = app_context._select_provider_candidates_within_radius(51.5072, -0.1276, 25)
+
+    assert len(candidates) == 2
+    assert candidates[0]['provider_name'] == 'Provider Alpha'
+    assert candidates[1]['provider_name'] == 'Provider Zulu'
+
+
+def test_provider_dispatch_exposes_quality_score_and_prefers_higher_score(app_context, monkeypatch):
+    monkeypatch.setattr(
+        app_context,
+        'suppliers',
+        pd.DataFrame(
+            [
+                {
+                    'name': 'Provider Mid Quality',
+                    'sup_type': 'Waste Carrier',
+                    'city': 'London',
+                    'postcode': 'E11AA',
+                    'lat': 51.5072,
+                    'long': -0.1276,
+                    'percent_recyclablenum': 60,
+                    'percent_efwnum': 30,
+                    'supplier_auditislist_yes_no_na': 'no',
+                    'provides_a_rebateyn': '0',
+                },
+                {
+                    'name': 'Provider High Quality',
+                    'sup_type': 'Waste Carrier',
+                    'city': 'London',
+                    'postcode': 'E11AA',
+                    'lat': 51.5072,
+                    'long': -0.1276,
+                    'percent_recyclablenum': 90,
+                    'percent_efwnum': 5,
+                    'supplier_auditislist_yes_no_na': 'yes',
+                    'provides_a_rebateyn': '1',
+                },
+            ]
+        ),
+    )
+
+    candidates = app_context._select_provider_candidates_within_radius(51.5072, -0.1276, 25)
+
+    assert len(candidates) == 2
+    assert candidates[0]['provider_name'] == 'Provider High Quality'
+    assert candidates[0]['dispatch_quality_score'] > candidates[1]['dispatch_quality_score']
+
+
 def test_reference_data_can_be_loaded_from_supplier_reference_table(app_context):
     with app_context.app.app_context():
         app_context.db.session.query(app_context.SupplierReference).delete()
@@ -745,6 +827,17 @@ def test_api_dispatch_first_accept_wins(client, app_context, monkeypatch):
         headers=driver_two_headers,
     )
     assert unauthorized_status.status_code == 403
+
+    unauthorized_location = client.post(
+        f'/api/v1/waste-requests/{request_id}/location',
+        json={
+            'latitude': 51.509,
+            'longitude': -0.128,
+            'vehicle_id': 'van-2',
+        },
+        headers=driver_two_headers,
+    )
+    assert unauthorized_location.status_code == 403
 
 
 def test_api_customer_cannot_update_status(client, app_context, monkeypatch):

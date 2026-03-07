@@ -2270,14 +2270,26 @@ def _request_access_allowed(booking):
     if role == 'admin':
         return True
     if role == 'driver':
-        current_user_id = _current_jwt_user_id()
-        return bool(
-            current_user_id
-            and booking.assigned_driver_user_id
-            and booking.assigned_driver_user_id == current_user_id
-        )
+        return _request_assigned_driver_matches_current_user(booking)
     if role == 'customer':
         return (booking.requester_email or '').strip().lower() == _current_jwt_email()
+    return False
+
+
+def _request_assigned_driver_matches_current_user(booking):
+    if not booking:
+        return False
+    assigned_driver_user_id = _to_int_or_none(getattr(booking, 'assigned_driver_user_id', None))
+    current_user_id = _to_int_or_none(_current_jwt_user_id())
+    return bool(assigned_driver_user_id and current_user_id and assigned_driver_user_id == current_user_id)
+
+
+def _request_driver_mutation_allowed(booking):
+    role = _current_jwt_role()
+    if role == 'admin':
+        return True
+    if role == 'driver':
+        return _request_assigned_driver_matches_current_user(booking)
     return False
 
 
@@ -2927,19 +2939,45 @@ def _to_percent_or_none(value):
     return max(0.0, min(100.0, parsed))
 
 
-def _dispatch_sort_key(candidate):
-    # Distance is primary. If equal, prefer higher recycling, lower EfW, audited suppliers, then rebates.
+def _dispatch_quality_score(candidate):
+    """Compute a deterministic quality score for provider ranking tie-breaks."""
     recyclable = candidate.get('percent_recyclable')
     efw = candidate.get('percent_efw')
     audited = candidate.get('is_audited')
     rebate = candidate.get('provides_rebate')
+
+    score = 0.0
+    if recyclable is not None:
+        score += recyclable
+    if efw is not None:
+        score += (100.0 - efw) * 0.65
+    if audited is True:
+        score += 10.0
+    if rebate is True:
+        score += 5.0
+    return round(score, 4)
+
+
+def _dispatch_sort_key(candidate):
+    # Distance is primary. If equal, prefer higher quality score, then explicit deterministic fields.
+    recyclable = candidate.get('percent_recyclable')
+    efw = candidate.get('percent_efw')
+    audited = candidate.get('is_audited')
+    rebate = candidate.get('provides_rebate')
+    quality_score = candidate.get('dispatch_quality_score')
+    if quality_score is None:
+        quality_score = _dispatch_quality_score(candidate)
     return (
-        candidate.get('distance_miles_raw', candidate['distance_miles']),
+        round(candidate.get('distance_miles_raw', candidate['distance_miles']), 6),
+        -quality_score,
         -(recyclable if recyclable is not None else -1.0),
         efw if efw is not None else 101.0,
         0 if audited is True else 1,
         0 if rebate is True else 1,
-        candidate['provider_name'].lower(),
+        candidate['provider_name'].strip().lower(),
+        str(candidate.get('provider_postcode') or '').strip().lower(),
+        round(candidate.get('provider_latitude') or 0.0, 6),
+        round(candidate.get('provider_longitude') or 0.0, 6),
     )
 
 
@@ -3092,28 +3130,28 @@ def _select_provider_candidates_within_radius(
         if distance_miles <= radius_miles:
             percent_recyclable = _to_percent_or_none(row.get('percent_recyclablenum'))
             percent_efw = _to_percent_or_none(row.get('percent_efwnum'))
-            candidates.append(
-                {
-                    'provider_name': provider_name[:255],
-                    'provider_type': str(row.get('sup_type') or '').strip()[:120] or None,
-                    'provider_city': str(row.get('city') or '').strip()[:120] or None,
-                    'provider_postcode': str(row.get('postcode') or '').strip()[:32] or None,
-                    'provider_latitude': provider_latitude,
-                    'provider_longitude': provider_longitude,
-                    'provider_email': (
-                        str(row.get('supplier_contact_email') or row.get('email') or '').strip()[:255] or None
-                    ),
-                    'provider_phone': (
-                        str(row.get('supplier_contact_telephone') or row.get('telephone') or '').strip()[:120] or None
-                    ),
-                    'distance_miles_raw': distance_miles,
-                    'distance_miles': round(distance_miles, 2),
-                    'percent_recyclable': percent_recyclable,
-                    'percent_efw': percent_efw,
-                    'is_audited': _parse_yes_no_flag(row.get('supplier_auditislist_yes_no_na')),
-                    'provides_rebate': _parse_yes_no_flag(row.get('provides_a_rebateyn')),
-                }
-            )
+            candidate = {
+                'provider_name': provider_name[:255],
+                'provider_type': str(row.get('sup_type') or '').strip()[:120] or None,
+                'provider_city': str(row.get('city') or '').strip()[:120] or None,
+                'provider_postcode': str(row.get('postcode') or '').strip()[:32] or None,
+                'provider_latitude': provider_latitude,
+                'provider_longitude': provider_longitude,
+                'provider_email': (
+                    str(row.get('supplier_contact_email') or row.get('email') or '').strip()[:255] or None
+                ),
+                'provider_phone': (
+                    str(row.get('supplier_contact_telephone') or row.get('telephone') or '').strip()[:120] or None
+                ),
+                'distance_miles_raw': distance_miles,
+                'distance_miles': round(distance_miles, 2),
+                'percent_recyclable': percent_recyclable,
+                'percent_efw': percent_efw,
+                'is_audited': _parse_yes_no_flag(row.get('supplier_auditislist_yes_no_na')),
+                'provides_rebate': _parse_yes_no_flag(row.get('provides_a_rebateyn')),
+            }
+            candidate['dispatch_quality_score'] = _dispatch_quality_score(candidate)
+            candidates.append(candidate)
 
     if not candidates:
         return []
@@ -9739,7 +9777,7 @@ def api_update_waste_request_status(request_id):
     booking = db.session.get(WasteRemovalRequest, request_id)
     if not booking:
         return jsonify({'error': 'Waste request not found'}), 404
-    if not _request_access_allowed(booking):
+    if not _request_driver_mutation_allowed(booking):
         return jsonify({'error': 'Forbidden'}), 403
 
     payload = request.get_json(silent=True) or {}
@@ -9793,7 +9831,7 @@ def api_create_vehicle_location(request_id):
     booking = db.session.get(WasteRemovalRequest, request_id)
     if not booking:
         return jsonify({'error': 'Waste request not found'}), 404
-    if not _request_access_allowed(booking):
+    if not _request_driver_mutation_allowed(booking):
         return jsonify({'error': 'Forbidden'}), 403
 
     payload = request.get_json(silent=True) or {}
