@@ -83,6 +83,113 @@ export type CreateLocationPayload = {
   source?: string;
 };
 
+export type ComplianceDocumentType =
+  | 'carrier_license'
+  | 'insurance_certificate'
+  | 'waste_transfer_note'
+  | 'proof_of_collection_photo';
+
+export type ComplianceDocumentStatus = 'submitted' | 'verified' | 'rejected' | 'expired';
+
+export type ComplianceDocument = {
+  id: number;
+  waste_removal_request_id: number;
+  uploaded_by_user_id?: number | null;
+  verified_by_user_id?: number | null;
+  document_type: ComplianceDocumentType | string;
+  status: ComplianceDocumentStatus | string;
+  file_url: string;
+  document_reference?: string | null;
+  issued_at?: string | null;
+  expires_at?: string | null;
+  verified_at?: string | null;
+  notes?: string | null;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ComplianceSummaryEntry = {
+  present: boolean;
+  count: number;
+  latest_status?: string | null;
+  latest_document_id?: number | null;
+  latest_expires_at?: string | null;
+  verified: boolean;
+  expired?: boolean;
+};
+
+export type ComplianceSummary = {
+  required_document_types: string[];
+  completion_required_document_types?: string[];
+  is_ready: boolean;
+  can_complete_request?: boolean;
+  by_type: Record<string, ComplianceSummaryEntry>;
+  total_documents: number;
+};
+
+export type RequestComplianceDetails = {
+  request_id: number;
+  request_status: string;
+  documents: ComplianceDocument[];
+  summary: ComplianceSummary;
+};
+
+export type CreateComplianceDocumentPayload = {
+  document_type: ComplianceDocumentType | string;
+  file_url: string;
+  document_reference?: string;
+  notes?: string;
+  issued_at?: string;
+  expires_at?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type ReviewComplianceDocumentPayload = {
+  status: 'verified' | 'rejected' | 'expired';
+  notes?: string;
+  expires_at?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type UploadComplianceFilePayload = {
+  document_type: ComplianceDocumentType | string;
+  uri: string;
+  file_name?: string;
+  mime_type?: string;
+};
+
+export type UploadComplianceFileResponse = {
+  request_id: number;
+  document_type: string;
+  upload: {
+    backend?: string;
+    file_url: string;
+    storage_key?: string | null;
+    static_path?: string | null;
+    original_filename: string;
+    content_type?: string | null;
+    size_bytes: number;
+  };
+};
+
+export type CreateSignedComplianceUploadPayload = {
+  document_type: ComplianceDocumentType | string;
+  file_name: string;
+  mime_type: string;
+};
+
+export type SignedComplianceUploadResponse = {
+  request_id: number;
+  document_type: string;
+  backend: string;
+  method: 'PUT' | string;
+  upload_url: string;
+  headers: Record<string, string>;
+  expires_in_seconds: number;
+  upload: UploadComplianceFileResponse['upload'];
+};
+
 export type WasteRequest = {
   id: number;
   requester_name: string;
@@ -132,6 +239,10 @@ export type WasteRequestDetails = {
   match: WasteMatch | null;
   latest_location: VehicleLocation | null;
   dispatch?: DispatchSummary;
+  compliance?: {
+    documents: ComplianceDocument[];
+    summary: ComplianceSummary;
+  };
 };
 
 export type WasteRequestRealtimeEventName =
@@ -143,6 +254,8 @@ export type WasteRequestRealtimeEventName =
   | 'payment_succeeded'
   | 'refund_processed'
   | 'payout_processed'
+  | 'compliance_document_created'
+  | 'compliance_document_reviewed'
   | 'admin_dispatch_override'
   | 'admin_dispatch_incident_ack'
   | 'admin_dispatch_incident_resolve'
@@ -220,6 +333,39 @@ export type AcceptDispatchOfferResponse = {
   match: WasteMatch;
   accepted_offer: DispatchOffer;
   dispatch: DispatchSummary;
+};
+
+export type ComplianceDocumentMutationResponse = {
+  request_id: number;
+  document: ComplianceDocument;
+  summary: ComplianceSummary;
+  previous_status?: string;
+  updated?: boolean;
+};
+
+export type AdminComplianceReviewQueueItem = {
+  document: ComplianceDocument;
+  request: WasteRequest | null;
+  summary: ComplianceSummary | null;
+};
+
+export type AdminComplianceReviewQueueResponse = {
+  items: AdminComplianceReviewQueueItem[];
+  pagination: {
+    limit: number;
+    offset: number;
+    returned: number;
+    total: number;
+    has_more: boolean;
+  };
+  filters: {
+    status: string;
+    document_type: string;
+  };
+  summary: {
+    status_counts: Record<string, number>;
+    document_type_counts: Record<string, number>;
+  };
 };
 
 export type UpsertPushSubscriptionPayload = {
@@ -373,6 +519,59 @@ async function requestJson<T>(
     }
     const parsed = body as { error?: string };
     const message = typeof parsed?.error === 'string' ? parsed.error : `Request failed (${response.status})`;
+    throw new ApiError(message, response.status, body);
+  }
+
+  return body as T;
+}
+
+async function requestMultipartJson<T>(
+  path: string,
+  formData: FormData,
+  options: RequestJsonOptions = {},
+): Promise<T | null> {
+  const { token, allow404 = false, retryOnAuthFailure = true } = options;
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  const text = await response.text();
+  let body: unknown = {};
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = { raw: text };
+    }
+  }
+
+  if (!response.ok) {
+    if (allow404 && response.status === 404) {
+      return null;
+    }
+    if (response.status === 401 && token && retryOnAuthFailure) {
+      const refreshed = await runRefreshFlow();
+      if (refreshed?.access_token) {
+        return requestMultipartJson<T>(path, formData, {
+          token: refreshed.access_token,
+          allow404,
+          retryOnAuthFailure: false,
+        });
+      }
+    }
+    const parsed = body as { error?: string };
+    const message =
+      typeof parsed?.error === 'string' ? parsed.error : `Request failed (${response.status})`;
     throw new ApiError(message, response.status, body);
   }
 
@@ -547,6 +746,14 @@ export const apiClient = {
     return requestJson<WasteRequestDetails>(`/api/v1/waste-requests/${requestId}`, { method: 'GET' }, { token }) as Promise<WasteRequestDetails>;
   },
 
+  getWasteRequestCompliance(requestId: number, token: string) {
+    return requestJson<RequestComplianceDetails>(
+      `/api/v1/waste-requests/${requestId}/compliance`,
+      { method: 'GET' },
+      { token },
+    ) as Promise<RequestComplianceDetails>;
+  },
+
   getLatestLocation(requestId: number, token: string) {
     return requestJson<{ request_id: number; request_status: string; latest_location: VehicleLocation }>(
       `/api/v1/waste-requests/${requestId}/location/latest`,
@@ -589,6 +796,96 @@ export const apiClient = {
       },
       { token },
     ) as Promise<AcceptDispatchOfferResponse>;
+  },
+
+  createComplianceDocument(
+    requestId: number,
+    payload: CreateComplianceDocumentPayload,
+    token: string,
+  ) {
+    return requestJson<ComplianceDocumentMutationResponse>(
+      `/api/v1/waste-requests/${requestId}/compliance/documents`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      { token },
+    ) as Promise<ComplianceDocumentMutationResponse>;
+  },
+
+  uploadComplianceFile(
+    requestId: number,
+    payload: UploadComplianceFilePayload,
+    token: string,
+  ) {
+    const formData = new FormData();
+    formData.append('document_type', String(payload.document_type));
+    formData.append(
+      'file',
+      {
+        uri: payload.uri,
+        name: payload.file_name || 'compliance-upload',
+        type: payload.mime_type || 'application/octet-stream',
+      } as unknown as Blob,
+    );
+    return requestMultipartJson<UploadComplianceFileResponse>(
+      `/api/v1/waste-requests/${requestId}/compliance/uploads`,
+      formData,
+      { token },
+    ) as Promise<UploadComplianceFileResponse>;
+  },
+
+  createSignedComplianceUpload(
+    requestId: number,
+    payload: CreateSignedComplianceUploadPayload,
+    token: string,
+  ) {
+    return requestJson<SignedComplianceUploadResponse>(
+      `/api/v1/waste-requests/${requestId}/compliance/uploads/sign`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      { token },
+    ) as Promise<SignedComplianceUploadResponse>;
+  },
+
+  reviewComplianceDocument(
+    requestId: number,
+    documentId: number,
+    payload: ReviewComplianceDocumentPayload,
+    token: string,
+  ) {
+    return requestJson<ComplianceDocumentMutationResponse>(
+      `/api/v1/admin/waste-requests/${requestId}/compliance/documents/${documentId}/verify`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      { token },
+    ) as Promise<ComplianceDocumentMutationResponse>;
+  },
+
+  getAdminComplianceReviewQueue(
+    token: string,
+    params: { status?: string; documentType?: string; limit?: number } = {},
+  ) {
+    const search = new URLSearchParams();
+    if (params.status) {
+      search.set('status', params.status);
+    }
+    if (params.documentType) {
+      search.set('document_type', params.documentType);
+    }
+    if (params.limit) {
+      search.set('limit', String(params.limit));
+    }
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    return requestJson<AdminComplianceReviewQueueResponse>(
+      `/api/v1/admin/compliance/review-queue${suffix}`,
+      { method: 'GET' },
+      { token },
+    ) as Promise<AdminComplianceReviewQueueResponse>;
   },
 
   upsertPushSubscription(payload: UpsertPushSubscriptionPayload, token: string) {

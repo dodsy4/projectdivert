@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { apiClient } from './src/api/client';
+import { AdminComplianceReviewCard } from './src/components/AdminComplianceReviewCard';
 import { Field } from './src/components/Field';
 import { ScreenTabs } from './src/components/ScreenTabs';
 import {
@@ -58,6 +59,8 @@ export default function App() {
     setDriverOffer,
     driverJob,
     setDriverJob,
+    complianceUpload,
+    setComplianceUpload,
     created,
     customerScreen,
     onSelectCustomerScreen,
@@ -71,11 +74,13 @@ export default function App() {
     isFallbackPolling,
     syncState,
     isBootstrappingSession,
+    isComplianceQueueLoading,
     info,
     error,
     hasTrackedCustomerRequest,
     customerRelevantRequestDetails,
     driverRelevantRequestDetails,
+    adminComplianceReviewQueue,
     currentRole,
     onLogin,
     onSignup,
@@ -90,6 +95,9 @@ export default function App() {
     onLoadDriverJob,
     onUpdateDriverStatus,
     onPushLocation,
+    onUploadComplianceDocument,
+    onLoadComplianceReviewQueue,
+    onReviewComplianceDocument,
   } = useWasteMobileController();
 
   if (isBootstrappingSession) {
@@ -273,33 +281,41 @@ export default function App() {
             </View>
 
             {currentRole === 'admin' ? (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Admin View Mode</Text>
-                <View style={styles.modeSwitchRow}>
-                  {adminModes.map((mode) => {
-                    const selected = adminViewMode === mode;
-                    return (
-                      <Pressable
-                        key={mode}
-                        onPress={() => setAdminViewMode(mode)}
-                        style={[
-                          styles.modeButton,
-                          selected ? styles.modeButtonSelected : undefined,
-                        ]}
-                      >
-                        <Text
+              <>
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>Admin View Mode</Text>
+                  <View style={styles.modeSwitchRow}>
+                    {adminModes.map((mode) => {
+                      const selected = adminViewMode === mode;
+                      return (
+                        <Pressable
+                          key={mode}
+                          onPress={() => setAdminViewMode(mode)}
                           style={[
-                            styles.modeButtonText,
-                            selected ? styles.modeButtonTextSelected : undefined,
+                            styles.modeButton,
+                            selected ? styles.modeButtonSelected : undefined,
                           ]}
                         >
-                          {mode}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
+                          <Text
+                            style={[
+                              styles.modeButtonText,
+                              selected ? styles.modeButtonTextSelected : undefined,
+                            ]}
+                          >
+                            {mode}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
                 </View>
-              </View>
+                <AdminComplianceReviewCard
+                  queue={adminComplianceReviewQueue}
+                  isLoading={isComplianceQueueLoading}
+                  onRefresh={onLoadComplianceReviewQueue}
+                  onReview={onReviewComplianceDocument}
+                />
+              </>
             ) : null}
 
             {(currentRole === 'customer' ||
@@ -358,6 +374,9 @@ export default function App() {
                     onLoadDriverJob={onLoadDriverJob}
                     onUpdateDriverStatus={onUpdateDriverStatus}
                     onPushLocation={onPushLocation}
+                    complianceUpload={complianceUpload}
+                    setComplianceUpload={setComplianceUpload}
+                    onUploadComplianceDocument={onUploadComplianceDocument}
                     statuses={driverProgressionStatuses}
                     relevantRequestDetails={driverRelevantRequestDetails}
                   />

@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { WasteRequestDetails } from '../api/client';
+import { ComplianceStatusPanel } from './ComplianceStatusPanel';
 
 type RequestDetailsPanelProps = {
   details: WasteRequestDetails;
@@ -33,6 +34,7 @@ export function RequestDetailsPanel({ details }: RequestDetailsPanelProps) {
       ) : (
         <Text>Latest location: none yet</Text>
       )}
+      <ComplianceStatusPanel summary={details.compliance?.summary} />
     </View>
   );
 }

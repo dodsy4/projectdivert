@@ -264,6 +264,58 @@ if "status" not in payload or "metrics" not in payload:
 print("Ops health status:", payload.get("status"))
 PY
 
+log "Compliance smoke (create + verify + list)"
+COMP_CREATE_BODY="$TMP_DIR/compliance_create.json"
+COMP_CREATE_STATUS="$TMP_DIR/compliance_create.status"
+http_json POST "/api/v1/waste-requests/$REQUEST_ID/compliance/documents" \
+  "{\"document_type\":\"waste_transfer_note\",\"file_url\":\"https://example.com/compliance/wtn-$REQUEST_ID.pdf\",\"document_reference\":\"WTN-$REQUEST_ID\",\"metadata\":{\"source\":\"full_staging_smoke\"}}" \
+  "$ADMIN_TOKEN" "$COMP_CREATE_BODY" "$COMP_CREATE_STATUS"
+assert_status "$(cat "$COMP_CREATE_STATUS")" "201" "Compliance document create" "$COMP_CREATE_BODY"
+COMP_DOC_ID="$(python -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["document"]["id"])' "$COMP_CREATE_BODY")"
+[[ -n "$COMP_DOC_ID" ]] || fail "Missing compliance document id"
+
+COMP_QUEUE_BODY="$TMP_DIR/compliance_queue.json"
+COMP_QUEUE_STATUS="$TMP_DIR/compliance_queue.status"
+http_json GET "/api/v1/admin/compliance/review-queue?status=submitted&limit=50" "" "$ADMIN_TOKEN" "$COMP_QUEUE_BODY" "$COMP_QUEUE_STATUS"
+assert_status "$(cat "$COMP_QUEUE_STATUS")" "200" "Compliance review queue" "$COMP_QUEUE_BODY"
+python - <<PY "$COMP_QUEUE_BODY" "$COMP_DOC_ID"
+import json,sys
+payload=json.load(open(sys.argv[1]))
+doc_id=int(sys.argv[2])
+ids=[item.get("document", {}).get("id") for item in payload.get("items", [])]
+if doc_id not in ids:
+    print("Compliance document missing from review queue")
+    sys.exit(1)
+print("Compliance review queue includes submitted document")
+PY
+
+COMP_VERIFY_BODY="$TMP_DIR/compliance_verify.json"
+COMP_VERIFY_STATUS="$TMP_DIR/compliance_verify.status"
+http_json POST "/api/v1/admin/waste-requests/$REQUEST_ID/compliance/documents/$COMP_DOC_ID/verify" \
+  "{\"status\":\"verified\",\"notes\":\"full staging smoke verification\"}" \
+  "$ADMIN_TOKEN" "$COMP_VERIFY_BODY" "$COMP_VERIFY_STATUS"
+assert_status "$(cat "$COMP_VERIFY_STATUS")" "200" "Compliance document verify" "$COMP_VERIFY_BODY"
+
+COMP_LIST_BODY="$TMP_DIR/compliance_list.json"
+COMP_LIST_STATUS="$TMP_DIR/compliance_list.status"
+http_json GET "/api/v1/waste-requests/$REQUEST_ID/compliance" "" "$ADMIN_TOKEN" "$COMP_LIST_BODY" "$COMP_LIST_STATUS"
+assert_status "$(cat "$COMP_LIST_STATUS")" "200" "Compliance list endpoint" "$COMP_LIST_BODY"
+python - <<PY "$COMP_LIST_BODY" "$COMP_DOC_ID"
+import json,sys
+payload=json.load(open(sys.argv[1]))
+doc_id=int(sys.argv[2])
+items=payload.get("documents", [])
+ids=[item.get("id") for item in items]
+if doc_id not in ids:
+    print("Compliance document id missing from list")
+    sys.exit(1)
+status_by_id={item.get("id"): item.get("status") for item in items}
+if status_by_id.get(doc_id) != "verified":
+    print("Compliance document status not verified")
+    sys.exit(1)
+print("Compliance list includes verified document")
+PY
+
 log "Payments readiness smoke"
 PAY_BODY="$TMP_DIR/payments_get.json"
 PAY_STATUS="$TMP_DIR/payments_get.status"

@@ -1,4 +1,4 @@
-import type { UpdateStatusPayload } from '../../api/client';
+import type { ComplianceDocumentType, UpdateStatusPayload } from '../../api/client';
 
 export type RequestFormState = {
   requesterName: string;
@@ -26,6 +26,14 @@ export type DriverJobState = {
   vehicleId: string;
   latitude: string;
   longitude: string;
+};
+
+export type ComplianceUploadState = {
+  documentType: ComplianceDocumentType;
+  fileUrl: string;
+  fileName: string;
+  mimeType: string;
+  documentReference: string;
 };
 
 export type CustomerScreen = 'new-request' | 'request-status';
@@ -65,6 +73,19 @@ export const defaultDriverJobState: DriverJobState = {
   vehicleId: 'van-42',
   latitude: '',
   longitude: '',
+};
+
+export const complianceUploadTypes: ComplianceDocumentType[] = [
+  'waste_transfer_note',
+  'proof_of_collection_photo',
+];
+
+export const defaultComplianceUploadState: ComplianceUploadState = {
+  documentType: 'waste_transfer_note',
+  fileUrl: '',
+  fileName: '',
+  mimeType: '',
+  documentReference: '',
 };
 
 export function defaultFormState(): RequestFormState {

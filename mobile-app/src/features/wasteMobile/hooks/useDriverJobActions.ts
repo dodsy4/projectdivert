@@ -1,11 +1,18 @@
 import { useCallback } from 'react';
 import type {
   AuthResponse,
+  CreateComplianceDocumentPayload,
   UpdateStatusPayload,
   WasteRequestDetails,
 } from '../../../api/client';
-import { apiClient } from '../../../api/client';
-import type { DriverJobState, DriverOfferState, DriverScreen } from '../types';
+import { apiClient, ApiError } from '../../../api/client';
+import {
+  defaultComplianceUploadState,
+  type ComplianceUploadState,
+  type DriverJobState,
+  type DriverOfferState,
+  type DriverScreen,
+} from '../types';
 import { normalizeError, parsePositiveInt } from './utils';
 
 type UseDriverJobActionsParams = {
@@ -15,6 +22,8 @@ type UseDriverJobActionsParams = {
   fetchRequestSnapshot: (requestId: number, token: string) => Promise<WasteRequestDetails>;
   setRequestDetails: React.Dispatch<React.SetStateAction<WasteRequestDetails | null>>;
   setCustomerRequestId: React.Dispatch<React.SetStateAction<string>>;
+  complianceUpload: ComplianceUploadState;
+  setComplianceUpload: React.Dispatch<React.SetStateAction<ComplianceUploadState>>;
   setDriverJob: React.Dispatch<React.SetStateAction<DriverJobState>>;
   setDriverScreen: React.Dispatch<React.SetStateAction<DriverScreen>>;
   setError: React.Dispatch<React.SetStateAction<string | null>>;
@@ -30,12 +39,46 @@ export function useDriverJobActions(params: UseDriverJobActionsParams) {
     fetchRequestSnapshot,
     setRequestDetails,
     setCustomerRequestId,
+    complianceUpload,
+    setComplianceUpload,
     setDriverJob,
     setDriverScreen,
     setError,
     setInfo,
     setIsLoading,
   } = params;
+
+  const uploadViaSignedUrl = useCallback(
+    async (requestId: number, uri: string, fileName: string, mimeType: string) => {
+      const signed = await apiClient.createSignedComplianceUpload(
+        requestId,
+        {
+          document_type: complianceUpload.documentType,
+          file_name: fileName,
+          mime_type: mimeType,
+        },
+        auth!.access_token,
+      );
+
+      const localResponse = await fetch(uri);
+      if (!localResponse.ok) {
+        throw new Error(`Failed to read local file (${localResponse.status}).`);
+      }
+      const fileBlob = await localResponse.blob();
+      const uploadResponse = await fetch(signed.upload_url, {
+        method: signed.method || 'PUT',
+        headers: signed.headers,
+        body: fileBlob,
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error(`Signed upload failed (${uploadResponse.status}).`);
+      }
+
+      return signed.upload.file_url;
+    },
+    [auth, complianceUpload.documentType],
+  );
 
   const onAcceptDispatchOffer = useCallback(async () => {
     if (!auth) {
@@ -232,10 +275,107 @@ export function useDriverJobActions(params: UseDriverJobActionsParams) {
     setRequestDetails,
   ]);
 
+  const onUploadComplianceDocument = useCallback(async () => {
+    if (!auth) {
+      return;
+    }
+
+    const requestId = parsePositiveInt(driverJob.requestId);
+    let fileUrl = complianceUpload.fileUrl.trim();
+    const documentReference = complianceUpload.documentReference.trim();
+
+    if (!requestId) {
+      setError('Assigned request ID must be a positive integer.');
+      return;
+    }
+
+    if (!fileUrl) {
+      setError('Evidence file is required.');
+      return;
+    }
+
+    setError(null);
+    setInfo(null);
+    setIsLoading(true);
+
+    try {
+      if (!/^https?:\/\//i.test(fileUrl)) {
+        const fileName =
+          complianceUpload.fileName ||
+          `${complianceUpload.documentType}.${complianceUpload.mimeType.includes('pdf') ? 'pdf' : 'jpg'}`;
+        const mimeType = complianceUpload.mimeType || 'application/octet-stream';
+
+        try {
+          fileUrl = await uploadViaSignedUrl(requestId, fileUrl, fileName, mimeType);
+        } catch (err) {
+          const signedUploadUnavailable =
+            (err instanceof ApiError && err.status === 409) ||
+            (err instanceof Error && /Signed uploads require S3 storage backend/.test(err.message));
+          if (!signedUploadUnavailable) {
+            throw err;
+          }
+
+          const upload = await apiClient.uploadComplianceFile(
+            requestId,
+            {
+              document_type: complianceUpload.documentType,
+              uri: fileUrl,
+              file_name: fileName,
+              mime_type: mimeType,
+            },
+            auth.access_token,
+          );
+          fileUrl = upload.upload.file_url;
+        }
+      }
+
+      const payload: CreateComplianceDocumentPayload = {
+        document_type: complianceUpload.documentType,
+        file_url: fileUrl,
+        document_reference: documentReference || undefined,
+      };
+      const response = await apiClient.createComplianceDocument(requestId, payload, auth.access_token);
+      const snapshot = await fetchRequestSnapshot(requestId, auth.access_token);
+      setRequestDetails(snapshot);
+      setCustomerRequestId(String(requestId));
+      setComplianceUpload((prev) => ({
+        ...prev,
+        fileUrl: defaultComplianceUploadState.fileUrl,
+        fileName: defaultComplianceUploadState.fileName,
+        mimeType: defaultComplianceUploadState.mimeType,
+        documentReference: defaultComplianceUploadState.documentReference,
+      }));
+      setInfo(
+        `Uploaded ${response.document.document_type.replace(/_/g, ' ')} for request #${requestId}.`,
+      );
+    } catch (err) {
+      setError(normalizeError(err));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [
+    auth,
+    complianceUpload.documentReference,
+    complianceUpload.documentType,
+    complianceUpload.fileUrl,
+    complianceUpload.fileName,
+    complianceUpload.mimeType,
+    driverJob.requestId,
+    fetchRequestSnapshot,
+    setComplianceUpload,
+    setCustomerRequestId,
+    setError,
+    setInfo,
+    setIsLoading,
+    setRequestDetails,
+    uploadViaSignedUrl,
+  ]);
+
   return {
     onAcceptDispatchOffer,
     onLoadDriverJob,
     onUpdateDriverStatus,
     onPushLocation,
+    onUploadComplianceDocument,
   };
 }

@@ -24,6 +24,10 @@ try:
     import redis
 except Exception:  # pragma: no cover - optional dependency
     redis = None
+try:
+    import boto3
+except Exception:  # pragma: no cover - optional dependency
+    boto3 = None
 from flask import Flask, Response, g, jsonify, render_template, request, flash, redirect, stream_with_context, url_for
 from flask_moment import Moment
 from forms import *
@@ -413,6 +417,51 @@ class DispatchIncidentEvent(db.Model):
             self.waste_removal_request_id,
             self.event_type,
             self.actor_user_id,
+        )
+
+
+class WasteComplianceDocument(db.Model):
+    __tablename__ = 'waste_compliance_documents'
+
+    id = db.Column(db.Integer, primary_key=True)
+    waste_removal_request_id = db.Column(
+        db.Integer,
+        db.ForeignKey('waste_removal_requests.id'),
+        nullable=False,
+        index=True,
+    )
+    uploaded_by_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id'),
+        index=True,
+    )
+    verified_by_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id'),
+        index=True,
+    )
+    document_type = db.Column(db.String(64), nullable=False, index=True)
+    status = db.Column(db.String(32), nullable=False, default='submitted', index=True)
+    file_url = db.Column(db.String(500), nullable=False)
+    document_reference = db.Column(db.String(120))
+    issued_at = db.Column(db.DateTime)
+    expires_at = db.Column(db.DateTime, index=True)
+    verified_at = db.Column(db.DateTime, index=True)
+    notes = db.Column(db.Text)
+    metadata_json = db.Column(db.JSON, nullable=False, default=dict)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    def __repr__(self):
+        return '<WasteComplianceDocument request={} type={} status={}>'.format(
+            self.waste_removal_request_id,
+            self.document_type,
+            self.status,
         )
 
 
@@ -3482,6 +3531,151 @@ def _serialize_vehicle_location(location):
     }
 
 
+COMPLIANCE_DOCUMENT_TYPES = {
+    'carrier_license',
+    'insurance_certificate',
+    'waste_transfer_note',
+    'proof_of_collection_photo',
+}
+
+COMPLIANCE_DRIVER_UPLOAD_TYPES = {
+    'waste_transfer_note',
+    'proof_of_collection_photo',
+}
+
+COMPLIANCE_COMPLETION_REQUIRED_TYPES = {
+    'waste_transfer_note',
+    'proof_of_collection_photo',
+}
+
+COMPLIANCE_DOCUMENT_STATUSES = {
+    'submitted',
+    'verified',
+    'rejected',
+    'expired',
+}
+
+
+def _normalize_compliance_document_type(value):
+    normalized = str(value or '').strip().lower().replace('-', '_').replace(' ', '_')
+    aliases = {
+        'carrier_licence': 'carrier_license',
+        'carrier_license': 'carrier_license',
+        'insurance': 'insurance_certificate',
+        'insurance_certificate': 'insurance_certificate',
+        'wtn': 'waste_transfer_note',
+        'waste_transfer_note': 'waste_transfer_note',
+        'proof_photo': 'proof_of_collection_photo',
+        'proof_of_collection_photo': 'proof_of_collection_photo',
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _serialize_compliance_document(document):
+    if not document:
+        return None
+    return {
+        'id': document.id,
+        'waste_removal_request_id': document.waste_removal_request_id,
+        'uploaded_by_user_id': document.uploaded_by_user_id,
+        'verified_by_user_id': document.verified_by_user_id,
+        'document_type': document.document_type,
+        'status': document.status,
+        'file_url': document.file_url,
+        'document_reference': document.document_reference,
+        'issued_at': document.issued_at.isoformat() if document.issued_at else None,
+        'expires_at': document.expires_at.isoformat() if document.expires_at else None,
+        'verified_at': document.verified_at.isoformat() if document.verified_at else None,
+        'notes': document.notes,
+        'metadata': document.metadata_json or {},
+        'created_at': document.created_at.isoformat() if document.created_at else None,
+        'updated_at': document.updated_at.isoformat() if document.updated_at else None,
+    }
+
+
+def _compliance_document_is_effectively_verified(document, now=None):
+    if not document:
+        return False
+    now = now or datetime.utcnow()
+    status = str(document.status or '').strip().lower()
+    if status != 'verified':
+        return False
+    if document.expires_at and document.expires_at <= now:
+        return False
+    return True
+
+
+def _compliance_summary_for_documents(documents):
+    now = datetime.utcnow()
+    by_type = {}
+    for doc_type in sorted(COMPLIANCE_DOCUMENT_TYPES):
+        by_type[doc_type] = {
+            'present': False,
+            'count': 0,
+            'latest_status': None,
+            'latest_document_id': None,
+            'latest_expires_at': None,
+            'verified': False,
+            'expired': False,
+        }
+
+    for document in documents:
+        doc_type = _normalize_compliance_document_type(document.document_type)
+        bucket = by_type.setdefault(
+            doc_type,
+            {
+                'present': False,
+                'count': 0,
+                'latest_status': None,
+                'latest_document_id': None,
+                'latest_expires_at': None,
+                'verified': False,
+                'expired': False,
+            },
+        )
+        bucket['present'] = True
+        bucket['count'] += 1
+        if bucket['latest_document_id'] is None:
+            bucket['latest_document_id'] = document.id
+            bucket['latest_status'] = document.status
+            bucket['latest_expires_at'] = (
+                document.expires_at.isoformat() if document.expires_at else None
+            )
+            bucket['verified'] = _compliance_document_is_effectively_verified(document, now=now)
+            bucket['expired'] = bool(document.expires_at and document.expires_at <= now)
+
+    required_types = sorted(COMPLIANCE_DOCUMENT_TYPES)
+    completion_required_types = sorted(COMPLIANCE_COMPLETION_REQUIRED_TYPES)
+    is_ready = all(by_type[doc_type]['verified'] for doc_type in required_types)
+    can_complete_request = all(by_type[doc_type]['verified'] for doc_type in completion_required_types)
+    return {
+        'required_document_types': required_types,
+        'completion_required_document_types': completion_required_types,
+        'is_ready': is_ready,
+        'can_complete_request': can_complete_request,
+        'by_type': by_type,
+        'total_documents': len(documents),
+    }
+
+
+def _compliance_documents_for_request(request_id):
+    return (
+        WasteComplianceDocument.query.filter_by(waste_removal_request_id=request_id)
+        .order_by(WasteComplianceDocument.created_at.desc(), WasteComplianceDocument.id.desc())
+        .all()
+    )
+
+
+def _compliance_missing_required_document_types(summary, required_types):
+    summary = summary or {}
+    by_type = summary.get('by_type') or {}
+    missing = []
+    for doc_type in sorted(required_types):
+        if not (by_type.get(doc_type) or {}).get('verified'):
+            missing.append(doc_type)
+    return missing
+
+
 def _serialize_dispatch_driver(user):
     if not user:
         return None
@@ -3692,6 +3886,8 @@ def _serialize_dispatch_queue_item(booking, driver=None, latest_location=None, n
 
     incident_flags = _dispatch_incident_flags(booking, latest_location=latest_location, now=now)
     incident = _dispatch_incident_summary(booking, incident_flags, now=now)
+    compliance_documents = _compliance_documents_for_request(booking.id)
+    compliance_summary = _compliance_summary_for_documents(compliance_documents)
 
     return {
         'request': _serialize_waste_request(booking),
@@ -3701,6 +3897,7 @@ def _serialize_dispatch_queue_item(booking, driver=None, latest_location=None, n
         'pickup_due_minutes': pickup_due_minutes,
         'incident_flags': incident_flags,
         'incident': incident,
+        'compliance': compliance_summary,
     }
 
 
@@ -3824,12 +4021,17 @@ def _serialize_waste_request_snapshot(booking):
         .order_by(WasteRemovalVehicleLocation.recorded_at.desc(), WasteRemovalVehicleLocation.id.desc())
         .first()
     )
+    compliance_documents = _compliance_documents_for_request(booking.id)
     return {
         'request': _serialize_waste_request(booking),
         'match': _serialize_waste_match(match_row),
         'latest_location': _serialize_vehicle_location(latest_location),
         'dispatch': _dispatch_summary_for_request(booking.id),
         'financials': _financial_summary_for_request(booking.id),
+        'compliance': {
+            'documents': [_serialize_compliance_document(row) for row in compliance_documents],
+            'summary': _compliance_summary_for_documents(compliance_documents),
+        },
     }
 
 
@@ -4621,6 +4823,23 @@ app.jinja_env.filters['datetime'] = format_datetime
 
 ALLOWED_IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp'}
 MAX_MATERIAL_IMAGES = 10
+ALLOWED_COMPLIANCE_UPLOAD_EXTENSIONS = {
+    '.pdf',
+    '.png',
+    '.jpg',
+    '.jpeg',
+    '.webp',
+    '.heic',
+    '.heif',
+}
+COMPLIANCE_IMAGE_UPLOAD_EXTENSIONS = {
+    '.png',
+    '.jpg',
+    '.jpeg',
+    '.webp',
+    '.heic',
+    '.heif',
+}
 
 
 def normalize_image_filename(image_ref):
@@ -4661,6 +4880,252 @@ def _save_material_images(uploaded_files, limit=MAX_MATERIAL_IMAGES):
         if saved_name:
             saved.append(saved_name)
     return saved
+
+
+def _compliance_upload_root():
+    configured = app.config.get('COMPLIANCE_UPLOAD_DIR') or os.path.join(
+        'static',
+        'uploads',
+        'compliance',
+    )
+    if os.path.isabs(configured):
+        return configured
+    return os.path.join(app.root_path, configured)
+
+
+def _compliance_storage_backend():
+    backend = str(app.config.get('COMPLIANCE_STORAGE_BACKEND') or 'local').strip().lower()
+    return backend or 'local'
+
+
+def _compliance_s3_client():
+    if boto3 is None:
+        raise RuntimeError('boto3 dependency is not installed')
+
+    kwargs = {}
+    region = str(app.config.get('COMPLIANCE_S3_REGION') or '').strip()
+    endpoint_url = str(app.config.get('COMPLIANCE_S3_ENDPOINT_URL') or '').strip()
+    access_key_id = str(app.config.get('COMPLIANCE_S3_ACCESS_KEY_ID') or '').strip()
+    secret_access_key = str(app.config.get('COMPLIANCE_S3_SECRET_ACCESS_KEY') or '').strip()
+
+    if region:
+        kwargs['region_name'] = region
+    if endpoint_url:
+        kwargs['endpoint_url'] = endpoint_url
+    if access_key_id:
+        kwargs['aws_access_key_id'] = access_key_id
+    if secret_access_key:
+        kwargs['aws_secret_access_key'] = secret_access_key
+
+    return boto3.client('s3', **kwargs)
+
+
+def _coerce_compliance_upload_extension(original_name, mimetype):
+    original_name = secure_filename(original_name or '')
+    _stem, ext = os.path.splitext(original_name)
+    ext = ext.lower()
+    if ext:
+        return ext
+
+    mimetype = str(mimetype or '').strip().lower()
+    mapping = {
+        'application/pdf': '.pdf',
+        'image/png': '.png',
+        'image/jpeg': '.jpg',
+        'image/webp': '.webp',
+        'image/heic': '.heic',
+        'image/heif': '.heif',
+    }
+    return mapping.get(mimetype, '')
+
+
+def _build_compliance_storage_key(request_id, document_type, ext):
+    unique_name = '{}-{}{}'.format(document_type, uuid.uuid4().hex[:16], ext)
+    backend = _compliance_storage_backend()
+    if backend == 's3':
+        prefix = str(app.config.get('COMPLIANCE_S3_PREFIX') or 'compliance').strip().strip('/')
+        parts = [prefix] if prefix else []
+        parts.extend(['request-{}'.format(request_id), unique_name])
+        return '/'.join(parts)
+    return os.path.join('uploads', 'compliance', 'request-{}'.format(request_id), unique_name).replace(
+        os.sep, '/'
+    )
+
+
+def _build_compliance_s3_public_url(storage_key):
+    public_base = str(app.config.get('COMPLIANCE_S3_PUBLIC_BASE_URL') or '').strip().rstrip('/')
+    if public_base:
+        return '{}/{}'.format(public_base, storage_key)
+
+    bucket = str(app.config.get('COMPLIANCE_S3_BUCKET') or '').strip()
+    endpoint_url = str(app.config.get('COMPLIANCE_S3_ENDPOINT_URL') or '').strip().rstrip('/')
+    region = str(app.config.get('COMPLIANCE_S3_REGION') or '').strip()
+
+    if endpoint_url and bucket:
+        return '{}/{}/{}'.format(endpoint_url, bucket, storage_key)
+    if bucket and region and region != 'us-east-1':
+        return 'https://{}.s3.{}.amazonaws.com/{}'.format(bucket, region, storage_key)
+    if bucket:
+        return 'https://{}.s3.amazonaws.com/{}'.format(bucket, storage_key)
+    return storage_key
+
+
+def _build_compliance_signed_upload(request_id, document_type, original_name, mimetype):
+    bucket = str(app.config.get('COMPLIANCE_S3_BUCKET') or '').strip()
+    if not bucket:
+        raise RuntimeError('COMPLIANCE_S3_BUCKET is not configured')
+
+    ext = _coerce_compliance_upload_extension(original_name, mimetype)
+    if ext not in ALLOWED_COMPLIANCE_UPLOAD_EXTENSIONS:
+        raise ValueError(
+            'Only PDF, PNG, JPG, JPEG, WEBP, HEIC, and HEIF files are supported.'
+        )
+    if (
+        document_type == 'proof_of_collection_photo'
+        and ext not in COMPLIANCE_IMAGE_UPLOAD_EXTENSIONS
+    ):
+        raise ValueError('Proof-of-collection uploads must be image files.')
+
+    sanitized_name = secure_filename(original_name or '')
+    storage_key = _build_compliance_storage_key(request_id, document_type, ext)
+    content_type = str(mimetype or '').strip() or 'application/octet-stream'
+    expires_in = int(app.config.get('COMPLIANCE_S3_PRESIGN_EXP_SECONDS') or 900)
+    client = _compliance_s3_client()
+    upload_url = client.generate_presigned_url(
+        'put_object',
+        Params={
+            'Bucket': bucket,
+            'Key': storage_key,
+            'ContentType': content_type,
+        },
+        ExpiresIn=expires_in,
+        HttpMethod='PUT',
+    )
+
+    return {
+        'backend': 's3',
+        'method': 'PUT',
+        'upload_url': upload_url,
+        'headers': {
+            'Content-Type': content_type,
+        },
+        'expires_in_seconds': expires_in,
+        'upload': {
+            'backend': 's3',
+            'file_url': _build_compliance_s3_public_url(storage_key),
+            'storage_key': storage_key,
+            'static_path': None,
+            'original_filename': sanitized_name or '{}{}'.format(document_type, ext),
+            'content_type': content_type,
+        },
+    }
+
+
+def _save_compliance_upload_local(uploaded_file, request_id, document_type, ext, original_name):
+    storage_key = _build_compliance_storage_key(request_id, document_type, ext)
+    target_dir = os.path.join(_compliance_upload_root(), 'request-{}'.format(request_id))
+    os.makedirs(target_dir, exist_ok=True)
+
+    absolute_path = os.path.join(app.static_folder, storage_key.replace('uploads/', 'uploads/', 1))
+    absolute_dir = os.path.dirname(absolute_path)
+    os.makedirs(absolute_dir, exist_ok=True)
+    uploaded_file.save(absolute_path)
+    size_bytes = os.path.getsize(absolute_path)
+
+    return {
+        'backend': 'local',
+        'file_url': url_for('static', filename=storage_key, _external=True),
+        'storage_key': storage_key,
+        'static_path': storage_key,
+        'original_filename': original_name,
+        'content_type': str(uploaded_file.mimetype or '').strip() or None,
+        'size_bytes': size_bytes,
+    }
+
+
+def _save_compliance_upload_s3(uploaded_file, request_id, document_type, ext, original_name):
+    bucket = str(app.config.get('COMPLIANCE_S3_BUCKET') or '').strip()
+    if not bucket:
+        raise RuntimeError('COMPLIANCE_S3_BUCKET is not configured')
+
+    storage_key = _build_compliance_storage_key(request_id, document_type, ext)
+    content_type = str(uploaded_file.mimetype or '').strip() or 'application/octet-stream'
+    file_bytes = uploaded_file.read()
+    size_bytes = len(file_bytes)
+
+    client = _compliance_s3_client()
+    client.put_object(
+        Bucket=bucket,
+        Key=storage_key,
+        Body=file_bytes,
+        ContentType=content_type,
+        Metadata={
+            'request-id': str(request_id),
+            'document-type': document_type,
+            'original-filename': original_name,
+        },
+    )
+
+    return {
+        'backend': 's3',
+        'file_url': _build_compliance_s3_public_url(storage_key),
+        'storage_key': storage_key,
+        'static_path': None,
+        'original_filename': original_name,
+        'content_type': content_type,
+        'size_bytes': size_bytes,
+    }
+
+
+def _save_compliance_upload(uploaded_file, request_id, document_type):
+    if not uploaded_file or not uploaded_file.filename:
+        raise ValueError('file is required')
+
+    max_bytes = int(app.config.get('COMPLIANCE_UPLOAD_MAX_BYTES') or 0)
+    if request.content_length and max_bytes and request.content_length > max_bytes:
+        raise ValueError('Uploaded file is too large.')
+
+    original_name = secure_filename(uploaded_file.filename)
+    ext = _coerce_compliance_upload_extension(original_name, uploaded_file.mimetype)
+    if ext not in ALLOWED_COMPLIANCE_UPLOAD_EXTENSIONS:
+        raise ValueError(
+            'Only PDF, PNG, JPG, JPEG, WEBP, HEIC, and HEIF files are supported.'
+        )
+    if (
+        document_type == 'proof_of_collection_photo'
+        and ext not in COMPLIANCE_IMAGE_UPLOAD_EXTENSIONS
+    ):
+        raise ValueError('Proof-of-collection uploads must be image files.')
+
+    backend = _compliance_storage_backend()
+    if backend == 's3':
+        upload_info = _save_compliance_upload_s3(
+            uploaded_file,
+            request_id,
+            document_type,
+            ext,
+            original_name or '{}{}'.format(document_type, ext),
+        )
+    else:
+        upload_info = _save_compliance_upload_local(
+            uploaded_file,
+            request_id,
+            document_type,
+            ext,
+            original_name or '{}{}'.format(document_type, ext),
+        )
+
+    size_bytes = int(upload_info.get('size_bytes') or 0)
+    if max_bytes and size_bytes > max_bytes:
+        if upload_info.get('backend') == 'local' and upload_info.get('static_path'):
+            absolute_path = os.path.join(app.static_folder, upload_info['static_path'])
+            try:
+                os.remove(absolute_path)
+            except OSError:
+                app.logger.warning('Failed removing oversized compliance upload %s.', absolute_path)
+        raise ValueError('Uploaded file is too large.')
+
+    return upload_info
 
 
 def _send_material_request_email(to_email, subject, text_body, html_body=None):
@@ -8104,6 +8569,99 @@ def api_admin_dispatch_queue():
     )
 
 
+@app.route('/api/v1/admin/compliance/review-queue', methods=['GET'])
+@jwt_required(roles={'admin'})
+def api_admin_compliance_review_queue():
+    try:
+        limit = _parse_optional_int_query(request.args.get('limit'), 'limit', min_value=1, max_value=500)
+        offset = _parse_optional_int_query(request.args.get('offset'), 'offset', min_value=0)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    limit = limit or 50
+    offset = offset or 0
+
+    status = (str(request.args.get('status') or '').strip().lower().replace('-', '_').replace(' ', '_') or 'submitted')
+    if status != 'all' and status not in COMPLIANCE_DOCUMENT_STATUSES:
+        return jsonify(
+            {
+                'error': 'Invalid status filter',
+                'allowed_statuses': ['all'] + sorted(COMPLIANCE_DOCUMENT_STATUSES),
+            }
+        ), 400
+
+    document_type = _normalize_compliance_document_type(request.args.get('document_type'))
+    if document_type and document_type not in COMPLIANCE_DOCUMENT_TYPES:
+        return jsonify(
+            {
+                'error': 'Invalid document_type filter',
+                'allowed_document_types': sorted(COMPLIANCE_DOCUMENT_TYPES),
+            }
+        ), 400
+
+    try:
+        query = WasteComplianceDocument.query
+        if status != 'all':
+            query = query.filter(WasteComplianceDocument.status == status)
+        if document_type:
+            query = query.filter(WasteComplianceDocument.document_type == document_type)
+
+        total = query.count()
+        rows = (
+            query.order_by(
+                WasteComplianceDocument.created_at.asc(),
+                WasteComplianceDocument.id.asc(),
+            )
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+    except SQLAlchemyError:
+        app.logger.exception('Failed to query compliance review queue.')
+        return jsonify({'error': 'Failed to query compliance review queue'}), 500
+
+    items = []
+    status_counts = {}
+    type_counts = {}
+    for row in rows:
+        status_key = (row.status or '').strip().lower() or 'unknown'
+        type_key = _normalize_compliance_document_type(row.document_type) or 'unknown'
+        status_counts[status_key] = status_counts.get(status_key, 0) + 1
+        type_counts[type_key] = type_counts.get(type_key, 0) + 1
+
+        booking = db.session.get(WasteRemovalRequest, row.waste_removal_request_id)
+        items.append(
+            {
+                'document': _serialize_compliance_document(row),
+                'request': _serialize_waste_request(booking) if booking else None,
+                'summary': _compliance_summary_for_documents(
+                    _compliance_documents_for_request(row.waste_removal_request_id)
+                ) if booking else None,
+            }
+        )
+
+    return jsonify(
+        {
+            'items': items,
+            'pagination': {
+                'limit': limit,
+                'offset': offset,
+                'returned': len(items),
+                'total': total,
+                'has_more': (offset + len(items)) < total,
+            },
+            'filters': {
+                'status': status,
+                'document_type': document_type or '',
+            },
+            'summary': {
+                'status_counts': status_counts,
+                'document_type_counts': type_counts,
+            },
+        }
+    )
+
+
 @app.route('/api/v1/admin/dispatch/incidents', methods=['GET'])
 @jwt_required(roles={'admin'})
 def api_admin_dispatch_incidents():
@@ -8920,6 +9478,345 @@ def api_deactivate_push_subscription():
     subscription.last_seen_at = datetime.utcnow()
     db.session.commit()
     return jsonify({'deactivated': True})
+
+
+@app.route('/api/v1/waste-requests/<int:request_id>/compliance', methods=['GET'])
+@jwt_required(roles={'customer', 'driver', 'admin'})
+def api_get_waste_request_compliance(request_id):
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        return jsonify({'error': 'Waste request not found'}), 404
+    if not _request_access_allowed(booking):
+        return jsonify({'error': 'Forbidden'}), 403
+
+    documents = _compliance_documents_for_request(booking.id)
+    return jsonify(
+        {
+            'request_id': booking.id,
+            'request_status': booking.status,
+            'documents': [_serialize_compliance_document(row) for row in documents],
+            'summary': _compliance_summary_for_documents(documents),
+        }
+    )
+
+
+@app.route('/api/v1/waste-requests/<int:request_id>/compliance/uploads', methods=['POST'])
+@jwt_required(roles={'driver', 'admin'})
+def api_upload_waste_request_compliance_file(request_id):
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        return jsonify({'error': 'Waste request not found'}), 404
+    if not _request_driver_mutation_allowed(booking):
+        return jsonify({'error': 'Forbidden'}), 403
+
+    document_type = _normalize_compliance_document_type(
+        request.form.get('document_type') or request.args.get('document_type')
+    )
+    if document_type not in COMPLIANCE_DOCUMENT_TYPES:
+        return jsonify(
+            {
+                'error': 'Invalid document_type',
+                'allowed_document_types': sorted(COMPLIANCE_DOCUMENT_TYPES),
+            }
+        ), 400
+
+    role = _current_jwt_role()
+    if role == 'driver' and document_type not in COMPLIANCE_DRIVER_UPLOAD_TYPES:
+        return jsonify(
+            {
+                'error': 'Drivers can only upload collection evidence documents',
+                'allowed_document_types': sorted(COMPLIANCE_DRIVER_UPLOAD_TYPES),
+            }
+        ), 403
+
+    uploaded_file = request.files.get('file')
+    if not uploaded_file or not uploaded_file.filename:
+        return jsonify({'error': 'file is required'}), 400
+
+    try:
+        upload_info = _save_compliance_upload(uploaded_file, booking.id, document_type)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except Exception:
+        app.logger.exception('Failed saving compliance upload for request %s.', request_id)
+        return jsonify({'error': 'Failed to save compliance upload'}), 500
+
+    return (
+        jsonify(
+            {
+                'request_id': booking.id,
+                'document_type': document_type,
+                'upload': upload_info,
+            }
+        ),
+        201,
+    )
+
+
+@app.route('/api/v1/waste-requests/<int:request_id>/compliance/uploads/sign', methods=['POST'])
+@jwt_required(roles={'driver', 'admin'})
+def api_sign_waste_request_compliance_upload(request_id):
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        return jsonify({'error': 'Waste request not found'}), 404
+    if not _request_driver_mutation_allowed(booking):
+        return jsonify({'error': 'Forbidden'}), 403
+    if _compliance_storage_backend() != 's3':
+        return jsonify({'error': 'Signed uploads require S3 storage backend'}), 409
+
+    payload = request.get_json(silent=True) or {}
+    document_type = _normalize_compliance_document_type(payload.get('document_type'))
+    if document_type not in COMPLIANCE_DOCUMENT_TYPES:
+        return jsonify(
+            {
+                'error': 'Invalid document_type',
+                'allowed_document_types': sorted(COMPLIANCE_DOCUMENT_TYPES),
+            }
+        ), 400
+
+    role = _current_jwt_role()
+    if role == 'driver' and document_type not in COMPLIANCE_DRIVER_UPLOAD_TYPES:
+        return jsonify(
+            {
+                'error': 'Drivers can only upload collection evidence documents',
+                'allowed_document_types': sorted(COMPLIANCE_DRIVER_UPLOAD_TYPES),
+            }
+        ), 403
+
+    file_name = str(payload.get('file_name') or '').strip()
+    if not file_name:
+        return jsonify({'error': 'file_name is required'}), 400
+
+    mime_type = str(payload.get('mime_type') or '').strip()
+    if not mime_type:
+        return jsonify({'error': 'mime_type is required'}), 400
+
+    try:
+        signed_upload = _build_compliance_signed_upload(
+            booking.id,
+            document_type,
+            file_name,
+            mime_type,
+        )
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except Exception:
+        app.logger.exception('Failed generating signed compliance upload for request %s.', request_id)
+        return jsonify({'error': 'Failed to create signed upload'}), 500
+
+    return jsonify(
+        {
+            'request_id': booking.id,
+            'document_type': document_type,
+            **signed_upload,
+        }
+    )
+
+
+@app.route('/api/v1/waste-requests/<int:request_id>/compliance/documents', methods=['POST'])
+@jwt_required(roles={'driver', 'admin'})
+def api_create_waste_request_compliance_document(request_id):
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        return jsonify({'error': 'Waste request not found'}), 404
+    if not _request_driver_mutation_allowed(booking):
+        return jsonify({'error': 'Forbidden'}), 403
+
+    payload = request.get_json(silent=True) or {}
+    document_type = _normalize_compliance_document_type(payload.get('document_type'))
+    if document_type not in COMPLIANCE_DOCUMENT_TYPES:
+        return jsonify(
+            {
+                'error': 'Invalid document_type',
+                'allowed_document_types': sorted(COMPLIANCE_DOCUMENT_TYPES),
+            }
+        ), 400
+
+    file_url = str(payload.get('file_url') or '').strip()
+    if not file_url:
+        return jsonify({'error': 'file_url is required'}), 400
+    if len(file_url) > 500:
+        return jsonify({'error': 'file_url is too long'}), 400
+
+    status = str(payload.get('status') or 'submitted').strip().lower().replace('-', '_').replace(' ', '_')
+    if status not in COMPLIANCE_DOCUMENT_STATUSES:
+        return jsonify(
+            {
+                'error': 'Invalid status',
+                'allowed_statuses': sorted(COMPLIANCE_DOCUMENT_STATUSES),
+            }
+        ), 400
+
+    role = _current_jwt_role()
+    if role != 'admin' and status != 'submitted':
+        return jsonify({'error': 'Only admins can set non-submitted status'}), 403
+    if role == 'driver' and document_type not in COMPLIANCE_DRIVER_UPLOAD_TYPES:
+        return jsonify(
+            {
+                'error': 'Drivers can only upload collection evidence documents',
+                'allowed_document_types': sorted(COMPLIANCE_DRIVER_UPLOAD_TYPES),
+            }
+        ), 403
+
+    metadata = payload.get('metadata') if 'metadata' in payload else {}
+    if metadata is None:
+        metadata = {}
+    if not isinstance(metadata, dict):
+        return jsonify({'error': 'metadata must be an object'}), 400
+
+    notes = str(payload.get('notes') or '').strip()
+    notes = notes[:2000] if notes else None
+    document_reference = str(payload.get('document_reference') or '').strip()
+    document_reference = document_reference[:120] if document_reference else None
+
+    issued_at = None
+    expires_at = None
+    if payload.get('issued_at') not in (None, ''):
+        try:
+            issued_at = _parse_datetime_or_error(payload.get('issued_at'), 'issued_at')
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+    if payload.get('expires_at') not in (None, ''):
+        try:
+            expires_at = _parse_datetime_or_error(payload.get('expires_at'), 'expires_at')
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+    if issued_at and expires_at and expires_at <= issued_at:
+        return jsonify({'error': 'expires_at must be later than issued_at'}), 400
+
+    now = datetime.utcnow()
+    current_user_id = _current_jwt_user_id()
+    document = WasteComplianceDocument(
+        waste_removal_request_id=booking.id,
+        uploaded_by_user_id=current_user_id,
+        document_type=document_type,
+        status=status,
+        file_url=file_url,
+        document_reference=document_reference,
+        issued_at=issued_at,
+        expires_at=expires_at,
+        notes=notes,
+        metadata_json=metadata,
+    )
+    if role == 'admin' and status in {'verified', 'rejected', 'expired'}:
+        document.verified_by_user_id = current_user_id
+        document.verified_at = now
+
+    db.session.add(document)
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Failed to create compliance document for request %s.', request_id)
+        return jsonify({'error': 'Failed to create compliance document'}), 500
+
+    _publish_waste_request_event(
+        booking.id,
+        'compliance_document_created',
+        payload=_serialize_waste_request_snapshot(booking),
+        metadata={
+            'compliance_document_id': document.id,
+            'document_type': document.document_type,
+            'status': document.status,
+        },
+    )
+    documents = _compliance_documents_for_request(booking.id)
+    return (
+        jsonify(
+            {
+                'request_id': booking.id,
+                'document': _serialize_compliance_document(document),
+                'summary': _compliance_summary_for_documents(documents),
+            }
+        ),
+        201,
+    )
+
+
+@app.route('/api/v1/admin/waste-requests/<int:request_id>/compliance/documents/<int:document_id>/verify', methods=['POST'])
+@jwt_required(roles={'admin'})
+def api_admin_verify_waste_request_compliance_document(request_id, document_id):
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        return jsonify({'error': 'Waste request not found'}), 404
+
+    document = WasteComplianceDocument.query.filter_by(
+        id=document_id,
+        waste_removal_request_id=booking.id,
+    ).first()
+    if not document:
+        return jsonify({'error': 'Compliance document not found'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    status = str(payload.get('status') or 'verified').strip().lower().replace('-', '_').replace(' ', '_')
+    allowed_review_statuses = {'verified', 'rejected', 'expired'}
+    if status not in allowed_review_statuses:
+        return jsonify({'error': 'status must be verified, rejected, or expired'}), 400
+
+    metadata = payload.get('metadata') if 'metadata' in payload else None
+    if metadata is not None and not isinstance(metadata, dict):
+        return jsonify({'error': 'metadata must be an object'}), 400
+
+    notes = None
+    if 'notes' in payload:
+        notes = str(payload.get('notes') or '').strip()
+        notes = notes[:2000] if notes else None
+
+    expires_at = document.expires_at
+    if 'expires_at' in payload:
+        if payload.get('expires_at') in (None, ''):
+            expires_at = None
+        else:
+            try:
+                expires_at = _parse_datetime_or_error(payload.get('expires_at'), 'expires_at')
+            except ValueError as exc:
+                return jsonify({'error': str(exc)}), 400
+    if document.issued_at and expires_at and expires_at <= document.issued_at:
+        return jsonify({'error': 'expires_at must be later than issued_at'}), 400
+
+    previous_status = document.status
+    document.status = status
+    document.verified_by_user_id = _current_jwt_user_id()
+    document.verified_at = datetime.utcnow()
+    document.expires_at = expires_at
+    if notes is not None:
+        document.notes = notes
+    if metadata is not None:
+        merged = dict(document.metadata_json or {})
+        merged.update(metadata)
+        document.metadata_json = merged
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception(
+            'Failed to review compliance document %s for request %s.',
+            document_id,
+            request_id,
+        )
+        return jsonify({'error': 'Failed to update compliance document'}), 500
+
+    _publish_waste_request_event(
+        booking.id,
+        'compliance_document_reviewed',
+        payload=_serialize_waste_request_snapshot(booking),
+        metadata={
+            'compliance_document_id': document.id,
+            'previous_status': previous_status,
+            'status': document.status,
+        },
+    )
+    documents = _compliance_documents_for_request(booking.id)
+    return jsonify(
+        {
+            'updated': True,
+            'request_id': booking.id,
+            'document': _serialize_compliance_document(document),
+            'previous_status': previous_status,
+            'summary': _compliance_summary_for_documents(documents),
+        }
+    )
 
 
 @app.route('/api/v1/waste-requests/<int:request_id>/payments', methods=['GET'])
@@ -9801,6 +10698,22 @@ def api_update_waste_request_status(request_id):
         match_row = _get_latest_match_for_request(booking.id)
         if not match_row:
             return jsonify({'error': 'No provider has accepted this request yet'}), 409
+
+    if new_status == 'completed':
+        compliance_documents = _compliance_documents_for_request(booking.id)
+        compliance_summary = _compliance_summary_for_documents(compliance_documents)
+        missing_types = _compliance_missing_required_document_types(
+            compliance_summary,
+            COMPLIANCE_COMPLETION_REQUIRED_TYPES,
+        )
+        if missing_types:
+            return jsonify(
+                {
+                    'error': 'Compliance review incomplete for request completion',
+                    'missing_document_types': missing_types,
+                    'compliance': compliance_summary,
+                }
+            ), 409
 
     previous_status = booking.status
     booking.status = new_status

@@ -1,11 +1,18 @@
 import { Alert } from 'react-native';
-import { useCallback, useMemo, useState } from 'react';
-import type { CreateWasteRequestResponse, WasteRequestRealtimeEvent } from '../../../api/client';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type {
+  AdminComplianceReviewQueueResponse,
+  CreateWasteRequestResponse,
+  WasteRequestRealtimeEvent,
+} from '../../../api/client';
+import { apiClient } from '../../../api/client';
 import {
+  defaultComplianceUploadState,
   defaultDriverJobState,
   defaultDriverOfferState,
   defaultFormState,
   type AdminViewMode,
+  type ComplianceUploadState,
   type CustomerScreen,
   type DriverJobState,
   type DriverOfferState,
@@ -24,6 +31,10 @@ export function useWasteMobileController() {
   const [customerRequestId, setCustomerRequestId] = useState('');
   const [driverOffer, setDriverOffer] = useState<DriverOfferState>(defaultDriverOfferState);
   const [driverJob, setDriverJob] = useState<DriverJobState>(defaultDriverJobState);
+  const [complianceUpload, setComplianceUpload] =
+    useState<ComplianceUploadState>(defaultComplianceUploadState);
+  const [adminComplianceReviewQueue, setAdminComplianceReviewQueue] =
+    useState<AdminComplianceReviewQueueResponse | null>(null);
 
   const [created, setCreated] = useState<CreateWasteRequestResponse | null>(null);
   const [customerScreen, setCustomerScreen] = useState<CustomerScreen>('new-request');
@@ -31,6 +42,7 @@ export function useWasteMobileController() {
   const [adminViewMode, setAdminViewMode] = useState<AdminViewMode>('customer');
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isComplianceQueueLoading, setIsComplianceQueueLoading] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,6 +102,8 @@ export function useWasteMobileController() {
       payment_succeeded: 'Payment succeeded',
       refund_processed: 'Refund processed',
       payout_processed: 'Payout processed',
+      compliance_document_created: 'Compliance document uploaded',
+      compliance_document_reviewed: 'Compliance document reviewed',
       admin_dispatch_override: 'Dispatch override applied',
       admin_dispatch_incident_ack: 'Incident acknowledged',
       admin_dispatch_incident_resolve: 'Incident resolved',
@@ -156,6 +170,7 @@ export function useWasteMobileController() {
     onLoadDriverJob,
     onUpdateDriverStatus,
     onPushLocation,
+    onUploadComplianceDocument,
   } = useDriverJobActions({
     auth,
     driverOffer,
@@ -163,12 +178,91 @@ export function useWasteMobileController() {
     fetchRequestSnapshot,
     setRequestDetails,
     setCustomerRequestId,
+    complianceUpload,
+    setComplianceUpload,
     setDriverJob,
     setDriverScreen,
     setError,
     setInfo,
     setIsLoading,
   });
+
+  const onLoadComplianceReviewQueue = useCallback(async () => {
+    if (!auth || auth.user.role !== 'admin') {
+      return;
+    }
+
+    setError(null);
+    setIsComplianceQueueLoading(true);
+
+    try {
+      const queue = await apiClient.getAdminComplianceReviewQueue(auth.access_token, {
+        status: 'submitted',
+        limit: 20,
+      });
+      setAdminComplianceReviewQueue(queue);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load compliance review queue.');
+    } finally {
+      setIsComplianceQueueLoading(false);
+    }
+  }, [auth, setError]);
+
+  const onReviewComplianceDocument = useCallback(
+    async (requestId: number, documentId: number, status: 'verified' | 'rejected') => {
+      if (!auth || auth.user.role !== 'admin') {
+        return;
+      }
+
+      setError(null);
+      setInfo(null);
+      setIsComplianceQueueLoading(true);
+
+      try {
+        await apiClient.reviewComplianceDocument(
+          requestId,
+          documentId,
+          { status },
+          auth.access_token,
+        );
+        await onLoadComplianceReviewQueue();
+
+        const activeRequestId =
+          customerRequestIdParsed === requestId || driverJobRequestIdParsed === requestId
+            ? requestId
+            : null;
+        if (activeRequestId) {
+          const snapshot = await fetchRequestSnapshot(activeRequestId, auth.access_token);
+          setRequestDetails(snapshot);
+        }
+
+        setInfo(`Marked compliance document #${documentId} as ${status}.`);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unable to review compliance document.');
+      } finally {
+        setIsComplianceQueueLoading(false);
+      }
+    },
+    [
+      auth,
+      customerRequestIdParsed,
+      driverJobRequestIdParsed,
+      fetchRequestSnapshot,
+      onLoadComplianceReviewQueue,
+      setError,
+      setInfo,
+      setRequestDetails,
+    ],
+  );
+
+  useEffect(() => {
+    if (auth?.user.role !== 'admin') {
+      setAdminComplianceReviewQueue(null);
+      return;
+    }
+
+    void onLoadComplianceReviewQueue();
+  }, [auth?.user.role, onLoadComplianceReviewQueue]);
 
   const onLogout = useCallback(async () => {
     await onBeforeLogout();
@@ -178,8 +272,10 @@ export function useWasteMobileController() {
     setCustomerRequestId('');
     setDriverOffer(defaultDriverOfferState);
     setDriverJob(defaultDriverJobState);
+    setComplianceUpload(defaultComplianceUploadState);
     setCreated(null);
     setRequestDetails(null);
+    setAdminComplianceReviewQueue(null);
     setCustomerScreen('new-request');
     setDriverScreen('offer-inbox');
     setAdminViewMode('customer');
@@ -220,6 +316,8 @@ export function useWasteMobileController() {
     setDriverOffer,
     driverJob,
     setDriverJob,
+    complianceUpload,
+    setComplianceUpload,
     created,
     customerScreen,
     onSelectCustomerScreen,
@@ -233,11 +331,13 @@ export function useWasteMobileController() {
     isFallbackPolling,
     syncState,
     isBootstrappingSession,
+    isComplianceQueueLoading,
     info,
     error,
     hasTrackedCustomerRequest,
     customerRelevantRequestDetails,
     driverRelevantRequestDetails,
+    adminComplianceReviewQueue,
     currentRole,
     onLogin,
     onSignup,
@@ -252,5 +352,8 @@ export function useWasteMobileController() {
     onLoadDriverJob,
     onUpdateDriverStatus,
     onPushLocation,
+    onUploadComplianceDocument,
+    onLoadComplianceReviewQueue,
+    onReviewComplianceDocument,
   };
 }

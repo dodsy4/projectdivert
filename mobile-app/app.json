@@ -20,7 +20,15 @@
     },
     "plugins": [
       "expo-secure-store",
-      "expo-notifications"
+      "expo-notifications",
+      "expo-document-picker",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Project Divert to choose collection evidence photos.",
+          "cameraPermission": "Allow Project Divert to capture proof-of-collection photos."
+        }
+      ]
     ],
     "extra": {
       "eas": {

@@ -64,6 +64,7 @@ Then open in iOS/Android simulator or Expo Go.
 
 - Auth sessions are persisted with `expo-secure-store` and restored on launch.
 - Realtime delivery is now SSE-based. For production with multiple API workers, route sticky sessions or a shared event bus is recommended.
+- Compliance evidence uploads now support device photo/document picking. The backend can store uploads locally by default or use S3-compatible object storage, including presigned direct uploads when configured.
 - For OS background push, install Expo modules in `mobile-app`:
   - `npx expo install expo-notifications expo-device expo-constants`
   - Also configure credentials/build profiles for APNS/FCM in your Expo project.
