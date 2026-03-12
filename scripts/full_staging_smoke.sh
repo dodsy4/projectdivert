@@ -376,6 +376,43 @@ if status_by_id.get(doc_id) != "verified":
 print("Compliance list includes verified document")
 PY
 
+log "Offline billing reporting smoke"
+BILLING_UPDATE_BODY="$TMP_DIR/billing_update.json"
+BILLING_UPDATE_STATUS="$TMP_DIR/billing_update.status"
+http_json POST "/api/v1/admin/waste-requests/$REQUEST_ID/billing" \
+  "{\"state\":\"invoice_sent\",\"reference\":\"SMOKE-INV-$REQUEST_ID\",\"notes\":\"full staging smoke offline invoice\"}" \
+  "$ADMIN_TOKEN" "$BILLING_UPDATE_BODY" "$BILLING_UPDATE_STATUS"
+assert_status "$(cat "$BILLING_UPDATE_STATUS")" "200" "Billing workflow update" "$BILLING_UPDATE_BODY"
+
+BILLING_LIST_BODY="$TMP_DIR/billing_list.json"
+BILLING_LIST_STATUS="$TMP_DIR/billing_list.status"
+http_json GET "/api/v1/admin/billing/requests?state=invoice_sent&reference=SMOKE-INV-$REQUEST_ID&limit=20" "" "$ADMIN_TOKEN" "$BILLING_LIST_BODY" "$BILLING_LIST_STATUS"
+assert_status "$(cat "$BILLING_LIST_STATUS")" "200" "Billing queue list" "$BILLING_LIST_BODY"
+python - <<PY "$BILLING_LIST_BODY" "$REQUEST_ID"
+import json,sys
+payload=json.load(open(sys.argv[1]))
+rid=int(sys.argv[2])
+ids=[item.get("request", {}).get("id") for item in payload.get("items", [])]
+if rid not in ids:
+    print("Request missing from offline billing queue")
+    sys.exit(1)
+print("Billing queue includes invoice-tracked request")
+PY
+
+BILLING_EXPORT_BODY="$TMP_DIR/billing_export.csv"
+BILLING_EXPORT_STATUS="$TMP_DIR/billing_export.status"
+http_json GET "/api/v1/admin/billing/requests/export?search=SMOKE-INV-$REQUEST_ID&limit=20" "" "$ADMIN_TOKEN" "$BILLING_EXPORT_BODY" "$BILLING_EXPORT_STATUS"
+assert_status "$(cat "$BILLING_EXPORT_STATUS")" "200" "Billing export endpoint" "$BILLING_EXPORT_BODY"
+python - <<PY "$BILLING_EXPORT_BODY" "$REQUEST_ID"
+import sys
+text=open(sys.argv[1]).read()
+rid=sys.argv[2]
+if "billing_reference" not in text or f"SMOKE-INV-{rid}" not in text:
+    print("Billing export missing expected invoice reference")
+    sys.exit(1)
+print("Billing export includes invoice reference")
+PY
+
 log "Payments readiness smoke"
 PAY_BODY="$TMP_DIR/payments_get.json"
 PAY_STATUS="$TMP_DIR/payments_get.status"

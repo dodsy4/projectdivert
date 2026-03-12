@@ -2670,3 +2670,83 @@ def test_admin_can_update_offline_billing_workflow_for_request(client, app_conte
     request_payload = request_response.get_json()
     assert request_payload['request']['billing_workflow']['state'] == 'invoice_sent'
     assert request_payload['request']['billing_workflow']['reference'] == 'INV-1001'
+
+
+def test_admin_billing_requests_list_filters_and_export(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+
+    _create_user(app_context, 'billingadmin3@example.com', 'Password123!', role='admin', name='Billing Admin 3')
+    _create_user(app_context, 'billingcustomer3@example.com', 'Password123!', role='customer', name='Billing Customer 3')
+
+    admin_headers = _auth_header(client, 'billingadmin3@example.com', 'Password123!')
+    customer_headers = _auth_header(client, 'billingcustomer3@example.com', 'Password123!')
+
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+
+    created_ids = []
+    for index, material in enumerate(['Glass', 'Metal'], start=1):
+        create_response = client.post(
+            '/api/v1/waste-requests',
+            json={
+                'requester_name': 'Billing Customer 3',
+                'requester_email': 'billingcustomer3@example.com',
+                'material_type': material,
+                'waste_amount': 1.0 + index,
+                'waste_unit': 'Tonnes',
+                'match_radius_miles': 25,
+                'pickup_address': f'{index} Example Road',
+                'pickup_postcode': 'SW1A1AA',
+                'scheduled_pickup_at': scheduled_time,
+            },
+            headers=customer_headers,
+        )
+        assert create_response.status_code == 201
+        created_ids.append(create_response.get_json()['request']['id'])
+
+    first_id, second_id = created_ids
+    first_update = client.post(
+        f'/api/v1/admin/waste-requests/{first_id}/billing',
+        json={
+            'state': 'invoice_sent',
+            'reference': 'INV-2001',
+            'notes': 'First invoice sent',
+        },
+        headers=admin_headers,
+    )
+    assert first_update.status_code == 200
+
+    second_update = client.post(
+        f'/api/v1/admin/waste-requests/{second_id}/billing',
+        json={
+            'state': 'paid_offline',
+            'reference': 'INV-2002',
+            'notes': 'Paid by bank transfer',
+        },
+        headers=admin_headers,
+    )
+    assert second_update.status_code == 200
+
+    list_response = client.get(
+        '/api/v1/admin/billing/requests?state=paid_offline&reference=INV-2002&limit=10',
+        headers=admin_headers,
+    )
+    assert list_response.status_code == 200
+    list_payload = list_response.get_json()
+    assert list_payload['pagination']['total'] == 1
+    assert len(list_payload['items']) == 1
+    assert list_payload['items'][0]['request']['id'] == second_id
+    assert list_payload['items'][0]['request']['billing_workflow']['state'] == 'paid_offline'
+    assert list_payload['items'][0]['request']['billing_workflow']['reference'] == 'INV-2002'
+    assert list_payload['summary']['state_counts']['paid_offline'] == 1
+
+    export_response = client.get(
+        '/api/v1/admin/billing/requests/export?search=INV-2002&limit=10',
+        headers=admin_headers,
+    )
+    assert export_response.status_code == 200
+    assert export_response.mimetype == 'text/csv'
+    export_text = export_response.get_data(as_text=True)
+    assert 'request_id,request_status,billing_state,billing_reference' in export_text
+    assert 'INV-2002' in export_text
+    assert 'paid_offline' in export_text

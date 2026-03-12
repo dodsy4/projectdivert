@@ -317,6 +317,41 @@ class WasteRemovalRequest(db.Model):
         return '<WasteRemovalRequest {} {}>'.format(self.id, self.material_type)
 
 
+class WasteRequestCommunicationLog(db.Model):
+    __tablename__ = 'waste_request_communication_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    waste_removal_request_id = db.Column(
+        db.Integer,
+        db.ForeignKey('waste_removal_requests.id'),
+        nullable=False,
+        index=True,
+    )
+    created_by_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id'),
+        index=True,
+    )
+    direction = db.Column(db.String(32), nullable=False, index=True)
+    channel = db.Column(db.String(32), nullable=False, index=True)
+    subject = db.Column(db.String(255))
+    message = db.Column(db.Text, nullable=False)
+    outcome = db.Column(db.String(120))
+    contact_name = db.Column(db.String(120))
+    contact_email = db.Column(db.String(255))
+    contact_phone = db.Column(db.String(120))
+    customer_visible = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    occurred_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    def __repr__(self):
+        return '<WasteRequestCommunicationLog request={} direction={} channel={}>'.format(
+            self.waste_removal_request_id,
+            self.direction,
+            self.channel,
+        )
+
+
 class WasteRemovalMatch(db.Model):
     __tablename__ = 'waste_removal_matches'
 
@@ -3581,6 +3616,16 @@ OFFLINE_BILLING_STATES = {
     'cancelled',
 }
 
+COMMUNICATION_DIRECTIONS = {'outbound', 'inbound', 'internal'}
+COMMUNICATION_CHANNELS = {'email', 'phone', 'sms', 'manual', 'other'}
+
+
+def _normalize_offline_billing_state(value, default=None):
+    normalized = str(value or '').strip().lower().replace('-', '_').replace(' ', '_')
+    if not normalized:
+        return default
+    return normalized
+
 
 def _serialize_request_billing_workflow(booking):
     if not booking:
@@ -3592,6 +3637,62 @@ def _serialize_request_billing_workflow(booking):
         'notes': booking.billing_notes,
         'updated_at': booking.billing_updated_at.isoformat() if booking.billing_updated_at else None,
         'updated_by_user_id': booking.billing_updated_by_user_id,
+    }
+
+
+def _serialize_request_communication_log(entry):
+    if not entry:
+        return None
+    return {
+        'id': entry.id,
+        'waste_removal_request_id': entry.waste_removal_request_id,
+        'created_by_user_id': entry.created_by_user_id,
+        'direction': entry.direction,
+        'channel': entry.channel,
+        'subject': entry.subject,
+        'message': entry.message,
+        'outcome': entry.outcome,
+        'contact_name': entry.contact_name,
+        'contact_email': entry.contact_email,
+        'contact_phone': entry.contact_phone,
+        'customer_visible': bool(entry.customer_visible),
+        'occurred_at': entry.occurred_at.isoformat() if entry.occurred_at else None,
+        'created_at': entry.created_at.isoformat() if entry.created_at else None,
+    }
+
+
+def _communication_logs_for_request(request_id, customer_visible_only=False, limit=50):
+    query = WasteRequestCommunicationLog.query.filter(
+        WasteRequestCommunicationLog.waste_removal_request_id == request_id
+    )
+    if customer_visible_only:
+        query = query.filter(WasteRequestCommunicationLog.customer_visible.is_(True))
+    return (
+        query.order_by(
+            WasteRequestCommunicationLog.occurred_at.desc(),
+            WasteRequestCommunicationLog.id.desc(),
+        )
+        .limit(limit)
+        .all()
+    )
+
+
+def _serialize_request_communication_summary(entries):
+    direction_counts = {}
+    channel_counts = {}
+    customer_visible_count = 0
+    for entry in entries:
+        direction = (entry.direction or '').strip().lower() or 'unknown'
+        channel = (entry.channel or '').strip().lower() or 'unknown'
+        direction_counts[direction] = direction_counts.get(direction, 0) + 1
+        channel_counts[channel] = channel_counts.get(channel, 0) + 1
+        if entry.customer_visible:
+            customer_visible_count += 1
+    return {
+        'total': len(entries),
+        'customer_visible_count': customer_visible_count,
+        'direction_counts': direction_counts,
+        'channel_counts': channel_counts,
     }
 
 
@@ -3626,6 +3727,14 @@ def _serialize_waste_request(booking):
         ),
         'billing_workflow': _serialize_request_billing_workflow(booking),
         'created_at': booking.created_at.isoformat() if booking.created_at else None,
+    }
+
+
+def _serialize_admin_billing_queue_item(booking):
+    return {
+        'request': _serialize_waste_request(booking),
+        'billing': _billing_summary(),
+        'financials': _financial_summary_for_request(booking.id),
     }
 
 
@@ -4550,6 +4659,11 @@ def _serialize_waste_request_snapshot(booking):
         .first()
     )
     compliance_documents = _compliance_documents_for_request(booking.id)
+    customer_visible_only = _current_jwt_role() == 'customer'
+    communication_logs = _communication_logs_for_request(
+        booking.id,
+        customer_visible_only=customer_visible_only,
+    )
     return {
         'request': _serialize_waste_request(booking),
         'match': _serialize_waste_match(match_row),
@@ -4561,6 +4675,8 @@ def _serialize_waste_request_snapshot(booking):
             'documents': [_serialize_compliance_document(row) for row in compliance_documents],
             'summary': _compliance_summary_for_documents(compliance_documents),
         },
+        'communications': [_serialize_request_communication_log(row) for row in communication_logs],
+        'communication_summary': _serialize_request_communication_summary(communication_logs),
     }
 
 
@@ -8957,6 +9073,194 @@ def api_admin_list_drivers():
     )
 
 
+def _build_admin_billing_requests_query(state=None, request_status=None, reference=None, search=None):
+    query = WasteRemovalRequest.query
+    if state and state != 'all':
+        query = query.filter(
+            func.coalesce(func.lower(WasteRemovalRequest.billing_state), 'pending_offline_invoice') == state
+        )
+    if request_status and request_status != 'all':
+        query = query.filter(func.lower(WasteRemovalRequest.status) == request_status)
+    if reference:
+        pattern = '%{}%'.format(reference.lower())
+        query = query.filter(func.lower(func.coalesce(WasteRemovalRequest.billing_reference, '')).like(pattern))
+    if search:
+        pattern = '%{}%'.format(search.lower())
+        query = query.filter(
+            or_(
+                func.lower(func.coalesce(WasteRemovalRequest.billing_reference, '')).like(pattern),
+                func.lower(func.coalesce(WasteRemovalRequest.requester_email, '')).like(pattern),
+                func.lower(func.coalesce(WasteRemovalRequest.requester_name, '')).like(pattern),
+                func.lower(func.coalesce(WasteRemovalRequest.pickup_postcode, '')).like(pattern),
+            )
+        )
+    return query
+
+
+@app.route('/api/v1/admin/billing/requests', methods=['GET'])
+@jwt_required(roles={'admin'})
+def api_admin_list_billing_requests():
+    try:
+        limit = _parse_optional_int_query(request.args.get('limit'), 'limit', min_value=1, max_value=500)
+        offset = _parse_optional_int_query(request.args.get('offset'), 'offset', min_value=0)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    limit = limit or 50
+    offset = offset or 0
+
+    state = _normalize_offline_billing_state(request.args.get('state'), default='all')
+    if state != 'all' and state not in OFFLINE_BILLING_STATES:
+        return jsonify({'error': 'Invalid billing state filter', 'allowed_states': ['all'] + sorted(OFFLINE_BILLING_STATES)}), 400
+
+    request_status = (str(request.args.get('request_status') or '').strip().lower() or 'all')
+    reference = str(request.args.get('reference') or '').strip() or None
+    search = str(request.args.get('search') or '').strip() or None
+
+    try:
+        query = _build_admin_billing_requests_query(
+            state=state,
+            request_status=request_status,
+            reference=reference,
+            search=search,
+        )
+        total = query.count()
+        rows = (
+            query.order_by(
+                func.coalesce(WasteRemovalRequest.billing_updated_at, WasteRemovalRequest.created_at).desc(),
+                WasteRemovalRequest.created_at.desc(),
+                WasteRemovalRequest.id.desc(),
+            )
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        state_counts = {
+            row[0] or 'pending_offline_invoice': row[1]
+            for row in (
+                query.with_entities(
+                    func.coalesce(func.lower(WasteRemovalRequest.billing_state), 'pending_offline_invoice'),
+                    func.count(WasteRemovalRequest.id),
+                )
+                .group_by(func.coalesce(func.lower(WasteRemovalRequest.billing_state), 'pending_offline_invoice'))
+                .all()
+            )
+        }
+    except SQLAlchemyError:
+        app.logger.exception('Failed to query admin billing requests.')
+        return jsonify({'error': 'Failed to query billing requests'}), 500
+
+    return jsonify(
+        {
+            'items': [_serialize_admin_billing_queue_item(row) for row in rows],
+            'pagination': {
+                'limit': limit,
+                'offset': offset,
+                'returned': len(rows),
+                'total': total,
+                'has_more': (offset + len(rows)) < total,
+            },
+            'filters': {
+                'state': state,
+                'request_status': request_status,
+                'reference': reference or '',
+                'search': search or '',
+            },
+            'summary': {
+                'state_counts': state_counts,
+            },
+        }
+    )
+
+
+@app.route('/api/v1/admin/billing/requests/export', methods=['GET'])
+@jwt_required(roles={'admin'})
+def api_admin_export_billing_requests():
+    try:
+        limit = _parse_optional_int_query(request.args.get('limit'), 'limit', min_value=1, max_value=5000)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    limit = limit or 1000
+    state = _normalize_offline_billing_state(request.args.get('state'), default='all')
+    if state != 'all' and state not in OFFLINE_BILLING_STATES:
+        return jsonify({'error': 'Invalid billing state filter', 'allowed_states': ['all'] + sorted(OFFLINE_BILLING_STATES)}), 400
+
+    request_status = (str(request.args.get('request_status') or '').strip().lower() or 'all')
+    reference = str(request.args.get('reference') or '').strip() or None
+    search = str(request.args.get('search') or '').strip() or None
+
+    try:
+        rows = (
+            _build_admin_billing_requests_query(
+                state=state,
+                request_status=request_status,
+                reference=reference,
+                search=search,
+            )
+            .order_by(
+                func.coalesce(WasteRemovalRequest.billing_updated_at, WasteRemovalRequest.created_at).desc(),
+                WasteRemovalRequest.created_at.desc(),
+                WasteRemovalRequest.id.desc(),
+            )
+            .limit(limit)
+            .all()
+        )
+    except SQLAlchemyError:
+        app.logger.exception('Failed to export admin billing requests.')
+        return jsonify({'error': 'Failed to export billing requests'}), 500
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        [
+            'request_id',
+            'request_status',
+            'billing_state',
+            'billing_reference',
+            'billing_notes',
+            'requester_name',
+            'requester_email',
+            'pickup_postcode',
+            'assigned_driver_user_id',
+            'charged_minor',
+            'refunded_minor',
+            'paid_out_minor',
+            'platform_net_minor',
+            'billing_updated_at',
+            'created_at',
+        ]
+    )
+    for row in rows:
+        financials = _financial_summary_for_request(row.id)
+        totals = financials.get('totals') or {}
+        workflow = _serialize_request_billing_workflow(row) or {}
+        writer.writerow(
+            [
+                row.id,
+                row.status or '',
+                workflow.get('state') or 'pending_offline_invoice',
+                row.billing_reference or '',
+                row.billing_notes or '',
+                row.requester_name or '',
+                row.requester_email or '',
+                row.pickup_postcode or '',
+                row.assigned_driver_user_id or '',
+                totals.get('charged_minor', 0),
+                totals.get('refunded_minor', 0),
+                totals.get('paid_out_minor', 0),
+                totals.get('platform_net_minor', 0),
+                row.billing_updated_at.isoformat() + 'Z' if row.billing_updated_at else '',
+                row.created_at.isoformat() + 'Z' if row.created_at else '',
+            ]
+        )
+
+    filename = 'offline_billing_requests_{}.csv'.format(datetime.utcnow().strftime('%Y%m%d_%H%M%S'))
+    response = Response(buffer.getvalue(), mimetype='text/csv')
+    response.headers['Content-Disposition'] = 'attachment; filename={}'.format(filename)
+    return response
+
+
 @app.route('/api/v1/admin/carrier-companies', methods=['GET'])
 @jwt_required(roles={'admin'})
 def api_admin_list_carrier_companies():
@@ -10511,6 +10815,128 @@ def api_admin_update_waste_request_billing(request_id):
             'financials': _financial_summary_for_request(booking.id),
         }
     )
+
+
+@app.route('/api/v1/waste-requests/<int:request_id>/communications', methods=['GET'])
+@jwt_required(roles={'customer', 'driver', 'admin'})
+def api_get_waste_request_communications(request_id):
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        return jsonify({'error': 'Waste request not found'}), 404
+    if not _request_access_allowed(booking):
+        return jsonify({'error': 'Forbidden'}), 403
+
+    try:
+        limit = _parse_optional_int_query(request.args.get('limit'), 'limit', min_value=1, max_value=200)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    limit = limit or 50
+    customer_visible_only = _current_jwt_role() == 'customer'
+    entries = _communication_logs_for_request(
+        request_id,
+        customer_visible_only=customer_visible_only,
+        limit=limit,
+    )
+    return jsonify(
+        {
+            'request_id': request_id,
+            'communications': [_serialize_request_communication_log(row) for row in entries],
+            'summary': _serialize_request_communication_summary(entries),
+            'filters': {
+                'customer_visible_only': customer_visible_only,
+                'limit': limit,
+            },
+        }
+    )
+
+
+@app.route('/api/v1/admin/waste-requests/<int:request_id>/communications', methods=['POST'])
+@jwt_required(roles={'admin'})
+def api_admin_create_waste_request_communication(request_id):
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        return jsonify({'error': 'Waste request not found'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    direction = str(payload.get('direction') or '').strip().lower()
+    channel = str(payload.get('channel') or '').strip().lower()
+    if direction not in COMMUNICATION_DIRECTIONS:
+        return jsonify({'error': 'Invalid direction', 'allowed_directions': sorted(COMMUNICATION_DIRECTIONS)}), 400
+    if channel not in COMMUNICATION_CHANNELS:
+        return jsonify({'error': 'Invalid channel', 'allowed_channels': sorted(COMMUNICATION_CHANNELS)}), 400
+
+    message = str(payload.get('message') or '').strip()
+    if not message:
+        return jsonify({'error': 'message is required'}), 400
+
+    subject = (str(payload.get('subject') or '').strip()[:255] or None)
+    outcome = (str(payload.get('outcome') or '').strip()[:120] or None)
+    contact_name = (str(payload.get('contact_name') or '').strip()[:120] or None)
+    contact_email = (str(payload.get('contact_email') or '').strip()[:255] or None)
+    contact_phone = (str(payload.get('contact_phone') or '').strip()[:120] or None)
+    customer_visible = bool(payload.get('customer_visible', False))
+
+    occurred_at_raw = payload.get('occurred_at')
+    if occurred_at_raw:
+        try:
+            occurred_at = _parse_datetime_or_error(occurred_at_raw, 'occurred_at')
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+    else:
+        occurred_at = datetime.utcnow()
+
+    entry = WasteRequestCommunicationLog(
+        waste_removal_request_id=request_id,
+        created_by_user_id=_current_jwt_user_id(),
+        direction=direction,
+        channel=channel,
+        subject=subject,
+        message=message[:4000],
+        outcome=outcome,
+        contact_name=contact_name,
+        contact_email=contact_email,
+        contact_phone=contact_phone,
+        customer_visible=customer_visible,
+        occurred_at=occurred_at,
+    )
+
+    try:
+        db.session.add(entry)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Failed to create communication log for request %s.', request_id)
+        return jsonify({'error': 'Failed to create communication log'}), 500
+
+    metadata = {
+        'communication_log_id': entry.id,
+        'direction': direction,
+        'channel': channel,
+        'customer_visible': customer_visible,
+        'created_by_user_id': entry.created_by_user_id,
+    }
+    _publish_waste_request_event(
+        booking.id,
+        'admin_communication_logged',
+        payload=_serialize_waste_request_snapshot(booking),
+        metadata=metadata,
+    )
+
+    entries = _communication_logs_for_request(
+        request_id,
+        customer_visible_only=False,
+        limit=50,
+    )
+    return jsonify(
+        {
+            'created': True,
+            'communication': _serialize_request_communication_log(entry),
+            'communications': [_serialize_request_communication_log(row) for row in entries],
+            'summary': _serialize_request_communication_summary(entries),
+            'request': _serialize_waste_request_snapshot(booking),
+        }
+    ), 201
 
 
 @app.route('/api/v1/admin/waste-requests/<int:request_id>/timeline', methods=['GET'])

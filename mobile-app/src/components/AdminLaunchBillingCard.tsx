@@ -13,8 +13,9 @@ export function AdminLaunchBillingCard() {
       <Text style={styles.status}>Offline invoicing is active for launch.</Text>
       <Text style={styles.step}>1. Confirm booking and driver assignment in the app.</Text>
       <Text style={styles.step}>2. Invoice the customer outside the app.</Text>
-      <Text style={styles.step}>3. Pay carriers or drivers outside the app.</Text>
-      <Text style={styles.step}>4. Treat any refund or dispute handling as an external finance workflow.</Text>
+      <Text style={styles.step}>3. Track invoice state, reference, and notes on the request.</Text>
+      <Text style={styles.step}>4. Pay carriers or drivers outside the app and mark payout recorded.</Text>
+      <Text style={styles.step}>5. Treat any refund or dispute handling as an external finance workflow.</Text>
     </View>
   );
 }

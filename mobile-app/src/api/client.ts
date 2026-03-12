@@ -345,6 +345,33 @@ export type BillingWorkflow = {
   updated_by_user_id?: number | null;
 };
 
+export type RequestCommunicationDirection = 'outbound' | 'inbound' | 'internal';
+export type RequestCommunicationChannel = 'email' | 'phone' | 'sms' | 'manual' | 'other';
+
+export type RequestCommunicationLog = {
+  id: number;
+  waste_removal_request_id: number;
+  created_by_user_id?: number | null;
+  direction: RequestCommunicationDirection | string;
+  channel: RequestCommunicationChannel | string;
+  subject?: string | null;
+  message: string;
+  outcome?: string | null;
+  contact_name?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  customer_visible: boolean;
+  occurred_at?: string | null;
+  created_at?: string | null;
+};
+
+export type RequestCommunicationSummary = {
+  total: number;
+  customer_visible_count: number;
+  direction_counts: Record<string, number>;
+  channel_counts: Record<string, number>;
+};
+
 export type WasteRequest = {
   id: number;
   requester_name: string;
@@ -397,6 +424,8 @@ export type WasteRequestDetails = {
   dispatch?: DispatchSummary;
   financials?: RequestFinancials;
   billing?: BillingSummary;
+  communications?: RequestCommunicationLog[];
+  communication_summary?: RequestCommunicationSummary;
   compliance?: {
     documents: ComplianceDocument[];
     summary: ComplianceSummary;
@@ -425,6 +454,63 @@ export type UpdateBillingWorkflowResponse = {
   financials: RequestFinancials;
 };
 
+export type AdminBillingQueueItem = {
+  request: WasteRequest;
+  billing: BillingSummary;
+  financials: RequestFinancials;
+};
+
+export type AdminBillingQueueResponse = {
+  items: AdminBillingQueueItem[];
+  pagination: {
+    limit: number;
+    offset: number;
+    returned: number;
+    total: number;
+    has_more: boolean;
+  };
+  filters: {
+    state: string;
+    request_status: string;
+    reference: string;
+    search: string;
+  };
+  summary: {
+    state_counts: Record<string, number>;
+  };
+};
+
+export type CreateRequestCommunicationPayload = {
+  direction: RequestCommunicationDirection | string;
+  channel: RequestCommunicationChannel | string;
+  subject?: string;
+  message: string;
+  outcome?: string;
+  contact_name?: string;
+  contact_email?: string;
+  contact_phone?: string;
+  customer_visible?: boolean;
+  occurred_at?: string;
+};
+
+export type RequestCommunicationsResponse = {
+  request_id: number;
+  communications: RequestCommunicationLog[];
+  summary: RequestCommunicationSummary;
+  filters: {
+    customer_visible_only: boolean;
+    limit: number;
+  };
+};
+
+export type CreateRequestCommunicationResponse = {
+  created: boolean;
+  communication: RequestCommunicationLog;
+  communications: RequestCommunicationLog[];
+  summary: RequestCommunicationSummary;
+  request: WasteRequestDetails;
+};
+
 export type WasteRequestRealtimeEventName =
   | 'snapshot'
   | 'request_created'
@@ -437,6 +523,7 @@ export type WasteRequestRealtimeEventName =
   | 'compliance_document_created'
   | 'compliance_document_reviewed'
   | 'admin_billing_updated'
+  | 'admin_communication_logged'
   | 'admin_dispatch_override'
   | 'admin_dispatch_incident_ack'
   | 'admin_dispatch_incident_resolve'
@@ -1116,6 +1203,57 @@ export const apiClient = {
       { method: 'GET' },
       { token },
     ) as Promise<AdminDriversResponse>;
+  },
+
+  getAdminBillingQueue(
+    token: string,
+    params: { state?: string; requestStatus?: string; reference?: string; search?: string; limit?: number } = {},
+  ) {
+    const searchParams = new URLSearchParams();
+    if (params.state) {
+      searchParams.set('state', params.state);
+    }
+    if (params.requestStatus) {
+      searchParams.set('request_status', params.requestStatus);
+    }
+    if (params.reference) {
+      searchParams.set('reference', params.reference);
+    }
+    if (params.search) {
+      searchParams.set('search', params.search);
+    }
+    if (params.limit) {
+      searchParams.set('limit', String(params.limit));
+    }
+    const suffix = searchParams.toString() ? `?${searchParams.toString()}` : '';
+    return requestJson<AdminBillingQueueResponse>(
+      `/api/v1/admin/billing/requests${suffix}`,
+      { method: 'GET' },
+      { token },
+    ) as Promise<AdminBillingQueueResponse>;
+  },
+
+  getWasteRequestCommunications(requestId: number, token: string, limit = 50) {
+    return requestJson<RequestCommunicationsResponse>(
+      `/api/v1/waste-requests/${requestId}/communications?limit=${limit}`,
+      { method: 'GET' },
+      { token },
+    ) as Promise<RequestCommunicationsResponse>;
+  },
+
+  createWasteRequestCommunication(
+    requestId: number,
+    payload: CreateRequestCommunicationPayload,
+    token: string,
+  ) {
+    return requestJson<CreateRequestCommunicationResponse>(
+      `/api/v1/admin/waste-requests/${requestId}/communications`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      { token },
+    ) as Promise<CreateRequestCommunicationResponse>;
   },
 
   upsertPushSubscription(payload: UpsertPushSubscriptionPayload, token: string) {

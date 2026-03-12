@@ -3,12 +3,14 @@ import { StyleSheet, Text, View } from 'react-native';
 import type { WasteRequestDetails } from '../api/client';
 import { BillingStatusPanel } from './BillingStatusPanel';
 import { ComplianceStatusPanel } from './ComplianceStatusPanel';
+import { RequestCommunicationPanel } from './RequestCommunicationPanel';
 
 type RequestDetailsPanelProps = {
   details: WasteRequestDetails;
+  audience?: 'customer' | 'admin';
 };
 
-export function RequestDetailsPanel({ details }: RequestDetailsPanelProps) {
+export function RequestDetailsPanel({ details, audience = 'customer' }: RequestDetailsPanelProps) {
   return (
     <View style={styles.resultBlock}>
       <Text style={styles.blockTitle}>Live Request Snapshot</Text>
@@ -43,6 +45,7 @@ export function RequestDetailsPanel({ details }: RequestDetailsPanelProps) {
       )}
       <BillingStatusPanel billing={details.billing} financials={details.financials} />
       <ComplianceStatusPanel summary={details.compliance?.summary} />
+      <RequestCommunicationPanel communications={details.communications} audience={audience} />
     </View>
   );
 }

@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { apiClient } from './src/api/client';
+import { AdminBillingQueueCard } from './src/components/AdminBillingQueueCard';
 import { AdminComplianceReviewCard } from './src/components/AdminComplianceReviewCard';
 import { AdminDriverEligibilityCard } from './src/components/AdminDriverEligibilityCard';
 import { AdminLaunchBillingCard } from './src/components/AdminLaunchBillingCard';
@@ -77,6 +78,7 @@ export default function App() {
     syncState,
     isBootstrappingSession,
     isComplianceQueueLoading,
+    isBillingQueueLoading,
     isAdminDriversLoading,
     isDriverComplianceLoading,
     info,
@@ -85,6 +87,7 @@ export default function App() {
     customerRelevantRequestDetails,
     driverRelevantRequestDetails,
     adminComplianceReviewQueue,
+    adminBillingQueue,
     adminDrivers,
     driverOwnCompliance,
     currentRole,
@@ -103,10 +106,12 @@ export default function App() {
     onPushLocation,
     onUploadComplianceDocument,
     onLoadComplianceReviewQueue,
+    onLoadAdminBillingQueue,
     onLoadAdminDrivers,
     onLoadDriverOwnCompliance,
     onReviewComplianceDocument,
     onUpdateBillingWorkflow,
+    onInspectBillingRequest,
   } = useWasteMobileController();
 
   if (isBootstrappingSession) {
@@ -323,6 +328,12 @@ export default function App() {
                   isLoading={isComplianceQueueLoading}
                   onRefresh={onLoadComplianceReviewQueue}
                   onReview={onReviewComplianceDocument}
+                />
+                <AdminBillingQueueCard
+                  queue={adminBillingQueue}
+                  isLoading={isBillingQueueLoading}
+                  onRefresh={onLoadAdminBillingQueue}
+                  onInspectRequest={onInspectBillingRequest}
                 />
                 <AdminLaunchBillingCard />
                 <AdminDriverEligibilityCard

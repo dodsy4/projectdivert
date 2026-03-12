@@ -2,6 +2,8 @@ import React from 'react';
 import { ActivityIndicator, Button, StyleSheet, Text, View } from 'react-native';
 import type { CreateWasteRequestResponse, WasteRequestDetails } from '../../api/client';
 import { AdminBillingWorkflowCard } from '../../components/AdminBillingWorkflowCard';
+import { AdminCommunicationLogCard } from '../../components/AdminCommunicationLogCard';
+import { BillingCommunicationPanel } from '../../components/BillingCommunicationPanel';
 import { Field } from '../../components/Field';
 import { OfflineBillingChecklistPanel } from '../../components/OfflineBillingChecklistPanel';
 import { RequestDetailsPanel } from '../../components/RequestDetailsPanel';
@@ -22,6 +24,20 @@ type RequestStatusScreenProps = {
     requestId: number,
     payload: { state: string; reference?: string; notes?: string },
   ) => void;
+  onCreateCommunicationLog?: (
+    requestId: number,
+    payload: {
+      direction: string;
+      channel: string;
+      subject?: string;
+      message: string;
+      outcome?: string;
+      contact_name?: string;
+      contact_email?: string;
+      contact_phone?: string;
+      customer_visible?: boolean;
+    },
+  ) => void;
 };
 
 export function RequestStatusScreen(props: RequestStatusScreenProps) {
@@ -38,6 +54,7 @@ export function RequestStatusScreen(props: RequestStatusScreenProps) {
     relevantRequestDetails,
     audience = 'customer',
     onUpdateBillingWorkflow,
+    onCreateCommunicationLog,
   } = props;
 
   return (
@@ -80,12 +97,20 @@ export function RequestStatusScreen(props: RequestStatusScreenProps) {
         </View>
       ) : null}
 
-      {relevantRequestDetails ? <RequestDetailsPanel details={relevantRequestDetails} /> : null}
+      {relevantRequestDetails ? <RequestDetailsPanel details={relevantRequestDetails} audience={audience} /> : null}
+      <BillingCommunicationPanel details={relevantRequestDetails} audience={audience} />
       {audience === 'admin' && onUpdateBillingWorkflow ? (
         <AdminBillingWorkflowCard
           details={relevantRequestDetails}
           isLoading={isLoading}
           onSave={onUpdateBillingWorkflow}
+        />
+      ) : null}
+      {audience === 'admin' && onCreateCommunicationLog ? (
+        <AdminCommunicationLogCard
+          details={relevantRequestDetails}
+          isLoading={isLoading}
+          onSave={onCreateCommunicationLog}
         />
       ) : null}
       <OfflineBillingChecklistPanel details={relevantRequestDetails} audience={audience} />
