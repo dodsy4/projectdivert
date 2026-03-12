@@ -413,6 +413,27 @@ if "billing_reference" not in text or f"SMOKE-INV-{rid}" not in text:
 print("Billing export includes invoice reference")
 PY
 
+log "Communication log smoke"
+COMM_CREATE_BODY="$TMP_DIR/communication_create.json"
+COMM_CREATE_STATUS="$TMP_DIR/communication_create.status"
+http_json POST "/api/v1/admin/waste-requests/$REQUEST_ID/communications" \
+  "{\"direction\":\"outbound\",\"channel\":\"email\",\"subject\":\"Smoke invoice\",\"message\":\"Sent offline invoice SMOKE-INV-$REQUEST_ID to customer\",\"outcome\":\"email_sent\",\"contact_email\":\"$CUSTOMER_EMAIL\",\"customer_visible\":true}" \
+  "$ADMIN_TOKEN" "$COMM_CREATE_BODY" "$COMM_CREATE_STATUS"
+assert_status "$(cat "$COMM_CREATE_STATUS")" "201" "Communication log create" "$COMM_CREATE_BODY"
+
+COMM_LIST_BODY="$TMP_DIR/communication_list.json"
+COMM_LIST_STATUS="$TMP_DIR/communication_list.status"
+http_json GET "/api/v1/waste-requests/$REQUEST_ID/communications?limit=20" "" "$ADMIN_TOKEN" "$COMM_LIST_BODY" "$COMM_LIST_STATUS"
+assert_status "$(cat "$COMM_LIST_STATUS")" "200" "Communication list endpoint" "$COMM_LIST_BODY"
+python - <<PY "$COMM_LIST_BODY"
+import json,sys
+payload=json.load(open(sys.argv[1]))
+if not payload.get("communications"):
+    print("Communication list is empty")
+    sys.exit(1)
+print("Communication list includes logged update")
+PY
+
 log "Payments readiness smoke"
 PAY_BODY="$TMP_DIR/payments_get.json"
 PAY_STATUS="$TMP_DIR/payments_get.status"

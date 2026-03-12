@@ -4659,7 +4659,7 @@ def _serialize_waste_request_snapshot(booking):
         .first()
     )
     compliance_documents = _compliance_documents_for_request(booking.id)
-    customer_visible_only = _current_jwt_role() == 'customer'
+    customer_visible_only = _current_jwt_role() in {'customer', 'driver'}
     communication_logs = _communication_logs_for_request(
         booking.id,
         customer_visible_only=customer_visible_only,

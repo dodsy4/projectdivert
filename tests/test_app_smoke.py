@@ -2750,3 +2750,89 @@ def test_admin_billing_requests_list_filters_and_export(client, app_context, mon
     assert 'request_id,request_status,billing_state,billing_reference' in export_text
     assert 'INV-2002' in export_text
     assert 'paid_offline' in export_text
+
+
+def test_admin_can_log_request_communications_and_customer_sees_visible_entries_only(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+
+    _create_user(app_context, 'billingadmin4@example.com', 'Password123!', role='admin', name='Billing Admin 4')
+    _create_user(app_context, 'billingcustomer4@example.com', 'Password123!', role='customer', name='Billing Customer 4')
+
+    admin_headers = _auth_header(client, 'billingadmin4@example.com', 'Password123!')
+    customer_headers = _auth_header(client, 'billingcustomer4@example.com', 'Password123!')
+
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+    create_response = client.post(
+        '/api/v1/waste-requests',
+        json={
+            'requester_name': 'Billing Customer 4',
+            'requester_email': 'billingcustomer4@example.com',
+            'material_type': 'Cardboard',
+            'waste_amount': 2.0,
+            'waste_unit': 'Tonnes',
+            'match_radius_miles': 25,
+            'pickup_address': '1 Example Road',
+            'pickup_postcode': 'SW1A1AA',
+            'scheduled_pickup_at': scheduled_time,
+        },
+        headers=customer_headers,
+    )
+    assert create_response.status_code == 201
+    request_id = create_response.get_json()['request']['id']
+
+    visible_response = client.post(
+        f'/api/v1/admin/waste-requests/{request_id}/communications',
+        json={
+            'direction': 'outbound',
+            'channel': 'email',
+            'subject': 'Invoice issued',
+            'message': 'Sent offline invoice INV-3001 to the customer.',
+            'outcome': 'email_sent',
+            'contact_email': 'billingcustomer4@example.com',
+            'customer_visible': True,
+        },
+        headers=admin_headers,
+    )
+    assert visible_response.status_code == 201
+
+    internal_response = client.post(
+        f'/api/v1/admin/waste-requests/{request_id}/communications',
+        json={
+            'direction': 'internal',
+            'channel': 'manual',
+            'message': 'Customer requested 7-day payment terms.',
+            'outcome': 'awaiting_settlement',
+            'customer_visible': False,
+        },
+        headers=admin_headers,
+    )
+    assert internal_response.status_code == 201
+
+    admin_list_response = client.get(
+        f'/api/v1/waste-requests/{request_id}/communications',
+        headers=admin_headers,
+    )
+    assert admin_list_response.status_code == 200
+    admin_payload = admin_list_response.get_json()
+    assert admin_payload['summary']['total'] == 2
+    assert admin_payload['summary']['customer_visible_count'] == 1
+
+    customer_list_response = client.get(
+        f'/api/v1/waste-requests/{request_id}/communications',
+        headers=customer_headers,
+    )
+    assert customer_list_response.status_code == 200
+    customer_payload = customer_list_response.get_json()
+    assert customer_payload['summary']['total'] == 1
+    assert len(customer_payload['communications']) == 1
+    assert customer_payload['communications'][0]['subject'] == 'Invoice issued'
+
+    request_response = client.get(
+        f'/api/v1/waste-requests/{request_id}',
+        headers=customer_headers,
+    )
+    assert request_response.status_code == 200
+    request_payload = request_response.get_json()
+    assert len(request_payload['communications']) == 1
+    assert request_payload['communication_summary']['customer_visible_count'] == 1

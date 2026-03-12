@@ -112,6 +112,7 @@ export default function App() {
     onReviewComplianceDocument,
     onUpdateBillingWorkflow,
     onInspectBillingRequest,
+    onCreateRequestCommunication,
   } = useWasteMobileController();
 
   if (isBootstrappingSession) {
@@ -374,6 +375,7 @@ export default function App() {
                     relevantRequestDetails={customerRelevantRequestDetails}
                     audience={currentRole === 'admin' ? 'admin' : 'customer'}
                     onUpdateBillingWorkflow={onUpdateBillingWorkflow}
+                    onCreateCommunicationLog={onCreateRequestCommunication}
                   />
                 )}
               </>

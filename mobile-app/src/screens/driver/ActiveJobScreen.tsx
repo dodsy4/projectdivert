@@ -170,7 +170,7 @@ export function ActiveJobScreen(props: ActiveJobScreenProps) {
         disabled={isLoading}
       />
 
-      {relevantRequestDetails ? <RequestDetailsPanel details={relevantRequestDetails} /> : null}
+      {relevantRequestDetails ? <RequestDetailsPanel details={relevantRequestDetails} audience="customer" /> : null}
 
       <View style={styles.resultBlock}>
         <Text style={styles.blockTitle}>Your Dispatch Access</Text>
