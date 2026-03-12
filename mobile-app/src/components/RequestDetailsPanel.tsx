@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { WasteRequestDetails } from '../api/client';
+import { BillingStatusPanel } from './BillingStatusPanel';
 import { ComplianceStatusPanel } from './ComplianceStatusPanel';
 
 type RequestDetailsPanelProps = {
@@ -26,6 +27,12 @@ export function RequestDetailsPanel({ details }: RequestDetailsPanelProps) {
         Dispatch: {details.dispatch?.offers_sent ?? 0} offers,{' '}
         {details.dispatch?.offers_open ?? 0} open
       </Text>
+      <Text>
+        Offline billing state: {details.request.billing_workflow?.state?.replace(/_/g, ' ') || 'pending offline invoice'}
+      </Text>
+      {details.request.billing_workflow?.reference ? (
+        <Text>Billing reference: {details.request.billing_workflow.reference}</Text>
+      ) : null}
       {details.latest_location ? (
         <Text>
           Latest location: {details.latest_location.latitude},{' '}
@@ -34,6 +41,7 @@ export function RequestDetailsPanel({ details }: RequestDetailsPanelProps) {
       ) : (
         <Text>Latest location: none yet</Text>
       )}
+      <BillingStatusPanel billing={details.billing} financials={details.financials} />
       <ComplianceStatusPanel summary={details.compliance?.summary} />
     </View>
   );

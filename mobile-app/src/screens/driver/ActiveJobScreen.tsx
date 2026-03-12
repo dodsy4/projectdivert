@@ -4,9 +4,11 @@ import React, { useCallback } from 'react';
 import { Alert, Button, Pressable, StyleSheet, Text, View } from 'react-native';
 import type {
   ComplianceDocumentType,
+  DriverOwnComplianceResponse,
   UpdateStatusPayload,
   WasteRequestDetails,
 } from '../../api/client';
+import { DispatchEligibilityPanel } from '../../components/DispatchEligibilityPanel';
 import { Field } from '../../components/Field';
 import { RequestDetailsPanel } from '../../components/RequestDetailsPanel';
 import {
@@ -27,6 +29,9 @@ type ActiveJobScreenProps = {
   onUploadComplianceDocument: () => void;
   statuses: UpdateStatusPayload['status'][];
   relevantRequestDetails: WasteRequestDetails | null;
+  driverOwnCompliance: DriverOwnComplianceResponse | null;
+  isDriverComplianceLoading: boolean;
+  onRefreshDriverOwnCompliance: () => void | Promise<void>;
 };
 
 export function ActiveJobScreen(props: ActiveJobScreenProps) {
@@ -42,6 +47,9 @@ export function ActiveJobScreen(props: ActiveJobScreenProps) {
     onUploadComplianceDocument,
     statuses,
     relevantRequestDetails,
+    driverOwnCompliance,
+    isDriverComplianceLoading,
+    onRefreshDriverOwnCompliance,
   } = props;
 
   const completionRequiredTypes =
@@ -163,6 +171,16 @@ export function ActiveJobScreen(props: ActiveJobScreenProps) {
       />
 
       {relevantRequestDetails ? <RequestDetailsPanel details={relevantRequestDetails} /> : null}
+
+      <View style={styles.resultBlock}>
+        <Text style={styles.blockTitle}>Your Dispatch Access</Text>
+        <Button
+          title={isDriverComplianceLoading ? 'Refreshing...' : 'Refresh eligibility'}
+          onPress={onRefreshDriverOwnCompliance}
+          disabled={isLoading || isDriverComplianceLoading}
+        />
+        <DispatchEligibilityPanel summary={driverOwnCompliance?.driver.compliance} title="Driver and Carrier Compliance" />
+      </View>
 
       <View style={styles.resultBlock}>
         <Text style={styles.blockTitle}>Status Flow</Text>

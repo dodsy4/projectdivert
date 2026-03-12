@@ -156,10 +156,70 @@ assert_status "$(cat "$DRIVERS_STATUS")" "200" "Admin drivers list" "$DRIVERS_BO
 DRIVER_ID="$(python - <<'PY' "$DRIVERS_BODY"
 import json,sys
 items=json.load(open(sys.argv[1])).get("items",[])
-print(items[0]["id"] if items else "")
+eligible = next((item for item in items if item.get("dispatch_eligible")), None)
+selected = eligible or (items[0] if items else None)
+if not selected:
+    print("")
+else:
+    print(f'{selected["id"]}|{"true" if selected.get("dispatch_eligible") else "false"}')
 PY
 )"
 if [[ -n "$DRIVER_ID" ]]; then
+  DRIVER_ELIGIBLE="${DRIVER_ID##*|}"
+  DRIVER_ID="${DRIVER_ID%%|*}"
+
+  if [[ "$DRIVER_ELIGIBLE" != "true" ]]; then
+    COMPANY_BODY="$TMP_DIR/carrier_company_${DRIVER_ID}.json"
+    COMPANY_STATUS="$TMP_DIR/carrier_company_${DRIVER_ID}.status"
+    http_json POST "/api/v1/admin/carrier-companies" \
+      "{\"name\":\"Smoke Carrier $DRIVER_ID\",\"contact_email\":\"smoke-carrier-$DRIVER_ID@example.com\"}" \
+      "$ADMIN_TOKEN" "$COMPANY_BODY" "$COMPANY_STATUS"
+    COMPANY_HTTP_STATUS="$(cat "$COMPANY_STATUS")"
+    if [[ "$COMPANY_HTTP_STATUS" == "201" ]]; then
+      CARRIER_COMPANY_ID="$(python - <<'PY' "$COMPANY_BODY"
+import json,sys
+print(json.load(open(sys.argv[1]))["company"]["id"])
+PY
+)"
+    elif [[ "$COMPANY_HTTP_STATUS" == "409" ]]; then
+      CARRIER_COMPANY_ID="$(python - <<'PY' "$COMPANY_BODY"
+import json,sys
+print((json.load(open(sys.argv[1])).get("company") or {}).get("id",""))
+PY
+)"
+    else
+      assert_status "$COMPANY_HTTP_STATUS" "201" "Carrier company create" "$COMPANY_BODY"
+    fi
+    [[ -n "${CARRIER_COMPANY_ID:-}" ]] || fail "Failed to resolve carrier company id for smoke driver bootstrap"
+
+    DRIVER_COMPANY_BODY="$TMP_DIR/driver_${DRIVER_ID}_carrier_company.json"
+    DRIVER_COMPANY_STATUS="$TMP_DIR/driver_${DRIVER_ID}_carrier_company.status"
+    http_json POST "/api/v1/admin/drivers/$DRIVER_ID/carrier-company" \
+      "{\"carrier_company_id\":$CARRIER_COMPANY_ID}" \
+      "$ADMIN_TOKEN" "$DRIVER_COMPANY_BODY" "$DRIVER_COMPANY_STATUS"
+    assert_status "$(cat "$DRIVER_COMPANY_STATUS")" "200" "Assign carrier company to driver" "$DRIVER_COMPANY_BODY"
+
+    for DOC_TYPE in carrier_license insurance_certificate; do
+      DOC_REF="$(printf '%s' "$DOC_TYPE" | tr '[:lower:]' '[:upper:]')"
+      DRIVER_COMPLIANCE_BODY="$TMP_DIR/driver_${DRIVER_ID}_${DOC_TYPE}.json"
+      DRIVER_COMPLIANCE_STATUS="$TMP_DIR/driver_${DRIVER_ID}_${DOC_TYPE}.status"
+      http_json POST "/api/v1/admin/drivers/$DRIVER_ID/compliance/documents" \
+        "{\"document_type\":\"$DOC_TYPE\",\"status\":\"verified\",\"file_url\":\"https://example.com/smoke/$DOC_TYPE-$DRIVER_ID.pdf\",\"document_reference\":\"SMOKE-$DOC_REF-$DRIVER_ID\"}" \
+        "$ADMIN_TOKEN" "$DRIVER_COMPLIANCE_BODY" "$DRIVER_COMPLIANCE_STATUS"
+      assert_status "$(cat "$DRIVER_COMPLIANCE_STATUS")" "201" "Driver compliance seed ($DOC_TYPE)" "$DRIVER_COMPLIANCE_BODY"
+    done
+    for DOC_TYPE in operator_license insurance_certificate; do
+      DOC_REF="$(printf '%s' "$DOC_TYPE" | tr '[:lower:]' '[:upper:]')"
+      COMPANY_COMPLIANCE_BODY="$TMP_DIR/company_${CARRIER_COMPANY_ID}_${DOC_TYPE}.json"
+      COMPANY_COMPLIANCE_STATUS="$TMP_DIR/company_${CARRIER_COMPANY_ID}_${DOC_TYPE}.status"
+      http_json POST "/api/v1/admin/carrier-companies/$CARRIER_COMPANY_ID/compliance/documents" \
+        "{\"document_type\":\"$DOC_TYPE\",\"status\":\"verified\",\"file_url\":\"https://example.com/smoke/$DOC_TYPE-$CARRIER_COMPANY_ID.pdf\",\"document_reference\":\"SMOKE-$DOC_REF-$CARRIER_COMPANY_ID\"}" \
+        "$ADMIN_TOKEN" "$COMPANY_COMPLIANCE_BODY" "$COMPANY_COMPLIANCE_STATUS"
+      assert_status "$(cat "$COMPANY_COMPLIANCE_STATUS")" "201" "Company compliance seed ($DOC_TYPE)" "$COMPANY_COMPLIANCE_BODY"
+    done
+    echo "Seeded required driver and company compliance for driver_id=$DRIVER_ID carrier_company_id=$CARRIER_COMPANY_ID"
+  fi
+
   ASSIGN_BODY="$TMP_DIR/assign.json"
   ASSIGN_STATUS="$TMP_DIR/assign.status"
   http_json POST "/api/v1/admin/waste-requests/$REQUEST_ID/dispatch/override" \

@@ -105,7 +105,7 @@ export function useCustomerRequestActions(params: UseCustomerRequestActionsParam
       setRequestDetails(snapshot);
 
       setInfo(
-        `Created waste request #${response.request.id}. Dispatch offers: ${response.dispatch?.offers_created ?? 0}.`,
+        `Created waste request #${response.request.id}. Dispatch offers: ${response.dispatch?.offers_created ?? 0}. Billing will be arranged offline.`,
       );
     } catch (err) {
       setError(normalizeError(err));

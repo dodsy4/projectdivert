@@ -26,6 +26,7 @@ type UseDriverJobActionsParams = {
   setComplianceUpload: React.Dispatch<React.SetStateAction<ComplianceUploadState>>;
   setDriverJob: React.Dispatch<React.SetStateAction<DriverJobState>>;
   setDriverScreen: React.Dispatch<React.SetStateAction<DriverScreen>>;
+  onRefreshDriverCompliance?: () => Promise<void> | void;
   setError: React.Dispatch<React.SetStateAction<string | null>>;
   setInfo: React.Dispatch<React.SetStateAction<string | null>>;
   setIsLoading: React.Dispatch<React.SetStateAction<boolean>>;
@@ -43,6 +44,7 @@ export function useDriverJobActions(params: UseDriverJobActionsParams) {
     setComplianceUpload,
     setDriverJob,
     setDriverScreen,
+    onRefreshDriverCompliance,
     setError,
     setInfo,
     setIsLoading,
@@ -337,6 +339,7 @@ export function useDriverJobActions(params: UseDriverJobActionsParams) {
       const response = await apiClient.createComplianceDocument(requestId, payload, auth.access_token);
       const snapshot = await fetchRequestSnapshot(requestId, auth.access_token);
       setRequestDetails(snapshot);
+      await onRefreshDriverCompliance?.();
       setCustomerRequestId(String(requestId));
       setComplianceUpload((prev) => ({
         ...prev,
@@ -368,6 +371,7 @@ export function useDriverJobActions(params: UseDriverJobActionsParams) {
     setInfo,
     setIsLoading,
     setRequestDetails,
+    onRefreshDriverCompliance,
     uploadViaSignedUrl,
   ]);
 

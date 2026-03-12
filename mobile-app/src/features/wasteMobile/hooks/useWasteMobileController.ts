@@ -1,8 +1,10 @@
 import { Alert } from 'react-native';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
+  AdminDriversResponse,
   AdminComplianceReviewQueueResponse,
   CreateWasteRequestResponse,
+  DriverOwnComplianceResponse,
   WasteRequestRealtimeEvent,
 } from '../../../api/client';
 import { apiClient } from '../../../api/client';
@@ -35,6 +37,8 @@ export function useWasteMobileController() {
     useState<ComplianceUploadState>(defaultComplianceUploadState);
   const [adminComplianceReviewQueue, setAdminComplianceReviewQueue] =
     useState<AdminComplianceReviewQueueResponse | null>(null);
+  const [adminDrivers, setAdminDrivers] = useState<AdminDriversResponse | null>(null);
+  const [driverOwnCompliance, setDriverOwnCompliance] = useState<DriverOwnComplianceResponse | null>(null);
 
   const [created, setCreated] = useState<CreateWasteRequestResponse | null>(null);
   const [customerScreen, setCustomerScreen] = useState<CustomerScreen>('new-request');
@@ -43,6 +47,8 @@ export function useWasteMobileController() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [isComplianceQueueLoading, setIsComplianceQueueLoading] = useState(false);
+  const [isAdminDriversLoading, setIsAdminDriversLoading] = useState(false);
+  const [isDriverComplianceLoading, setIsDriverComplianceLoading] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -104,6 +110,7 @@ export function useWasteMobileController() {
       payout_processed: 'Payout processed',
       compliance_document_created: 'Compliance document uploaded',
       compliance_document_reviewed: 'Compliance document reviewed',
+      admin_billing_updated: 'Billing workflow updated',
       admin_dispatch_override: 'Dispatch override applied',
       admin_dispatch_incident_ack: 'Incident acknowledged',
       admin_dispatch_incident_resolve: 'Incident resolved',
@@ -165,28 +172,6 @@ export function useWasteMobileController() {
     setIsLoading,
   });
 
-  const {
-    onAcceptDispatchOffer,
-    onLoadDriverJob,
-    onUpdateDriverStatus,
-    onPushLocation,
-    onUploadComplianceDocument,
-  } = useDriverJobActions({
-    auth,
-    driverOffer,
-    driverJob,
-    fetchRequestSnapshot,
-    setRequestDetails,
-    setCustomerRequestId,
-    complianceUpload,
-    setComplianceUpload,
-    setDriverJob,
-    setDriverScreen,
-    setError,
-    setInfo,
-    setIsLoading,
-  });
-
   const onLoadComplianceReviewQueue = useCallback(async () => {
     if (!auth || auth.user.role !== 'admin') {
       return;
@@ -208,6 +193,68 @@ export function useWasteMobileController() {
     }
   }, [auth, setError]);
 
+  const onLoadAdminDrivers = useCallback(async () => {
+    if (!auth || auth.user.role !== 'admin') {
+      return;
+    }
+
+    setError(null);
+    setIsAdminDriversLoading(true);
+
+    try {
+      const drivers = await apiClient.getAdminDrivers(auth.access_token, {
+        active: true,
+        limit: 20,
+      });
+      setAdminDrivers(drivers);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load driver eligibility.');
+    } finally {
+      setIsAdminDriversLoading(false);
+    }
+  }, [auth, setError]);
+
+  const onLoadDriverOwnCompliance = useCallback(async () => {
+    if (!auth || auth.user.role !== 'driver') {
+      return;
+    }
+
+    setError(null);
+    setIsDriverComplianceLoading(true);
+
+    try {
+      const profile = await apiClient.getDriverOwnCompliance(auth.access_token);
+      setDriverOwnCompliance(profile);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load your dispatch eligibility.');
+    } finally {
+      setIsDriverComplianceLoading(false);
+    }
+  }, [auth, setError]);
+
+  const {
+    onAcceptDispatchOffer,
+    onLoadDriverJob,
+    onUpdateDriverStatus,
+    onPushLocation,
+    onUploadComplianceDocument,
+  } = useDriverJobActions({
+    auth,
+    driverOffer,
+    driverJob,
+    fetchRequestSnapshot,
+    setRequestDetails,
+    setCustomerRequestId,
+    complianceUpload,
+    setComplianceUpload,
+    setDriverJob,
+    setDriverScreen,
+    onRefreshDriverCompliance: onLoadDriverOwnCompliance,
+    setError,
+    setInfo,
+    setIsLoading,
+  });
+
   const onReviewComplianceDocument = useCallback(
     async (requestId: number, documentId: number, status: 'verified' | 'rejected') => {
       if (!auth || auth.user.role !== 'admin') {
@@ -226,6 +273,7 @@ export function useWasteMobileController() {
           auth.access_token,
         );
         await onLoadComplianceReviewQueue();
+        await onLoadAdminDrivers();
 
         const activeRequestId =
           customerRequestIdParsed === requestId || driverJobRequestIdParsed === requestId
@@ -248,6 +296,7 @@ export function useWasteMobileController() {
       customerRequestIdParsed,
       driverJobRequestIdParsed,
       fetchRequestSnapshot,
+      onLoadAdminDrivers,
       onLoadComplianceReviewQueue,
       setError,
       setInfo,
@@ -258,11 +307,46 @@ export function useWasteMobileController() {
   useEffect(() => {
     if (auth?.user.role !== 'admin') {
       setAdminComplianceReviewQueue(null);
+      setAdminDrivers(null);
       return;
     }
 
     void onLoadComplianceReviewQueue();
-  }, [auth?.user.role, onLoadComplianceReviewQueue]);
+    void onLoadAdminDrivers();
+  }, [auth?.user.role, onLoadAdminDrivers, onLoadComplianceReviewQueue]);
+
+  useEffect(() => {
+    if (auth?.user.role !== 'driver') {
+      setDriverOwnCompliance(null);
+      return;
+    }
+
+    void onLoadDriverOwnCompliance();
+  }, [auth?.user.role, onLoadDriverOwnCompliance]);
+
+  const onUpdateBillingWorkflow = useCallback(
+    async (requestId: number, payload: { state: string; reference?: string; notes?: string }) => {
+      if (!auth || auth.user.role !== 'admin') {
+        return;
+      }
+
+      setError(null);
+      setInfo(null);
+      setIsLoading(true);
+
+      try {
+        await apiClient.updateBillingWorkflow(requestId, payload, auth.access_token);
+        const snapshot = await fetchRequestSnapshot(requestId, auth.access_token);
+        setRequestDetails(snapshot);
+        setInfo(`Updated offline billing workflow for request #${requestId}.`);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unable to update billing workflow.');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [auth, fetchRequestSnapshot, setError, setInfo, setIsLoading, setRequestDetails],
+  );
 
   const onLogout = useCallback(async () => {
     await onBeforeLogout();
@@ -276,6 +360,8 @@ export function useWasteMobileController() {
     setCreated(null);
     setRequestDetails(null);
     setAdminComplianceReviewQueue(null);
+    setAdminDrivers(null);
+    setDriverOwnCompliance(null);
     setCustomerScreen('new-request');
     setDriverScreen('offer-inbox');
     setAdminViewMode('customer');
@@ -332,12 +418,16 @@ export function useWasteMobileController() {
     syncState,
     isBootstrappingSession,
     isComplianceQueueLoading,
+    isAdminDriversLoading,
+    isDriverComplianceLoading,
     info,
     error,
     hasTrackedCustomerRequest,
     customerRelevantRequestDetails,
     driverRelevantRequestDetails,
     adminComplianceReviewQueue,
+    adminDrivers,
+    driverOwnCompliance,
     currentRole,
     onLogin,
     onSignup,
@@ -354,6 +444,9 @@ export function useWasteMobileController() {
     onPushLocation,
     onUploadComplianceDocument,
     onLoadComplianceReviewQueue,
+    onLoadAdminDrivers,
+    onLoadDriverOwnCompliance,
     onReviewComplianceDocument,
+    onUpdateBillingWorkflow,
   };
 }

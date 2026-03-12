@@ -55,15 +55,18 @@ export function useRequestPolling(params: UseRequestPollingParams) {
 
   const fetchRequestSnapshot = useCallback(
     async (requestId: number, token: string): Promise<WasteRequestDetails> => {
-      const [details, latest, compliance] = await Promise.all([
+      const [details, latest, compliance, financials] = await Promise.all([
         apiClient.getWasteRequest(requestId, token),
         apiClient.getLatestLocation(requestId, token),
         apiClient.getWasteRequestCompliance(requestId, token).catch(() => null),
+        apiClient.getWasteRequestFinancials(requestId, token).catch(() => null),
       ]);
 
       return {
         ...details,
         latest_location: latest?.latest_location || details.latest_location,
+        financials: financials?.financials || details.financials,
+        billing: financials?.billing || details.billing,
         compliance: compliance
           ? {
               documents: compliance.documents,

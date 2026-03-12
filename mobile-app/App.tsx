@@ -11,6 +11,8 @@ import {
 } from 'react-native';
 import { apiClient } from './src/api/client';
 import { AdminComplianceReviewCard } from './src/components/AdminComplianceReviewCard';
+import { AdminDriverEligibilityCard } from './src/components/AdminDriverEligibilityCard';
+import { AdminLaunchBillingCard } from './src/components/AdminLaunchBillingCard';
 import { Field } from './src/components/Field';
 import { ScreenTabs } from './src/components/ScreenTabs';
 import {
@@ -75,12 +77,16 @@ export default function App() {
     syncState,
     isBootstrappingSession,
     isComplianceQueueLoading,
+    isAdminDriversLoading,
+    isDriverComplianceLoading,
     info,
     error,
     hasTrackedCustomerRequest,
     customerRelevantRequestDetails,
     driverRelevantRequestDetails,
     adminComplianceReviewQueue,
+    adminDrivers,
+    driverOwnCompliance,
     currentRole,
     onLogin,
     onSignup,
@@ -97,7 +103,10 @@ export default function App() {
     onPushLocation,
     onUploadComplianceDocument,
     onLoadComplianceReviewQueue,
+    onLoadAdminDrivers,
+    onLoadDriverOwnCompliance,
     onReviewComplianceDocument,
+    onUpdateBillingWorkflow,
   } = useWasteMobileController();
 
   if (isBootstrappingSession) {
@@ -117,7 +126,7 @@ export default function App() {
         <Text style={styles.title}>Project Divert Mobile</Text>
         <Text style={styles.caption}>API Base URL: {apiClient.apiBaseUrl}</Text>
         <Text style={styles.caption}>
-          Payments: {apiClient.paymentsEnabled ? 'Enabled' : 'Disabled (feature flag)'}
+          Billing mode: {apiClient.paymentsEnabled ? 'In-app payments' : 'Offline invoicing launch mode'}
         </Text>
         <Text style={styles.caption}>
           Realtime: {syncState.replace('_', ' ')} | Reconnect: {apiClient.realtimeReconnectDelayMs}ms
@@ -315,6 +324,12 @@ export default function App() {
                   onRefresh={onLoadComplianceReviewQueue}
                   onReview={onReviewComplianceDocument}
                 />
+                <AdminLaunchBillingCard />
+                <AdminDriverEligibilityCard
+                  drivers={adminDrivers}
+                  isLoading={isAdminDriversLoading}
+                  onRefresh={onLoadAdminDrivers}
+                />
               </>
             ) : null}
 
@@ -346,6 +361,8 @@ export default function App() {
                     isFallbackPolling={isFallbackPolling}
                     created={created}
                     relevantRequestDetails={customerRelevantRequestDetails}
+                    audience={currentRole === 'admin' ? 'admin' : 'customer'}
+                    onUpdateBillingWorkflow={onUpdateBillingWorkflow}
                   />
                 )}
               </>
@@ -379,6 +396,9 @@ export default function App() {
                     onUploadComplianceDocument={onUploadComplianceDocument}
                     statuses={driverProgressionStatuses}
                     relevantRequestDetails={driverRelevantRequestDetails}
+                    driverOwnCompliance={driverOwnCompliance}
+                    isDriverComplianceLoading={isDriverComplianceLoading}
+                    onRefreshDriverOwnCompliance={onLoadDriverOwnCompliance}
                   />
                 )}
               </>

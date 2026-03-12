@@ -128,11 +128,77 @@ export type ComplianceSummary = {
   total_documents: number;
 };
 
+export type DispatchComplianceSummary = {
+  required_document_types: string[];
+  dispatch_required_document_types: string[];
+  dispatch_eligible: boolean;
+  dispatch_missing_document_types: string[];
+  by_type: Record<string, ComplianceSummaryEntry>;
+  total_documents: number;
+};
+
+export type CarrierCompany = {
+  id: number;
+  name: string;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  is_active: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+  compliance?: DispatchComplianceSummary;
+};
+
+export type DispatchEligibilitySummary = {
+  driver: DispatchComplianceSummary;
+  company: DispatchComplianceSummary | null;
+  carrier_company_assigned: boolean;
+  carrier_company_active: boolean;
+  carrier_company: CarrierCompany | null;
+};
+
+export type DispatchDriver = {
+  id: number;
+  email: string;
+  name?: string | null;
+  role: string;
+  is_active: boolean;
+  carrier_company_id?: number | null;
+  carrier_company?: CarrierCompany | null;
+  dispatch_eligible: boolean;
+  dispatch_missing_document_types: string[];
+  compliance: DispatchEligibilitySummary;
+};
+
 export type RequestComplianceDetails = {
   request_id: number;
   request_status: string;
   documents: ComplianceDocument[];
   summary: ComplianceSummary;
+};
+
+export type DriverComplianceDocumentRecord = Omit<ComplianceDocument, 'waste_removal_request_id'> & {
+  driver_user_id: number;
+};
+
+export type DriverOwnComplianceResponse = {
+  driver: DispatchDriver;
+  documents: DriverComplianceDocumentRecord[];
+  summary: DispatchComplianceSummary;
+};
+
+export type AdminDriversResponse = {
+  items: DispatchDriver[];
+  pagination: {
+    limit: number;
+    offset: number;
+    returned: number;
+    total: number;
+    has_more: boolean;
+  };
+  filters: {
+    active?: boolean | string | null;
+    search?: string;
+  };
 };
 
 export type CreateComplianceDocumentPayload = {
@@ -190,6 +256,95 @@ export type SignedComplianceUploadResponse = {
   upload: UploadComplianceFileResponse['upload'];
 };
 
+export type PaymentCharge = {
+  id: number;
+  waste_removal_request_id: number;
+  customer_user_id?: number | null;
+  processor?: string | null;
+  payment_intent_id?: string | null;
+  charge_id?: string | null;
+  amount_minor: number;
+  currency: string;
+  platform_fee_minor: number;
+  driver_payout_minor: number;
+  status: string;
+  client_secret?: string | null;
+  last_error?: string | null;
+  paid_at?: string | null;
+  refunded_at?: string | null;
+  metadata?: Record<string, unknown>;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type PaymentRefund = {
+  id: number;
+  waste_removal_request_id: number;
+  payment_charge_id: number;
+  processor?: string | null;
+  refund_id?: string | null;
+  amount_minor: number;
+  currency: string;
+  status: string;
+  reason?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type DriverPayout = {
+  id: number;
+  waste_removal_request_id: number;
+  payment_charge_id: number;
+  driver_user_id: number;
+  processor?: string | null;
+  payout_id?: string | null;
+  destination_account_id?: string | null;
+  amount_minor: number;
+  currency: string;
+  status: string;
+  paid_out_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type RequestFinancials = {
+  charges: PaymentCharge[];
+  refunds: PaymentRefund[];
+  payouts: DriverPayout[];
+  totals: {
+    charged_minor: number;
+    refunded_minor: number;
+    paid_out_minor: number;
+    platform_net_minor: number;
+  };
+};
+
+export type BillingSummary = {
+  mode: 'offline' | 'in_app' | string;
+  payments_enabled: boolean;
+  stripe_configured?: boolean;
+  launch_scope?: string;
+  offline_reason?: string | null;
+  customer_message?: string;
+  admin_message?: string;
+  actions_disabled?: string[];
+};
+
+export type BillingWorkflowState =
+  | 'pending_offline_invoice'
+  | 'invoice_sent'
+  | 'paid_offline'
+  | 'payout_recorded'
+  | 'cancelled';
+
+export type BillingWorkflow = {
+  state: BillingWorkflowState | string;
+  reference?: string | null;
+  notes?: string | null;
+  updated_at?: string | null;
+  updated_by_user_id?: number | null;
+};
+
 export type WasteRequest = {
   id: number;
   requester_name: string;
@@ -205,6 +360,7 @@ export type WasteRequest = {
   notes?: string | null;
   status: string;
   assigned_driver_user_id?: number | null;
+  billing_workflow?: BillingWorkflow | null;
   created_at: string;
 };
 
@@ -239,10 +395,34 @@ export type WasteRequestDetails = {
   match: WasteMatch | null;
   latest_location: VehicleLocation | null;
   dispatch?: DispatchSummary;
+  financials?: RequestFinancials;
+  billing?: BillingSummary;
   compliance?: {
     documents: ComplianceDocument[];
     summary: ComplianceSummary;
   };
+};
+
+export type WasteRequestFinancialsResponse = {
+  request_id: number;
+  request_status: string;
+  payments_enabled: boolean;
+  billing: BillingSummary;
+  financials: RequestFinancials;
+};
+
+export type UpdateBillingWorkflowPayload = {
+  state: BillingWorkflowState | string;
+  reference?: string;
+  notes?: string;
+};
+
+export type UpdateBillingWorkflowResponse = {
+  updated: boolean;
+  previous_state?: string;
+  request: WasteRequest;
+  billing: BillingSummary;
+  financials: RequestFinancials;
 };
 
 export type WasteRequestRealtimeEventName =
@@ -256,6 +436,7 @@ export type WasteRequestRealtimeEventName =
   | 'payout_processed'
   | 'compliance_document_created'
   | 'compliance_document_reviewed'
+  | 'admin_billing_updated'
   | 'admin_dispatch_override'
   | 'admin_dispatch_incident_ack'
   | 'admin_dispatch_incident_resolve'
@@ -754,6 +935,33 @@ export const apiClient = {
     ) as Promise<RequestComplianceDetails>;
   },
 
+  getWasteRequestFinancials(requestId: number, token: string) {
+    return requestJson<WasteRequestFinancialsResponse>(
+      `/api/v1/waste-requests/${requestId}/payments`,
+      { method: 'GET' },
+      { token },
+    ) as Promise<WasteRequestFinancialsResponse>;
+  },
+
+  updateBillingWorkflow(requestId: number, payload: UpdateBillingWorkflowPayload, token: string) {
+    return requestJson<UpdateBillingWorkflowResponse>(
+      `/api/v1/admin/waste-requests/${requestId}/billing`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      { token },
+    ) as Promise<UpdateBillingWorkflowResponse>;
+  },
+
+  getDriverOwnCompliance(token: string) {
+    return requestJson<DriverOwnComplianceResponse>(
+      '/api/v1/drivers/me/compliance',
+      { method: 'GET' },
+      { token },
+    ) as Promise<DriverOwnComplianceResponse>;
+  },
+
   getLatestLocation(requestId: number, token: string) {
     return requestJson<{ request_id: number; request_status: string; latest_location: VehicleLocation }>(
       `/api/v1/waste-requests/${requestId}/location/latest`,
@@ -886,6 +1094,28 @@ export const apiClient = {
       { method: 'GET' },
       { token },
     ) as Promise<AdminComplianceReviewQueueResponse>;
+  },
+
+  getAdminDrivers(
+    token: string,
+    params: { active?: boolean; limit?: number; search?: string } = {},
+  ) {
+    const search = new URLSearchParams();
+    if (params.active !== undefined) {
+      search.set('active', params.active ? 'true' : 'false');
+    }
+    if (params.limit) {
+      search.set('limit', String(params.limit));
+    }
+    if (params.search) {
+      search.set('search', params.search);
+    }
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    return requestJson<AdminDriversResponse>(
+      `/api/v1/admin/drivers${suffix}`,
+      { method: 'GET' },
+      { token },
+    ) as Promise<AdminDriversResponse>;
   },
 
   upsertPushSubscription(payload: UpsertPushSubscriptionPayload, token: string) {

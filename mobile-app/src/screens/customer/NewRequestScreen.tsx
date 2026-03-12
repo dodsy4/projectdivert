@@ -1,5 +1,6 @@
 import React from 'react';
 import { Button, StyleSheet, Text, View } from 'react-native';
+import { apiClient } from '../../api/client';
 import { Field } from '../../components/Field';
 import type { RequestFormState } from '../../features/wasteMobile/types';
 
@@ -16,6 +17,14 @@ export function NewRequestScreen(props: NewRequestScreenProps) {
   return (
     <View style={styles.card}>
       <Text style={styles.cardTitle}>New Waste Request</Text>
+      {!apiClient.paymentsEnabled ? (
+        <View style={styles.notice}>
+          <Text style={styles.noticeTitle}>Offline Billing Launch Mode</Text>
+          <Text style={styles.noticeText}>
+            Submit the request normally. Billing will be arranged offline after booking confirmation.
+          </Text>
+        </View>
+      ) : null}
       <Field
         label="Requester name"
         value={form.requesterName}
@@ -109,5 +118,20 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 16,
     fontWeight: '700',
+  },
+  notice: {
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: '#f7f3e9',
+    borderWidth: 1,
+    borderColor: '#e0c98f',
+    gap: 4,
+  },
+  noticeTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  noticeText: {
+    color: '#6b5a2b',
   },
 });

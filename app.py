@@ -94,6 +94,11 @@ class User(UserMixin, db.Model):
     is_active_user = db.Column(db.Boolean, nullable=False, default=True)
     email_verified_at = db.Column(db.DateTime, index=True)
     access_token_revoked_at = db.Column(db.DateTime, index=True)
+    carrier_company_id = db.Column(
+        db.Integer,
+        db.ForeignKey('carrier_companies.id'),
+        index=True,
+    )
 
     def __repr__(self):
         return '<User {}>'.format(self.email)
@@ -297,6 +302,15 @@ class WasteRemovalRequest(db.Model):
     incident_updated_at = db.Column(db.DateTime, index=True)
     incident_last_escalation_key = db.Column(db.String(120), index=True)
     incident_last_escalated_at = db.Column(db.DateTime, index=True)
+    billing_state = db.Column(db.String(32), index=True)
+    billing_reference = db.Column(db.String(120))
+    billing_notes = db.Column(db.Text)
+    billing_updated_at = db.Column(db.DateTime, index=True)
+    billing_updated_by_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id'),
+        index=True,
+    )
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     def __repr__(self):
@@ -460,6 +474,116 @@ class WasteComplianceDocument(db.Model):
     def __repr__(self):
         return '<WasteComplianceDocument request={} type={} status={}>'.format(
             self.waste_removal_request_id,
+            self.document_type,
+            self.status,
+        )
+
+
+class CarrierCompany(db.Model):
+    __tablename__ = 'carrier_companies'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False, unique=True, index=True)
+    contact_email = db.Column(db.String(255), index=True)
+    contact_phone = db.Column(db.String(120))
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    def __repr__(self):
+        return '<CarrierCompany {} {}>'.format(self.id, self.name)
+
+
+class DriverComplianceDocument(db.Model):
+    __tablename__ = 'driver_compliance_documents'
+
+    id = db.Column(db.Integer, primary_key=True)
+    driver_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id'),
+        nullable=False,
+        index=True,
+    )
+    uploaded_by_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id'),
+        index=True,
+    )
+    verified_by_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id'),
+        index=True,
+    )
+    document_type = db.Column(db.String(64), nullable=False, index=True)
+    status = db.Column(db.String(32), nullable=False, default='submitted', index=True)
+    file_url = db.Column(db.String(500), nullable=False)
+    document_reference = db.Column(db.String(120))
+    issued_at = db.Column(db.DateTime)
+    expires_at = db.Column(db.DateTime, index=True)
+    verified_at = db.Column(db.DateTime, index=True)
+    notes = db.Column(db.Text)
+    metadata_json = db.Column(db.JSON, nullable=False, default=dict)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    def __repr__(self):
+        return '<DriverComplianceDocument driver={} type={} status={}>'.format(
+            self.driver_user_id,
+            self.document_type,
+            self.status,
+        )
+
+
+class CompanyComplianceDocument(db.Model):
+    __tablename__ = 'company_compliance_documents'
+
+    id = db.Column(db.Integer, primary_key=True)
+    carrier_company_id = db.Column(
+        db.Integer,
+        db.ForeignKey('carrier_companies.id'),
+        nullable=False,
+        index=True,
+    )
+    uploaded_by_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id'),
+        index=True,
+    )
+    verified_by_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id'),
+        index=True,
+    )
+    document_type = db.Column(db.String(64), nullable=False, index=True)
+    status = db.Column(db.String(32), nullable=False, default='submitted', index=True)
+    file_url = db.Column(db.String(500), nullable=False)
+    document_reference = db.Column(db.String(120))
+    issued_at = db.Column(db.DateTime)
+    expires_at = db.Column(db.DateTime, index=True)
+    verified_at = db.Column(db.DateTime, index=True)
+    notes = db.Column(db.Text)
+    metadata_json = db.Column(db.JSON, nullable=False, default=dict)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    def __repr__(self):
+        return '<CompanyComplianceDocument company={} type={} status={}>'.format(
+            self.carrier_company_id,
             self.document_type,
             self.status,
         )
@@ -2342,6 +2466,18 @@ def _request_driver_mutation_allowed(booking):
     return False
 
 
+def _driver_dispatch_eligibility_error(driver_user_id):
+    normalized_driver_user_id = _to_int_or_none(driver_user_id)
+    if normalized_driver_user_id is None:
+        return 'driver_user_id is required', []
+
+    status = _driver_dispatch_compliance_status(normalized_driver_user_id)
+    if status['eligible']:
+        return '', []
+
+    return 'Driver compliance review incomplete for dispatch', status['missing_document_types']
+
+
 def jwt_required(roles=None):
     roles = {str(role).strip().lower() for role in (roles or set()) if str(role).strip()}
 
@@ -3437,6 +3573,28 @@ def _parse_datetime_or_error(value, label):
     return parsed
 
 
+OFFLINE_BILLING_STATES = {
+    'pending_offline_invoice',
+    'invoice_sent',
+    'paid_offline',
+    'payout_recorded',
+    'cancelled',
+}
+
+
+def _serialize_request_billing_workflow(booking):
+    if not booking:
+        return None
+    state = (booking.billing_state or '').strip().lower() or 'pending_offline_invoice'
+    return {
+        'state': state,
+        'reference': booking.billing_reference,
+        'notes': booking.billing_notes,
+        'updated_at': booking.billing_updated_at.isoformat() if booking.billing_updated_at else None,
+        'updated_by_user_id': booking.billing_updated_by_user_id,
+    }
+
+
 def _serialize_waste_request(booking):
     return {
         'id': booking.id,
@@ -3466,6 +3624,7 @@ def _serialize_waste_request(booking):
         'incident_last_escalated_at': (
             booking.incident_last_escalated_at.isoformat() if booking.incident_last_escalated_at else None
         ),
+        'billing_workflow': _serialize_request_billing_workflow(booking),
         'created_at': booking.created_at.isoformat() if booking.created_at else None,
     }
 
@@ -3543,6 +3702,26 @@ COMPLIANCE_DRIVER_UPLOAD_TYPES = {
     'proof_of_collection_photo',
 }
 
+DRIVER_COMPLIANCE_DOCUMENT_TYPES = {
+    'carrier_license',
+    'insurance_certificate',
+}
+
+DRIVER_DISPATCH_REQUIRED_TYPES = {
+    'carrier_license',
+    'insurance_certificate',
+}
+
+COMPANY_COMPLIANCE_DOCUMENT_TYPES = {
+    'operator_license',
+    'insurance_certificate',
+}
+
+COMPANY_DISPATCH_REQUIRED_TYPES = {
+    'operator_license',
+    'insurance_certificate',
+}
+
 COMPLIANCE_COMPLETION_REQUIRED_TYPES = {
     'waste_transfer_note',
     'proof_of_collection_photo',
@@ -3561,6 +3740,8 @@ def _normalize_compliance_document_type(value):
     aliases = {
         'carrier_licence': 'carrier_license',
         'carrier_license': 'carrier_license',
+        'operator_licence': 'operator_license',
+        'operator_license': 'operator_license',
         'insurance': 'insurance_certificate',
         'insurance_certificate': 'insurance_certificate',
         'wtn': 'waste_transfer_note',
@@ -3593,6 +3774,50 @@ def _serialize_compliance_document(document):
     }
 
 
+def _serialize_driver_compliance_document(document):
+    if not document:
+        return None
+    return {
+        'id': document.id,
+        'driver_user_id': document.driver_user_id,
+        'uploaded_by_user_id': document.uploaded_by_user_id,
+        'verified_by_user_id': document.verified_by_user_id,
+        'document_type': document.document_type,
+        'status': document.status,
+        'file_url': document.file_url,
+        'document_reference': document.document_reference,
+        'issued_at': document.issued_at.isoformat() if document.issued_at else None,
+        'expires_at': document.expires_at.isoformat() if document.expires_at else None,
+        'verified_at': document.verified_at.isoformat() if document.verified_at else None,
+        'notes': document.notes,
+        'metadata': document.metadata_json or {},
+        'created_at': document.created_at.isoformat() if document.created_at else None,
+        'updated_at': document.updated_at.isoformat() if document.updated_at else None,
+    }
+
+
+def _serialize_company_compliance_document(document):
+    if not document:
+        return None
+    return {
+        'id': document.id,
+        'carrier_company_id': document.carrier_company_id,
+        'uploaded_by_user_id': document.uploaded_by_user_id,
+        'verified_by_user_id': document.verified_by_user_id,
+        'document_type': document.document_type,
+        'status': document.status,
+        'file_url': document.file_url,
+        'document_reference': document.document_reference,
+        'issued_at': document.issued_at.isoformat() if document.issued_at else None,
+        'expires_at': document.expires_at.isoformat() if document.expires_at else None,
+        'verified_at': document.verified_at.isoformat() if document.verified_at else None,
+        'notes': document.notes,
+        'metadata': document.metadata_json or {},
+        'created_at': document.created_at.isoformat() if document.created_at else None,
+        'updated_at': document.updated_at.isoformat() if document.updated_at else None,
+    }
+
+
 def _compliance_document_is_effectively_verified(document, now=None):
     if not document:
         return False
@@ -3603,6 +3828,271 @@ def _compliance_document_is_effectively_verified(document, now=None):
     if document.expires_at and document.expires_at <= now:
         return False
     return True
+
+
+def _driver_compliance_documents_for_driver(driver_user_id):
+    if not driver_user_id:
+        return []
+    return (
+        DriverComplianceDocument.query.filter_by(driver_user_id=driver_user_id)
+        .order_by(
+            DriverComplianceDocument.created_at.desc(),
+            DriverComplianceDocument.id.desc(),
+        )
+        .all()
+    )
+
+
+def _company_compliance_documents_for_company(carrier_company_id):
+    if not carrier_company_id:
+        return []
+    return (
+        CompanyComplianceDocument.query.filter_by(carrier_company_id=carrier_company_id)
+        .order_by(
+            CompanyComplianceDocument.created_at.desc(),
+            CompanyComplianceDocument.id.desc(),
+        )
+        .all()
+    )
+
+
+def _driver_compliance_summary_for_documents(documents):
+    now = datetime.utcnow()
+    by_type = {}
+    for doc_type in sorted(DRIVER_COMPLIANCE_DOCUMENT_TYPES):
+        typed_docs = [row for row in documents if row.document_type == doc_type]
+        latest = typed_docs[0] if typed_docs else None
+        by_type[doc_type] = {
+            'present': bool(typed_docs),
+            'count': len(typed_docs),
+            'latest_status': latest.status if latest else None,
+            'latest_document_id': latest.id if latest else None,
+            'latest_expires_at': latest.expires_at.isoformat() if latest and latest.expires_at else None,
+            'verified': any(_compliance_document_is_effectively_verified(row, now=now) for row in typed_docs),
+            'expired': bool(
+                latest and latest.expires_at and latest.expires_at <= now and str(latest.status or '').lower() == 'verified'
+            ),
+        }
+
+    dispatch_missing_types = []
+    for doc_type in sorted(DRIVER_DISPATCH_REQUIRED_TYPES):
+        if not by_type.get(doc_type, {}).get('verified'):
+            dispatch_missing_types.append(doc_type)
+
+    return {
+        'required_document_types': sorted(DRIVER_COMPLIANCE_DOCUMENT_TYPES),
+        'dispatch_required_document_types': sorted(DRIVER_DISPATCH_REQUIRED_TYPES),
+        'dispatch_eligible': len(dispatch_missing_types) == 0,
+        'dispatch_missing_document_types': dispatch_missing_types,
+        'by_type': by_type,
+        'total_documents': len(documents),
+    }
+
+
+def _company_compliance_summary_for_documents(documents):
+    now = datetime.utcnow()
+    by_type = {}
+    for doc_type in sorted(COMPANY_COMPLIANCE_DOCUMENT_TYPES):
+        typed_docs = [row for row in documents if row.document_type == doc_type]
+        latest = typed_docs[0] if typed_docs else None
+        by_type[doc_type] = {
+            'present': bool(typed_docs),
+            'count': len(typed_docs),
+            'latest_status': latest.status if latest else None,
+            'latest_document_id': latest.id if latest else None,
+            'latest_expires_at': latest.expires_at.isoformat() if latest and latest.expires_at else None,
+            'verified': any(_compliance_document_is_effectively_verified(row, now=now) for row in typed_docs),
+            'expired': bool(
+                latest and latest.expires_at and latest.expires_at <= now and str(latest.status or '').lower() == 'verified'
+            ),
+        }
+
+    dispatch_missing_types = []
+    for doc_type in sorted(COMPANY_DISPATCH_REQUIRED_TYPES):
+        if not by_type.get(doc_type, {}).get('verified'):
+            dispatch_missing_types.append(doc_type)
+
+    return {
+        'required_document_types': sorted(COMPANY_COMPLIANCE_DOCUMENT_TYPES),
+        'dispatch_required_document_types': sorted(COMPANY_DISPATCH_REQUIRED_TYPES),
+        'dispatch_eligible': len(dispatch_missing_types) == 0,
+        'dispatch_missing_document_types': dispatch_missing_types,
+        'by_type': by_type,
+        'total_documents': len(documents),
+    }
+
+
+def _driver_compliance_summary_for_user(driver_user_id):
+    documents = _driver_compliance_documents_for_driver(driver_user_id)
+    return _driver_compliance_summary_for_documents(documents)
+
+
+def _company_compliance_summary_for_company(carrier_company_id):
+    documents = _company_compliance_documents_for_company(carrier_company_id)
+    return _company_compliance_summary_for_documents(documents)
+
+
+def _serialize_carrier_company(company, include_compliance=False):
+    if not company:
+        return None
+    payload = {
+        'id': company.id,
+        'name': company.name,
+        'contact_email': company.contact_email,
+        'contact_phone': company.contact_phone,
+        'is_active': bool(company.is_active),
+        'created_at': company.created_at.isoformat() if company.created_at else None,
+        'updated_at': company.updated_at.isoformat() if company.updated_at else None,
+    }
+    if include_compliance:
+        payload['compliance'] = _company_compliance_summary_for_company(company.id)
+    return payload
+
+
+def _driver_dispatch_compliance_status(driver_user_id):
+    driver_summary = _driver_compliance_summary_for_user(driver_user_id)
+    driver = db.session.get(User, _to_int_or_none(driver_user_id)) if _to_int_or_none(driver_user_id) else None
+    carrier_company = db.session.get(CarrierCompany, driver.carrier_company_id) if driver and driver.carrier_company_id else None
+    company_summary = _company_compliance_summary_for_company(carrier_company.id) if carrier_company else None
+
+    missing_types = []
+    missing_types.extend(
+        ['driver:{}'.format(doc_type) for doc_type in driver_summary.get('dispatch_missing_document_types') or []]
+    )
+    if not carrier_company:
+        missing_types.append('company:assignment')
+    elif not carrier_company.is_active:
+        missing_types.append('company:inactive')
+    else:
+        missing_types.extend(
+            ['company:{}'.format(doc_type) for doc_type in (company_summary or {}).get('dispatch_missing_document_types') or []]
+        )
+
+    eligible = (
+        bool(driver_summary.get('dispatch_eligible'))
+        and bool(carrier_company)
+        and bool(carrier_company.is_active)
+        and bool(company_summary and company_summary.get('dispatch_eligible'))
+    )
+    return {
+        'eligible': eligible,
+        'missing_document_types': missing_types,
+        'summary': {
+            'driver': driver_summary,
+            'company': company_summary,
+            'carrier_company_assigned': bool(carrier_company),
+            'carrier_company_active': bool(carrier_company.is_active) if carrier_company else False,
+            'carrier_company': _serialize_carrier_company(carrier_company, include_compliance=False),
+        },
+    }
+
+
+def _build_driver_compliance_document(driver_user_id, payload, actor_user_id, actor_role):
+    document_type = _normalize_compliance_document_type(payload.get('document_type'))
+    if document_type not in DRIVER_COMPLIANCE_DOCUMENT_TYPES:
+        raise ValueError('Invalid document_type')
+
+    file_url = str(payload.get('file_url') or '').strip()
+    if not file_url:
+        raise ValueError('file_url is required')
+    if len(file_url) > 500:
+        raise ValueError('file_url is too long')
+
+    status = str(payload.get('status') or 'submitted').strip().lower().replace('-', '_').replace(' ', '_')
+    if status not in COMPLIANCE_DOCUMENT_STATUSES:
+        raise ValueError('Invalid status')
+    if actor_role != 'admin' and status != 'submitted':
+        raise PermissionError('Only admins can set non-submitted status')
+
+    metadata = payload.get('metadata') if 'metadata' in payload else {}
+    if metadata is None:
+        metadata = {}
+    if not isinstance(metadata, dict):
+        raise ValueError('metadata must be an object')
+
+    notes = str(payload.get('notes') or '').strip()
+    notes = notes[:2000] if notes else None
+    document_reference = str(payload.get('document_reference') or '').strip()
+    document_reference = document_reference[:120] if document_reference else None
+
+    issued_at = None
+    expires_at = None
+    if payload.get('issued_at') not in (None, ''):
+        issued_at = _parse_datetime_or_error(payload.get('issued_at'), 'issued_at')
+    if payload.get('expires_at') not in (None, ''):
+        expires_at = _parse_datetime_or_error(payload.get('expires_at'), 'expires_at')
+    if issued_at and expires_at and expires_at <= issued_at:
+        raise ValueError('expires_at must be later than issued_at')
+
+    document = DriverComplianceDocument(
+        driver_user_id=driver_user_id,
+        uploaded_by_user_id=actor_user_id,
+        document_type=document_type,
+        status=status,
+        file_url=file_url,
+        document_reference=document_reference,
+        issued_at=issued_at,
+        expires_at=expires_at,
+        notes=notes,
+        metadata_json=metadata,
+    )
+    if actor_role == 'admin' and status in {'verified', 'rejected', 'expired'}:
+        document.verified_by_user_id = actor_user_id
+        document.verified_at = datetime.utcnow()
+    return document
+
+
+def _build_company_compliance_document(carrier_company_id, payload, actor_user_id):
+    document_type = _normalize_compliance_document_type(payload.get('document_type'))
+    if document_type not in COMPANY_COMPLIANCE_DOCUMENT_TYPES:
+        raise ValueError('Invalid document_type')
+
+    file_url = str(payload.get('file_url') or '').strip()
+    if not file_url:
+        raise ValueError('file_url is required')
+    if len(file_url) > 500:
+        raise ValueError('file_url is too long')
+
+    status = str(payload.get('status') or 'submitted').strip().lower().replace('-', '_').replace(' ', '_')
+    if status not in COMPLIANCE_DOCUMENT_STATUSES:
+        raise ValueError('Invalid status')
+
+    metadata = payload.get('metadata') if 'metadata' in payload else {}
+    if metadata is None:
+        metadata = {}
+    if not isinstance(metadata, dict):
+        raise ValueError('metadata must be an object')
+
+    notes = str(payload.get('notes') or '').strip()
+    notes = notes[:2000] if notes else None
+    document_reference = str(payload.get('document_reference') or '').strip()
+    document_reference = document_reference[:120] if document_reference else None
+
+    issued_at = None
+    expires_at = None
+    if payload.get('issued_at') not in (None, ''):
+        issued_at = _parse_datetime_or_error(payload.get('issued_at'), 'issued_at')
+    if payload.get('expires_at') not in (None, ''):
+        expires_at = _parse_datetime_or_error(payload.get('expires_at'), 'expires_at')
+    if issued_at and expires_at and expires_at <= issued_at:
+        raise ValueError('expires_at must be later than issued_at')
+
+    document = CompanyComplianceDocument(
+        carrier_company_id=carrier_company_id,
+        uploaded_by_user_id=actor_user_id,
+        document_type=document_type,
+        status=status,
+        file_url=file_url,
+        document_reference=document_reference,
+        issued_at=issued_at,
+        expires_at=expires_at,
+        notes=notes,
+        metadata_json=metadata,
+    )
+    if status in {'verified', 'rejected', 'expired'}:
+        document.verified_by_user_id = actor_user_id
+        document.verified_at = datetime.utcnow()
+    return document
 
 
 def _compliance_summary_for_documents(documents):
@@ -3679,12 +4169,18 @@ def _compliance_missing_required_document_types(summary, required_types):
 def _serialize_dispatch_driver(user):
     if not user:
         return None
+    compliance = _driver_dispatch_compliance_status(user.id)
     return {
         'id': user.id,
         'email': user.email,
         'name': user.name,
         'role': user.role,
         'is_active': bool(user.is_active_user),
+        'carrier_company_id': user.carrier_company_id,
+        'carrier_company': compliance['summary'].get('carrier_company'),
+        'dispatch_eligible': compliance['eligible'],
+        'dispatch_missing_document_types': compliance['missing_document_types'],
+        'compliance': compliance['summary'],
     }
 
 
@@ -4000,6 +4496,38 @@ def _financial_summary_for_request(request_id):
     }
 
 
+def _billing_summary():
+    payments_enabled = _payments_enabled()
+    stripe_configured = _stripe_is_configured()
+
+    if payments_enabled and stripe_configured:
+        return {
+            'mode': 'in_app',
+            'payments_enabled': True,
+            'stripe_configured': True,
+            'launch_scope': 'in_app_payments',
+            'offline_reason': None,
+            'customer_message': 'Pay securely in app once your waste collection is confirmed.',
+            'admin_message': 'Charges, refunds, and driver payouts are active in-app.',
+            'actions_disabled': [],
+        }
+
+    offline_reason = 'feature_flag_disabled'
+    if payments_enabled and not stripe_configured:
+        offline_reason = 'processor_not_configured'
+
+    return {
+        'mode': 'offline',
+        'payments_enabled': payments_enabled,
+        'stripe_configured': stripe_configured,
+        'launch_scope': 'offline_billing',
+        'offline_reason': offline_reason,
+        'customer_message': 'Billing is arranged offline after booking confirmation.',
+        'admin_message': 'In-app payments are disabled; billing, refunds, and payouts are handled offline.',
+        'actions_disabled': ['charge', 'refund', 'payout'],
+    }
+
+
 _waste_request_event_subscribers = {}
 _waste_request_event_lock = threading.Lock()
 _waste_request_event_queue_size = 100
@@ -4028,6 +4556,7 @@ def _serialize_waste_request_snapshot(booking):
         'latest_location': _serialize_vehicle_location(latest_location),
         'dispatch': _dispatch_summary_for_request(booking.id),
         'financials': _financial_summary_for_request(booking.id),
+        'billing': _billing_summary(),
         'compliance': {
             'documents': [_serialize_compliance_document(row) for row in compliance_documents],
             'summary': _compliance_summary_for_documents(compliance_documents),
@@ -5630,6 +6159,15 @@ def admin_dispatch_override_form():
             return redirect(redirect_target)
         if not driver.is_active_user:
             flash('Selected driver is inactive.')
+            return redirect(redirect_target)
+        eligibility_error, missing_types = _driver_dispatch_eligibility_error(new_driver_user_id)
+        if eligibility_error:
+            flash(
+                '{}: {}'.format(
+                    eligibility_error,
+                    ', '.join(missing_types) if missing_types else 'missing required records',
+                )
+            )
             return redirect(redirect_target)
 
     previous_driver_user_id = booking.assigned_driver_user_id
@@ -8419,6 +8957,546 @@ def api_admin_list_drivers():
     )
 
 
+@app.route('/api/v1/admin/carrier-companies', methods=['GET'])
+@jwt_required(roles={'admin'})
+def api_admin_list_carrier_companies():
+    active = request.args.get('active')
+    search = str(request.args.get('search') or '').strip().lower()
+    try:
+        limit = _parse_optional_int_query(request.args.get('limit'), 'limit', min_value=1, max_value=200)
+        offset = _parse_optional_int_query(request.args.get('offset'), 'offset', min_value=0, max_value=100000)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    limit = limit or 50
+    offset = offset or 0
+
+    query = CarrierCompany.query
+    if active is not None and active != '':
+        parsed_active = _parse_optional_bool_query(active, 'active')
+        query = query.filter(CarrierCompany.is_active.is_(bool(parsed_active)))
+    if search:
+        pattern = '%{}%'.format(search.lower())
+        query = query.filter(
+            or_(
+                func.lower(CarrierCompany.name).like(pattern),
+                func.lower(func.coalesce(CarrierCompany.contact_email, '')).like(pattern),
+            )
+        )
+
+    total = query.count()
+    rows = (
+        query.order_by(func.lower(CarrierCompany.name).asc(), CarrierCompany.id.asc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return jsonify(
+        {
+            'items': [_serialize_carrier_company(row, include_compliance=True) for row in rows],
+            'pagination': {
+                'limit': limit,
+                'offset': offset,
+                'returned': len(rows),
+                'total': total,
+                'has_more': (offset + len(rows)) < total,
+            },
+            'filters': {
+                'active': active,
+                'search': search,
+            },
+        }
+    )
+
+
+@app.route('/api/v1/admin/carrier-companies', methods=['POST'])
+@jwt_required(roles={'admin'})
+def api_admin_create_carrier_company():
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+    if len(name) > 255:
+        return jsonify({'error': 'name is too long'}), 400
+
+    existing = CarrierCompany.query.filter(func.lower(CarrierCompany.name) == name.lower()).first()
+    if existing:
+        return jsonify({'error': 'Carrier company already exists', 'company': _serialize_carrier_company(existing, include_compliance=True)}), 409
+
+    company = CarrierCompany(
+        name=name,
+        contact_email=(str(payload.get('contact_email') or '').strip()[:255] or None),
+        contact_phone=(str(payload.get('contact_phone') or '').strip()[:120] or None),
+        is_active=bool(payload.get('is_active', True)),
+    )
+    try:
+        db.session.add(company)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Failed to create carrier company %s.', name)
+        return jsonify({'error': 'Failed to create carrier company'}), 500
+
+    return jsonify({'company': _serialize_carrier_company(company, include_compliance=True)}), 201
+
+
+@app.route('/api/v1/admin/drivers/<int:driver_user_id>/carrier-company', methods=['POST'])
+@jwt_required(roles={'admin'})
+def api_admin_assign_driver_carrier_company(driver_user_id):
+    driver = db.session.get(User, driver_user_id)
+    if not driver or (driver.role or '').strip().lower() != 'driver':
+        return jsonify({'error': 'Driver not found'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    raw_company_id = payload.get('carrier_company_id')
+    if raw_company_id in (None, ''):
+        company = None
+        next_company_id = None
+    else:
+        next_company_id = _to_int_or_none(raw_company_id)
+        if next_company_id is None:
+            return jsonify({'error': 'carrier_company_id must be an integer or null'}), 400
+        company = db.session.get(CarrierCompany, next_company_id)
+        if not company:
+            return jsonify({'error': 'Carrier company not found'}), 404
+
+    previous_company_id = driver.carrier_company_id
+    driver.carrier_company_id = next_company_id
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Failed assigning carrier company %s to driver %s.', next_company_id, driver_user_id)
+        return jsonify({'error': 'Failed to assign carrier company'}), 500
+
+    return jsonify(
+        {
+            'updated': previous_company_id != next_company_id,
+            'previous_carrier_company_id': previous_company_id,
+            'carrier_company_id': driver.carrier_company_id,
+            'driver': _serialize_dispatch_driver(driver),
+            'carrier_company': _serialize_carrier_company(company, include_compliance=True),
+        }
+    )
+
+
+@app.route('/api/v1/drivers/me/compliance', methods=['GET'])
+@jwt_required(roles={'driver'})
+def api_driver_get_own_compliance():
+    driver_user_id = _current_jwt_user_id()
+    driver = db.session.get(User, driver_user_id)
+    if not driver or (driver.role or '').strip().lower() != 'driver':
+        return jsonify({'error': 'Driver not found'}), 404
+
+    documents = _driver_compliance_documents_for_driver(driver.id)
+    summary = _driver_compliance_summary_for_documents(documents)
+    return jsonify(
+        {
+            'driver': _serialize_dispatch_driver(driver),
+            'documents': [_serialize_driver_compliance_document(row) for row in documents],
+            'summary': summary,
+        }
+    )
+
+
+@app.route('/api/v1/drivers/me/compliance/documents', methods=['POST'])
+@jwt_required(roles={'driver'})
+def api_driver_create_own_compliance_document():
+    driver_user_id = _current_jwt_user_id()
+    driver = db.session.get(User, driver_user_id)
+    if not driver or (driver.role or '').strip().lower() != 'driver':
+        return jsonify({'error': 'Driver not found'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        document = _build_driver_compliance_document(
+            driver.id,
+            payload,
+            actor_user_id=driver.id,
+            actor_role='driver',
+        )
+    except PermissionError as exc:
+        return jsonify({'error': str(exc)}), 403
+    except ValueError as exc:
+        message = str(exc)
+        if message == 'Invalid document_type':
+            return jsonify(
+                {
+                    'error': message,
+                    'allowed_document_types': sorted(DRIVER_COMPLIANCE_DOCUMENT_TYPES),
+                }
+            ), 400
+        if message == 'Invalid status':
+            return jsonify(
+                {
+                    'error': message,
+                    'allowed_statuses': sorted(COMPLIANCE_DOCUMENT_STATUSES),
+                }
+            ), 400
+        return jsonify({'error': message}), 400
+
+    try:
+        db.session.add(document)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Failed creating driver compliance document for user %s.', driver.id)
+        return jsonify({'error': 'Failed to create driver compliance document'}), 500
+
+    documents = _driver_compliance_documents_for_driver(driver.id)
+    return (
+        jsonify(
+            {
+                'driver': _serialize_dispatch_driver(driver),
+                'document': _serialize_driver_compliance_document(document),
+                'summary': _driver_compliance_summary_for_documents(documents),
+            }
+        ),
+        201,
+    )
+
+
+@app.route('/api/v1/drivers/me/carrier-company', methods=['GET'])
+@jwt_required(roles={'driver'})
+def api_driver_get_own_carrier_company():
+    driver_user_id = _current_jwt_user_id()
+    driver = db.session.get(User, driver_user_id)
+    if not driver or (driver.role or '').strip().lower() != 'driver':
+        return jsonify({'error': 'Driver not found'}), 404
+
+    company = db.session.get(CarrierCompany, driver.carrier_company_id) if driver.carrier_company_id else None
+    documents = _company_compliance_documents_for_company(company.id) if company else []
+    summary = _company_compliance_summary_for_documents(documents) if company else None
+    return jsonify(
+        {
+            'driver': _serialize_dispatch_driver(driver),
+            'carrier_company': _serialize_carrier_company(company, include_compliance=False),
+            'documents': [_serialize_company_compliance_document(row) for row in documents],
+            'summary': summary,
+        }
+    )
+
+
+@app.route('/api/v1/admin/drivers/<int:driver_user_id>/compliance', methods=['GET'])
+@jwt_required(roles={'admin'})
+def api_admin_get_driver_compliance(driver_user_id):
+    driver = db.session.get(User, driver_user_id)
+    if not driver or (driver.role or '').strip().lower() != 'driver':
+        return jsonify({'error': 'Driver not found'}), 404
+
+    documents = _driver_compliance_documents_for_driver(driver.id)
+    return jsonify(
+        {
+            'driver': _serialize_dispatch_driver(driver),
+            'documents': [_serialize_driver_compliance_document(row) for row in documents],
+            'summary': _driver_compliance_summary_for_documents(documents),
+        }
+    )
+
+
+@app.route('/api/v1/admin/drivers/<int:driver_user_id>/compliance/documents', methods=['POST'])
+@jwt_required(roles={'admin'})
+def api_admin_create_driver_compliance_document(driver_user_id):
+    driver = db.session.get(User, driver_user_id)
+    if not driver or (driver.role or '').strip().lower() != 'driver':
+        return jsonify({'error': 'Driver not found'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        document = _build_driver_compliance_document(
+            driver.id,
+            payload,
+            actor_user_id=_current_jwt_user_id(),
+            actor_role='admin',
+        )
+    except PermissionError as exc:
+        return jsonify({'error': str(exc)}), 403
+    except ValueError as exc:
+        message = str(exc)
+        if message == 'Invalid document_type':
+            return jsonify(
+                {
+                    'error': message,
+                    'allowed_document_types': sorted(DRIVER_COMPLIANCE_DOCUMENT_TYPES),
+                }
+            ), 400
+        if message == 'Invalid status':
+            return jsonify(
+                {
+                    'error': message,
+                    'allowed_statuses': sorted(COMPLIANCE_DOCUMENT_STATUSES),
+                }
+            ), 400
+        return jsonify({'error': message}), 400
+
+    try:
+        db.session.add(document)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Failed admin driver compliance create for user %s.', driver.id)
+        return jsonify({'error': 'Failed to create driver compliance document'}), 500
+
+    documents = _driver_compliance_documents_for_driver(driver.id)
+    return (
+        jsonify(
+            {
+                'driver': _serialize_dispatch_driver(driver),
+                'document': _serialize_driver_compliance_document(document),
+                'summary': _driver_compliance_summary_for_documents(documents),
+            }
+        ),
+        201,
+    )
+
+
+@app.route('/api/v1/admin/carrier-companies/<int:carrier_company_id>/compliance', methods=['GET'])
+@jwt_required(roles={'admin'})
+def api_admin_get_carrier_company_compliance(carrier_company_id):
+    company = db.session.get(CarrierCompany, carrier_company_id)
+    if not company:
+        return jsonify({'error': 'Carrier company not found'}), 404
+
+    documents = _company_compliance_documents_for_company(company.id)
+    summary = _company_compliance_summary_for_documents(documents)
+    return jsonify(
+        {
+            'carrier_company': _serialize_carrier_company(company, include_compliance=False),
+            'documents': [_serialize_company_compliance_document(row) for row in documents],
+            'summary': summary,
+        }
+    )
+
+
+@app.route('/api/v1/admin/carrier-companies/<int:carrier_company_id>/compliance/documents', methods=['POST'])
+@jwt_required(roles={'admin'})
+def api_admin_create_carrier_company_compliance_document(carrier_company_id):
+    company = db.session.get(CarrierCompany, carrier_company_id)
+    if not company:
+        return jsonify({'error': 'Carrier company not found'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        document = _build_company_compliance_document(
+            company.id,
+            payload,
+            actor_user_id=_current_jwt_user_id(),
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if message == 'Invalid document_type':
+            return jsonify(
+                {
+                    'error': message,
+                    'allowed_document_types': sorted(COMPANY_COMPLIANCE_DOCUMENT_TYPES),
+                }
+            ), 400
+        if message == 'Invalid status':
+            return jsonify(
+                {
+                    'error': message,
+                    'allowed_statuses': sorted(COMPLIANCE_DOCUMENT_STATUSES),
+                }
+            ), 400
+        return jsonify({'error': message}), 400
+
+    try:
+        db.session.add(document)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Failed creating company compliance document for company %s.', company.id)
+        return jsonify({'error': 'Failed to create company compliance document'}), 500
+
+    documents = _company_compliance_documents_for_company(company.id)
+    return (
+        jsonify(
+            {
+                'carrier_company': _serialize_carrier_company(company, include_compliance=False),
+                'document': _serialize_company_compliance_document(document),
+                'summary': _company_compliance_summary_for_documents(documents),
+            }
+        ),
+        201,
+    )
+
+
+@app.route('/api/v1/admin/carrier-companies/<int:carrier_company_id>/compliance/documents/<int:document_id>/verify', methods=['POST'])
+@jwt_required(roles={'admin'})
+def api_admin_verify_carrier_company_compliance_document(carrier_company_id, document_id):
+    company = db.session.get(CarrierCompany, carrier_company_id)
+    if not company:
+        return jsonify({'error': 'Carrier company not found'}), 404
+
+    document = db.session.get(CompanyComplianceDocument, document_id)
+    if not document or document.carrier_company_id != company.id:
+        return jsonify({'error': 'Company compliance document not found'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    status = str(payload.get('status') or '').strip().lower().replace('-', '_').replace(' ', '_')
+    if status not in COMPLIANCE_DOCUMENT_STATUSES:
+        return jsonify(
+            {
+                'error': 'Invalid status',
+                'allowed_statuses': sorted(COMPLIANCE_DOCUMENT_STATUSES),
+            }
+        ), 400
+
+    previous_status = document.status
+    updated = False
+    if document.status != status:
+        document.status = status
+        updated = True
+
+    notes = str(payload.get('notes') or '').strip()
+    next_notes = notes[:2000] if notes else None
+    if document.notes != next_notes:
+        document.notes = next_notes
+        updated = True
+
+    expires_at = document.expires_at
+    if payload.get('expires_at') not in (None, ''):
+        try:
+            expires_at = _parse_datetime_or_error(payload.get('expires_at'), 'expires_at')
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+    if document.expires_at != expires_at:
+        document.expires_at = expires_at
+        updated = True
+
+    metadata = payload.get('metadata') if 'metadata' in payload else document.metadata_json
+    if metadata is None:
+        metadata = {}
+    if not isinstance(metadata, dict):
+        return jsonify({'error': 'metadata must be an object'}), 400
+    if document.metadata_json != metadata:
+        document.metadata_json = metadata
+        updated = True
+
+    if status in {'verified', 'rejected', 'expired'}:
+        document.verified_by_user_id = _current_jwt_user_id()
+        document.verified_at = datetime.utcnow()
+        updated = True
+
+    if not updated:
+        documents = _company_compliance_documents_for_company(company.id)
+        return jsonify(
+            {
+                'updated': False,
+                'previous_status': previous_status,
+                'carrier_company': _serialize_carrier_company(company, include_compliance=False),
+                'document': _serialize_company_compliance_document(document),
+                'summary': _company_compliance_summary_for_documents(documents),
+            }
+        )
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Failed admin company compliance verify for company %s doc %s.', company.id, document.id)
+        return jsonify({'error': 'Failed to update company compliance document'}), 500
+
+    documents = _company_compliance_documents_for_company(company.id)
+    return jsonify(
+        {
+            'updated': True,
+            'previous_status': previous_status,
+            'carrier_company': _serialize_carrier_company(company, include_compliance=False),
+            'document': _serialize_company_compliance_document(document),
+            'summary': _company_compliance_summary_for_documents(documents),
+        }
+    )
+
+
+@app.route('/api/v1/admin/drivers/<int:driver_user_id>/compliance/documents/<int:document_id>/verify', methods=['POST'])
+@jwt_required(roles={'admin'})
+def api_admin_verify_driver_compliance_document(driver_user_id, document_id):
+    driver = db.session.get(User, driver_user_id)
+    if not driver or (driver.role or '').strip().lower() != 'driver':
+        return jsonify({'error': 'Driver not found'}), 404
+
+    document = db.session.get(DriverComplianceDocument, document_id)
+    if not document or document.driver_user_id != driver.id:
+        return jsonify({'error': 'Driver compliance document not found'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    status = str(payload.get('status') or '').strip().lower().replace('-', '_').replace(' ', '_')
+    if status not in COMPLIANCE_DOCUMENT_STATUSES:
+        return jsonify(
+            {
+                'error': 'Invalid status',
+                'allowed_statuses': sorted(COMPLIANCE_DOCUMENT_STATUSES),
+            }
+        ), 400
+
+    previous_status = document.status
+    updated = False
+    if document.status != status:
+        document.status = status
+        updated = True
+
+    notes = str(payload.get('notes') or '').strip()
+    next_notes = notes[:2000] if notes else None
+    if document.notes != next_notes:
+        document.notes = next_notes
+        updated = True
+
+    expires_at = document.expires_at
+    if payload.get('expires_at') not in (None, ''):
+        try:
+            expires_at = _parse_datetime_or_error(payload.get('expires_at'), 'expires_at')
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+    if document.expires_at != expires_at:
+        document.expires_at = expires_at
+        updated = True
+
+    metadata = payload.get('metadata') if 'metadata' in payload else document.metadata_json
+    if metadata is None:
+        metadata = {}
+    if not isinstance(metadata, dict):
+        return jsonify({'error': 'metadata must be an object'}), 400
+    if document.metadata_json != metadata:
+        document.metadata_json = metadata
+        updated = True
+
+    if status in {'verified', 'rejected', 'expired'}:
+        document.verified_by_user_id = _current_jwt_user_id()
+        document.verified_at = datetime.utcnow()
+        updated = True
+
+    if not updated:
+        documents = _driver_compliance_documents_for_driver(driver.id)
+        return jsonify(
+            {
+                'updated': False,
+                'previous_status': previous_status,
+                'driver': _serialize_dispatch_driver(driver),
+                'document': _serialize_driver_compliance_document(document),
+                'summary': _driver_compliance_summary_for_documents(documents),
+            }
+        )
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Failed admin driver compliance verify for user %s doc %s.', driver.id, document.id)
+        return jsonify({'error': 'Failed to update driver compliance document'}), 500
+
+    documents = _driver_compliance_documents_for_driver(driver.id)
+    return jsonify(
+        {
+            'updated': True,
+            'previous_status': previous_status,
+            'driver': _serialize_dispatch_driver(driver),
+            'document': _serialize_driver_compliance_document(document),
+            'summary': _driver_compliance_summary_for_documents(documents),
+        }
+    )
+
+
 @app.route('/api/v1/admin/dispatch/queue', methods=['GET'])
 @jwt_required(roles={'admin'})
 def api_admin_dispatch_queue():
@@ -9278,6 +10356,14 @@ def api_admin_dispatch_override(request_id):
             return jsonify({'error': 'Selected user is not a driver'}), 400
         if not driver.is_active_user:
             return jsonify({'error': 'Selected driver is inactive'}), 409
+        eligibility_error, missing_types = _driver_dispatch_eligibility_error(new_driver_user_id)
+        if eligibility_error:
+            return jsonify(
+                {
+                    'error': eligibility_error,
+                    'missing_document_types': missing_types,
+                }
+            ), 409
 
     reason = (str(payload.get('reason') or '').strip()[:255] or None)
     previous_driver_user_id = booking.assigned_driver_user_id
@@ -9343,6 +10429,86 @@ def api_admin_dispatch_override(request_id):
             'previous_assigned_driver_user_id': previous_driver_user_id,
             'assigned_driver_user_id': booking.assigned_driver_user_id,
             'reason': reason,
+        }
+    )
+
+
+@app.route('/api/v1/admin/waste-requests/<int:request_id>/billing', methods=['POST'])
+@jwt_required(roles={'admin'})
+def api_admin_update_waste_request_billing(request_id):
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        return jsonify({'error': 'Waste request not found'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    billing_state = str(payload.get('state') or '').strip().lower().replace('-', '_').replace(' ', '_')
+    if billing_state not in OFFLINE_BILLING_STATES:
+        return jsonify(
+            {
+                'error': 'Invalid billing state',
+                'allowed_states': sorted(OFFLINE_BILLING_STATES),
+            }
+        ), 400
+
+    billing_reference = str(payload.get('reference') or '').strip()
+    next_reference = billing_reference[:120] if billing_reference else None
+
+    billing_notes = str(payload.get('notes') or '').strip()
+    next_notes = billing_notes[:2000] if billing_notes else None
+
+    previous_state = (booking.billing_state or '').strip().lower() or 'pending_offline_invoice'
+    updated = False
+    if previous_state != billing_state:
+        booking.billing_state = billing_state
+        updated = True
+    if booking.billing_reference != next_reference:
+        booking.billing_reference = next_reference
+        updated = True
+    if booking.billing_notes != next_notes:
+        booking.billing_notes = next_notes
+        updated = True
+
+    if updated:
+        booking.billing_updated_at = datetime.utcnow()
+        booking.billing_updated_by_user_id = _current_jwt_user_id()
+
+    if not updated:
+        return jsonify(
+            {
+                'updated': False,
+                'previous_state': previous_state,
+                'request': _serialize_waste_request(booking),
+                'billing': _billing_summary(),
+                'financials': _financial_summary_for_request(booking.id),
+            }
+        )
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Failed to update billing workflow for request %s.', request_id)
+        return jsonify({'error': 'Failed to update billing workflow'}), 500
+
+    metadata = {
+        'billing_state': billing_state,
+        'billing_reference': next_reference,
+        'updated_by_user_id': booking.billing_updated_by_user_id,
+    }
+    _publish_waste_request_event(
+        booking.id,
+        'admin_billing_updated',
+        payload=_serialize_waste_request_snapshot(booking),
+        metadata=metadata,
+    )
+
+    return jsonify(
+        {
+            'updated': True,
+            'previous_state': previous_state,
+            'request': _serialize_waste_request(booking),
+            'billing': _billing_summary(),
+            'financials': _financial_summary_for_request(booking.id),
         }
     )
 
@@ -9833,6 +10999,7 @@ def api_get_waste_request_financials(request_id):
             'request_id': booking.id,
             'request_status': booking.status,
             'payments_enabled': _payments_enabled(),
+            'billing': _billing_summary(),
             'financials': _financial_summary_for_request(booking.id),
         }
     )
@@ -10547,6 +11714,14 @@ def api_accept_dispatch_offer(request_id):
     driver_user_id = _current_jwt_user_id()
     if driver_user_id is None:
         return jsonify({'error': 'Token missing valid user id claim'}), 401
+    eligibility_error, missing_types = _driver_dispatch_eligibility_error(driver_user_id)
+    if eligibility_error:
+        return jsonify(
+            {
+                'error': eligibility_error,
+                'missing_document_types': missing_types,
+            }
+        ), 409
 
     match_row, outcome = _accept_dispatch_offer(
         booking,

@@ -295,6 +295,59 @@ def _auth_header(client, email, password):
     return {'Authorization': f'Bearer {token}'}
 
 
+def _seed_driver_dispatch_compliance(app_context, driver_email, verifier_email=None):
+    with app_context.app.app_context():
+        driver = app_context.User.query.filter_by(email=driver_email).first()
+        assert driver is not None
+        verifier = app_context.User.query.filter_by(email=verifier_email).first() if verifier_email else None
+        company_name = f'Seeded Carrier {driver.id}'
+        company = app_context.CarrierCompany.query.filter_by(name=company_name).first()
+        if not company:
+            company = app_context.CarrierCompany(
+                name=company_name,
+                contact_email=f'carrier{driver.id}@example.com',
+                is_active=True,
+            )
+            app_context.db.session.add(company)
+            app_context.db.session.flush()
+        driver.carrier_company_id = company.id
+        app_context.DriverComplianceDocument.query.filter_by(driver_user_id=driver.id).delete()
+        app_context.CompanyComplianceDocument.query.filter_by(carrier_company_id=company.id).delete()
+        now = datetime.utcnow()
+        expires_at = now + timedelta(days=365)
+        for document_type in ['carrier_license', 'insurance_certificate']:
+            app_context.db.session.add(
+                app_context.DriverComplianceDocument(
+                    driver_user_id=driver.id,
+                    uploaded_by_user_id=driver.id,
+                    verified_by_user_id=verifier.id if verifier else driver.id,
+                    document_type=document_type,
+                    status='verified',
+                    file_url=f'https://example.com/driver-compliance/{driver.id}/{document_type}.pdf',
+                    document_reference=f'{document_type.upper()}-{driver.id}',
+                    verified_at=now,
+                    expires_at=expires_at,
+                    metadata_json={'seeded': True},
+                )
+            )
+        for document_type in ['operator_license', 'insurance_certificate']:
+            app_context.db.session.add(
+                app_context.CompanyComplianceDocument(
+                    carrier_company_id=company.id,
+                    uploaded_by_user_id=verifier.id if verifier else driver.id,
+                    verified_by_user_id=verifier.id if verifier else driver.id,
+                    document_type=document_type,
+                    status='verified',
+                    file_url=f'https://example.com/company-compliance/{company.id}/{document_type}.pdf',
+                    document_reference=f'{document_type.upper()}-{company.id}',
+                    verified_at=now,
+                    expires_at=expires_at,
+                    metadata_json={'seeded': True},
+                )
+            )
+        app_context.db.session.commit()
+
+
 def test_core_get_routes(client):
     expected = {
         '/': 302,
@@ -683,6 +736,7 @@ def test_api_status_and_location_flow(client, app_context, monkeypatch):
     )
     _create_user(app_context, 'customer@example.com', 'Password123!', role='customer', name='Customer')
     _create_user(app_context, 'driver@example.com', 'Password123!', role='driver', name='Driver')
+    _seed_driver_dispatch_compliance(app_context, 'driver@example.com')
     customer_headers = _auth_header(client, 'customer@example.com', 'Password123!')
     driver_headers = _auth_header(client, 'driver@example.com', 'Password123!')
     with app_context.app.app_context():
@@ -779,6 +833,8 @@ def test_api_dispatch_first_accept_wins(client, app_context, monkeypatch):
     _create_user(app_context, 'customer@example.com', 'Password123!', role='customer', name='Customer')
     _create_user(app_context, 'driver1@example.com', 'Password123!', role='driver', name='Driver One')
     _create_user(app_context, 'driver2@example.com', 'Password123!', role='driver', name='Driver Two')
+    _seed_driver_dispatch_compliance(app_context, 'driver1@example.com')
+    _seed_driver_dispatch_compliance(app_context, 'driver2@example.com')
     customer_headers = _auth_header(client, 'customer@example.com', 'Password123!')
     driver_one_headers = _auth_header(client, 'driver1@example.com', 'Password123!')
     driver_two_headers = _auth_header(client, 'driver2@example.com', 'Password123!')
@@ -1703,6 +1759,11 @@ def test_admin_dispatch_request_timeline_includes_dispatch_and_auth_events(clien
     _create_user(app_context, 'opsadmintimeline2@example.com', 'Password123!', role='admin', name='Ops Timeline 2')
     _create_user(app_context, 'timelinedriver@example.com', 'Password123!', role='driver', name='Timeline Driver')
     _create_user(app_context, 'timelinecustomer@example.com', 'Password123!', role='customer', name='Timeline Customer')
+    _seed_driver_dispatch_compliance(
+        app_context,
+        'timelinedriver@example.com',
+        verifier_email='opsadmintimeline@example.com',
+    )
     admin_headers = _auth_header(client, 'opsadmintimeline@example.com', 'Password123!')
     customer_headers = _auth_header(client, 'timelinecustomer@example.com', 'Password123!')
 
@@ -2182,6 +2243,239 @@ def test_driver_can_request_signed_compliance_upload(client, app_context, monkey
     assert call['params']['ContentType'] == 'image/jpeg'
 
 
+def test_driver_compliance_documents_control_dispatch_eligibility_and_admin_override(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+
+    _create_user(app_context, 'drivercompadmin@example.com', 'Password123!', role='admin', name='Driver Comp Admin')
+    _create_user(app_context, 'drivercompcustomer@example.com', 'Password123!', role='customer', name='Driver Comp Customer')
+    _create_user(app_context, 'drivercompdriver@example.com', 'Password123!', role='driver', name='Driver Comp Driver')
+
+    admin_headers = _auth_header(client, 'drivercompadmin@example.com', 'Password123!')
+    customer_headers = _auth_header(client, 'drivercompcustomer@example.com', 'Password123!')
+    driver_headers = _auth_header(client, 'drivercompdriver@example.com', 'Password123!')
+
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+    create_response = client.post(
+        '/api/v1/waste-requests',
+        json={
+            'requester_name': 'Driver Comp Customer',
+            'requester_email': 'drivercompcustomer@example.com',
+            'material_type': 'Glass',
+            'waste_amount': 1.0,
+            'waste_unit': 'Tonnes',
+            'match_radius_miles': 25,
+            'pickup_address': '1 Example Road',
+            'pickup_postcode': 'SW1A1AA',
+            'scheduled_pickup_at': scheduled_time,
+        },
+        headers=customer_headers,
+    )
+    assert create_response.status_code == 201
+    request_id = create_response.get_json()['request']['id']
+
+    with app_context.app.app_context():
+        driver_id = app_context.User.query.filter_by(email='drivercompdriver@example.com').first().id
+
+    drivers_before = client.get('/api/v1/admin/drivers?active=true&limit=20', headers=admin_headers)
+    assert drivers_before.status_code == 200
+    driver_before = next(
+        item for item in drivers_before.get_json()['items']
+        if item['email'] == 'drivercompdriver@example.com'
+    )
+    assert driver_before['dispatch_eligible'] is False
+    assert set(driver_before['dispatch_missing_document_types']) == {
+        'driver:carrier_license',
+        'driver:insurance_certificate',
+        'company:assignment',
+    }
+
+    blocked_override = client.post(
+        f'/api/v1/admin/waste-requests/{request_id}/dispatch/override',
+        json={'driver_user_id': driver_id, 'reason': 'should fail until compliant'},
+        headers=admin_headers,
+    )
+    assert blocked_override.status_code == 409
+    assert set(blocked_override.get_json()['missing_document_types']) == {
+        'driver:carrier_license',
+        'driver:insurance_certificate',
+        'company:assignment',
+    }
+
+    create_company = client.post(
+        '/api/v1/admin/carrier-companies',
+        json={
+            'name': 'Driver Comp Carrier',
+            'contact_email': 'ops@driver-comp-carrier.example.com',
+        },
+        headers=admin_headers,
+    )
+    assert create_company.status_code == 201
+    carrier_company_id = create_company.get_json()['company']['id']
+
+    assign_company = client.post(
+        f'/api/v1/admin/drivers/{driver_id}/carrier-company',
+        json={'carrier_company_id': carrier_company_id},
+        headers=admin_headers,
+    )
+    assert assign_company.status_code == 200
+
+    still_blocked_override = client.post(
+        f'/api/v1/admin/waste-requests/{request_id}/dispatch/override',
+        json={'driver_user_id': driver_id, 'reason': 'should fail until company docs exist'},
+        headers=admin_headers,
+    )
+    assert still_blocked_override.status_code == 409
+    assert set(still_blocked_override.get_json()['missing_document_types']) == {
+        'driver:carrier_license',
+        'driver:insurance_certificate',
+        'company:insurance_certificate',
+        'company:operator_license',
+    }
+
+    created_document_ids = []
+    for document_type in ['carrier_license', 'insurance_certificate']:
+        create_doc = client.post(
+            '/api/v1/drivers/me/compliance/documents',
+            json={
+                'document_type': document_type,
+                'file_url': f'https://example.com/driver-docs/{document_type}.pdf',
+                'document_reference': f'{document_type.upper()}-123',
+            },
+            headers=driver_headers,
+        )
+        assert create_doc.status_code == 201
+        created_document_ids.append(create_doc.get_json()['document']['id'])
+        assert create_doc.get_json()['summary']['dispatch_eligible'] is False
+
+    created_company_document_ids = []
+    for document_type in ['operator_license', 'insurance_certificate']:
+        create_doc = client.post(
+            f'/api/v1/admin/carrier-companies/{carrier_company_id}/compliance/documents',
+            json={
+                'document_type': document_type,
+                'file_url': f'https://example.com/company-docs/{document_type}.pdf',
+                'document_reference': f'{document_type.upper()}-123',
+            },
+            headers=admin_headers,
+        )
+        assert create_doc.status_code == 201
+        created_company_document_ids.append(create_doc.get_json()['document']['id'])
+
+    driver_compliance = client.get(
+        f'/api/v1/admin/drivers/{driver_id}/compliance',
+        headers=admin_headers,
+    )
+    assert driver_compliance.status_code == 200
+    compliance_payload = driver_compliance.get_json()
+    assert len(compliance_payload['documents']) == 2
+    assert compliance_payload['summary']['dispatch_eligible'] is False
+
+    for document_id in created_document_ids:
+        verify = client.post(
+            f'/api/v1/admin/drivers/{driver_id}/compliance/documents/{document_id}/verify',
+            json={'status': 'verified', 'notes': 'reviewed'},
+            headers=admin_headers,
+        )
+        assert verify.status_code == 200
+
+    company_compliance = client.get(
+        f'/api/v1/admin/carrier-companies/{carrier_company_id}/compliance',
+        headers=admin_headers,
+    )
+    assert company_compliance.status_code == 200
+    company_payload = company_compliance.get_json()
+    assert len(company_payload['documents']) == 2
+    assert company_payload['summary']['dispatch_eligible'] is False
+
+    for document_id in created_company_document_ids:
+        verify = client.post(
+            f'/api/v1/admin/carrier-companies/{carrier_company_id}/compliance/documents/{document_id}/verify',
+            json={'status': 'verified', 'notes': 'company reviewed'},
+            headers=admin_headers,
+        )
+        assert verify.status_code == 200
+
+    drivers_after = client.get('/api/v1/admin/drivers?active=true&limit=20', headers=admin_headers)
+    assert drivers_after.status_code == 200
+    driver_after = next(
+        item for item in drivers_after.get_json()['items']
+        if item['email'] == 'drivercompdriver@example.com'
+    )
+    assert driver_after['dispatch_eligible'] is True
+    assert driver_after['dispatch_missing_document_types'] == []
+    assert driver_after['carrier_company']['id'] == carrier_company_id
+
+    allowed_override = client.post(
+        f'/api/v1/admin/waste-requests/{request_id}/dispatch/override',
+        json={'driver_user_id': driver_id, 'reason': 'driver now compliant'},
+        headers=admin_headers,
+    )
+    assert allowed_override.status_code == 200
+    assert allowed_override.get_json()['assigned_driver_user_id'] == driver_id
+
+
+def test_driver_dispatch_accept_requires_verified_driver_compliance_documents(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+
+    _create_user(app_context, 'eligibilityadmin@example.com', 'Password123!', role='admin', name='Eligibility Admin')
+    _create_user(app_context, 'eligibilitycustomer@example.com', 'Password123!', role='customer', name='Eligibility Customer')
+    _create_user(app_context, 'eligibilitydriver@example.com', 'Password123!', role='driver', name='Eligibility Driver')
+
+    customer_headers = _auth_header(client, 'eligibilitycustomer@example.com', 'Password123!')
+    driver_headers = _auth_header(client, 'eligibilitydriver@example.com', 'Password123!')
+
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+    create_response = client.post(
+        '/api/v1/waste-requests',
+        json={
+            'requester_name': 'Eligibility Customer',
+            'requester_email': 'eligibilitycustomer@example.com',
+            'material_type': 'Glass',
+            'waste_amount': 1.0,
+            'waste_unit': 'Tonnes',
+            'match_radius_miles': 25,
+            'pickup_address': '1 Example Road',
+            'pickup_postcode': 'SW1A1AA',
+            'scheduled_pickup_at': scheduled_time,
+        },
+        headers=customer_headers,
+    )
+    assert create_response.status_code == 201
+    request_id = create_response.get_json()['request']['id']
+
+    with app_context.app.app_context():
+        offer = app_context.WasteRemovalDispatchOffer.query.filter_by(waste_removal_request_id=request_id).first()
+        offer_token = offer.offer_token
+
+    blocked_accept = client.post(
+        f'/api/v1/waste-requests/{request_id}/dispatch/accept',
+        json={'offer_token': offer_token},
+        headers=driver_headers,
+    )
+    assert blocked_accept.status_code == 409
+    assert set(blocked_accept.get_json()['missing_document_types']) == {
+        'driver:carrier_license',
+        'driver:insurance_certificate',
+        'company:assignment',
+    }
+
+    _seed_driver_dispatch_compliance(
+        app_context,
+        'eligibilitydriver@example.com',
+        verifier_email='eligibilityadmin@example.com',
+    )
+
+    accepted = client.post(
+        f'/api/v1/waste-requests/{request_id}/dispatch/accept',
+        json={'offer_token': offer_token},
+        headers=driver_headers,
+    )
+    assert accepted.status_code == 200
+    assert accepted.get_json()['request']['assigned_driver_user_id'] is not None
+
+
 def test_waste_request_completion_requires_verified_collection_documents(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
     monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
@@ -2189,6 +2483,11 @@ def test_waste_request_completion_requires_verified_collection_documents(client,
     _create_user(app_context, 'completeadmin@example.com', 'Password123!', role='admin', name='Complete Admin')
     _create_user(app_context, 'completecustomer@example.com', 'Password123!', role='customer', name='Complete Customer')
     _create_user(app_context, 'completedriver@example.com', 'Password123!', role='driver', name='Complete Driver')
+    _seed_driver_dispatch_compliance(
+        app_context,
+        'completedriver@example.com',
+        verifier_email='completeadmin@example.com',
+    )
 
     admin_headers = _auth_header(client, 'completeadmin@example.com', 'Password123!')
     customer_headers = _auth_header(client, 'completecustomer@example.com', 'Password123!')
@@ -2272,3 +2571,102 @@ def test_waste_request_completion_requires_verified_collection_documents(client,
     )
     assert completed.status_code == 200
     assert completed.get_json()['request']['status'] == 'completed'
+
+
+def test_waste_request_financials_report_offline_billing_launch_mode(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+
+    _create_user(app_context, 'billingcustomer@example.com', 'Password123!', role='customer', name='Billing Customer')
+    customer_headers = _auth_header(client, 'billingcustomer@example.com', 'Password123!')
+
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+    create_response = client.post(
+        '/api/v1/waste-requests',
+        json={
+            'requester_name': 'Billing Customer',
+            'requester_email': 'billingcustomer@example.com',
+            'material_type': 'Glass',
+            'waste_amount': 1.0,
+            'waste_unit': 'Tonnes',
+            'match_radius_miles': 25,
+            'pickup_address': '1 Example Road',
+            'pickup_postcode': 'SW1A1AA',
+            'scheduled_pickup_at': scheduled_time,
+        },
+        headers=customer_headers,
+    )
+    assert create_response.status_code == 201
+    request_id = create_response.get_json()['request']['id']
+
+    with app_context.app.app_context():
+        app_context.app.config['PAYMENTS_ENABLED'] = False
+        app_context.app.config['STRIPE_SECRET_KEY'] = ''
+
+    financials_response = client.get(
+        f'/api/v1/waste-requests/{request_id}/payments',
+        headers=customer_headers,
+    )
+    assert financials_response.status_code == 200
+    payload = financials_response.get_json()
+    assert payload['payments_enabled'] is False
+    assert payload['billing']['mode'] == 'offline'
+    assert payload['billing']['launch_scope'] == 'offline_billing'
+    assert payload['billing']['offline_reason'] == 'feature_flag_disabled'
+    assert payload['billing']['actions_disabled'] == ['charge', 'refund', 'payout']
+    assert 'Billing is arranged offline' in payload['billing']['customer_message']
+
+
+def test_admin_can_update_offline_billing_workflow_for_request(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+
+    _create_user(app_context, 'billingadmin2@example.com', 'Password123!', role='admin', name='Billing Admin 2')
+    _create_user(app_context, 'billingcustomer2@example.com', 'Password123!', role='customer', name='Billing Customer 2')
+
+    admin_headers = _auth_header(client, 'billingadmin2@example.com', 'Password123!')
+    customer_headers = _auth_header(client, 'billingcustomer2@example.com', 'Password123!')
+
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+    create_response = client.post(
+        '/api/v1/waste-requests',
+        json={
+            'requester_name': 'Billing Customer 2',
+            'requester_email': 'billingcustomer2@example.com',
+            'material_type': 'Glass',
+            'waste_amount': 1.0,
+            'waste_unit': 'Tonnes',
+            'match_radius_miles': 25,
+            'pickup_address': '1 Example Road',
+            'pickup_postcode': 'SW1A1AA',
+            'scheduled_pickup_at': scheduled_time,
+        },
+        headers=customer_headers,
+    )
+    assert create_response.status_code == 201
+    request_id = create_response.get_json()['request']['id']
+
+    update_response = client.post(
+        f'/api/v1/admin/waste-requests/{request_id}/billing',
+        json={
+            'state': 'invoice_sent',
+            'reference': 'INV-1001',
+            'notes': 'Invoice emailed to customer',
+        },
+        headers=admin_headers,
+    )
+    assert update_response.status_code == 200
+    update_payload = update_response.get_json()
+    assert update_payload['updated'] is True
+    assert update_payload['request']['billing_workflow']['state'] == 'invoice_sent'
+    assert update_payload['request']['billing_workflow']['reference'] == 'INV-1001'
+    assert update_payload['request']['billing_workflow']['notes'] == 'Invoice emailed to customer'
+
+    request_response = client.get(
+        f'/api/v1/waste-requests/{request_id}',
+        headers=customer_headers,
+    )
+    assert request_response.status_code == 200
+    request_payload = request_response.get_json()
+    assert request_payload['request']['billing_workflow']['state'] == 'invoice_sent'
+    assert request_payload['request']['billing_workflow']['reference'] == 'INV-1001'

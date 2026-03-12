@@ -1,7 +1,9 @@
 import React from 'react';
 import { ActivityIndicator, Button, StyleSheet, Text, View } from 'react-native';
 import type { CreateWasteRequestResponse, WasteRequestDetails } from '../../api/client';
+import { AdminBillingWorkflowCard } from '../../components/AdminBillingWorkflowCard';
 import { Field } from '../../components/Field';
+import { OfflineBillingChecklistPanel } from '../../components/OfflineBillingChecklistPanel';
 import { RequestDetailsPanel } from '../../components/RequestDetailsPanel';
 
 type RequestStatusScreenProps = {
@@ -15,6 +17,11 @@ type RequestStatusScreenProps = {
   isFallbackPolling: boolean;
   created: CreateWasteRequestResponse | null;
   relevantRequestDetails: WasteRequestDetails | null;
+  audience?: 'customer' | 'admin';
+  onUpdateBillingWorkflow?: (
+    requestId: number,
+    payload: { state: string; reference?: string; notes?: string },
+  ) => void;
 };
 
 export function RequestStatusScreen(props: RequestStatusScreenProps) {
@@ -29,6 +36,8 @@ export function RequestStatusScreen(props: RequestStatusScreenProps) {
     isFallbackPolling,
     created,
     relevantRequestDetails,
+    audience = 'customer',
+    onUpdateBillingWorkflow,
   } = props;
 
   return (
@@ -67,10 +76,19 @@ export function RequestStatusScreen(props: RequestStatusScreenProps) {
             Offers sent: {created.dispatch?.offers_created ?? 0} | Notifications:{' '}
             {created.dispatch?.provider_notifications_sent ?? 0}
           </Text>
+          <Text>Billing: arranged offline until in-app payments are enabled</Text>
         </View>
       ) : null}
 
       {relevantRequestDetails ? <RequestDetailsPanel details={relevantRequestDetails} /> : null}
+      {audience === 'admin' && onUpdateBillingWorkflow ? (
+        <AdminBillingWorkflowCard
+          details={relevantRequestDetails}
+          isLoading={isLoading}
+          onSave={onUpdateBillingWorkflow}
+        />
+      ) : null}
+      <OfflineBillingChecklistPanel details={relevantRequestDetails} audience={audience} />
     </View>
   );
 }
