@@ -40,7 +40,7 @@ This checks:
 - DB connectivity
 - migration drift
 - unsafe localhost DB fallback
-- operational gaps like missing alert routing or backup env
+- operational gaps like missing alert routing, offline billing follow-up automation, or backup env
 
 ## 5. Verify Production
 - Home page loads (`/`)
@@ -48,6 +48,8 @@ This checks:
 - Register/login/logout works
 - Material request submits
 - Request email notification arrives at `REQUEST_NOTIFICATION_EMAIL`
+- Offline billing ops smoke passes for no-payments launch:
+  `BASE_URL=http://127.0.0.1:5052 ./scripts/offline_billing_ops_smoke.sh`
 
 ## 5a. Release Discipline
 Use the release runbook for every production cut:
@@ -73,6 +75,7 @@ Use the restore drill checklist monthly and before launch:
 ## 8. Operations
 - Ops health digest: `./scripts/ops_health_digest.sh`
 - Full staging smoke: `BASE_URL=http://127.0.0.1:5052 ./scripts/full_staging_smoke.sh`
+- Offline billing ops smoke: `BASE_URL=http://127.0.0.1:5052 ./scripts/offline_billing_ops_smoke.sh`
 - DB backup runbook: `docs/runbooks/database-backups.md`
 - Production preflight runbook: `docs/runbooks/production-preflight.md`
 - Release + rollback runbook: `docs/runbooks/release-and-rollback.md`

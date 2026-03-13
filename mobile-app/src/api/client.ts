@@ -480,6 +480,83 @@ export type AdminBillingQueueResponse = {
   };
 };
 
+export type BillingFollowup = {
+  due_now: boolean;
+  due_reason?: string | null;
+  reminder_after_hours: number;
+  repeat_hours: number;
+  invoice_age_hours: number;
+  hours_since_last_customer_touch?: number | null;
+  hours_since_last_reminder?: number | null;
+  last_customer_touch?: RequestCommunicationLog | null;
+  last_reminder?: RequestCommunicationLog | null;
+  recommended_template?: CommunicationTemplate | null;
+};
+
+export type AdminBillingFollowupItem = {
+  request: WasteRequest;
+  followup: BillingFollowup;
+};
+
+export type AdminBillingFollowupsResponse = {
+  items: AdminBillingFollowupItem[];
+  summary: {
+    scanned: number;
+    invoice_sent_candidates: number;
+    due_now_count: number;
+    oldest_due_hours: number;
+    oldest_invoice_age_hours: number;
+  };
+  filters: {
+    search: string;
+    due_only: boolean;
+    reminder_after_hours: number;
+    repeat_hours: number;
+    limit: number;
+  };
+};
+
+export type RunBillingFollowupMaintenancePayload = {
+  search?: string;
+  reminder_after_hours?: number;
+  repeat_hours?: number;
+  limit?: number;
+  dry_run?: boolean;
+  log_reminders?: boolean;
+};
+
+export type BillingFollowupMaintenanceResponse = {
+  executed_at: string;
+  dry_run: boolean;
+  options: {
+    search: string;
+    reminder_after_hours: number;
+    repeat_hours: number;
+    limit: number;
+    log_reminders: boolean;
+  };
+  summary: {
+    scanned: number;
+    invoice_sent_candidates: number;
+    due_now_count: number;
+    reminders_planned: number;
+    reminders_logged: number;
+    changed_request_count: number;
+    oldest_due_hours: number;
+  };
+  items: Array<{
+    request_id: number;
+    billing_reference?: string | null;
+    billing_state: string;
+    invoice_age_hours?: number | null;
+    hours_since_last_customer_touch?: number | null;
+    hours_since_last_reminder?: number | null;
+    due_reason?: string | null;
+    planned_actions: string[];
+    applied_actions: string[];
+  }>;
+};
+
 export type CreateRequestCommunicationPayload = {
   direction: RequestCommunicationDirection | string;
   channel: RequestCommunicationChannel | string;
@@ -509,6 +586,49 @@ export type CreateRequestCommunicationResponse = {
   communications: RequestCommunicationLog[];
   summary: RequestCommunicationSummary;
   request: WasteRequestDetails;
+};
+
+export type CommunicationTemplate = {
+  key: string;
+  label: string;
+  direction: RequestCommunicationDirection | string;
+  channel: RequestCommunicationChannel | string;
+  customer_visible: boolean;
+  outcome?: string | null;
+  subject?: string | null;
+  message: string;
+};
+
+export type CommunicationTemplatesResponse = {
+  request_id: number;
+  templates: CommunicationTemplate[];
+};
+
+export type AdminCommunicationsReportItem = {
+  communication: RequestCommunicationLog;
+  request: WasteRequest | null;
+};
+
+export type AdminCommunicationsReportResponse = {
+  items: AdminCommunicationsReportItem[];
+  pagination: {
+    limit: number;
+    offset: number;
+    returned: number;
+    total: number;
+    has_more: boolean;
+  };
+  filters: {
+    state: string;
+    direction: string;
+    channel: string;
+    customer_visible?: boolean | null;
+    search: string;
+  };
+  summary: {
+    direction_counts: Record<string, number>;
+    channel_counts: Record<string, number>;
+  };
 };
 
 export type WasteRequestRealtimeEventName =
@@ -1233,6 +1353,54 @@ export const apiClient = {
     ) as Promise<AdminBillingQueueResponse>;
   },
 
+  getAdminBillingFollowups(
+    token: string,
+    params: {
+      search?: string;
+      dueOnly?: boolean;
+      reminderAfterHours?: number;
+      repeatHours?: number;
+      limit?: number;
+    } = {},
+  ) {
+    const searchParams = new URLSearchParams();
+    if (params.search) {
+      searchParams.set('search', params.search);
+    }
+    if (params.dueOnly !== undefined) {
+      searchParams.set('due_only', params.dueOnly ? 'true' : 'false');
+    }
+    if (params.reminderAfterHours !== undefined) {
+      searchParams.set('reminder_after_hours', String(params.reminderAfterHours));
+    }
+    if (params.repeatHours !== undefined) {
+      searchParams.set('repeat_hours', String(params.repeatHours));
+    }
+    if (params.limit) {
+      searchParams.set('limit', String(params.limit));
+    }
+    const suffix = searchParams.toString() ? `?${searchParams.toString()}` : '';
+    return requestJson<AdminBillingFollowupsResponse>(
+      `/api/v1/admin/billing/followups${suffix}`,
+      { method: 'GET' },
+      { token },
+    ) as Promise<AdminBillingFollowupsResponse>;
+  },
+
+  runAdminBillingFollowupMaintenance(
+    token: string,
+    payload: RunBillingFollowupMaintenancePayload,
+  ) {
+    return requestJson<BillingFollowupMaintenanceResponse>(
+      '/api/v1/admin/billing/followups/maintenance',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      { token },
+    ) as Promise<BillingFollowupMaintenanceResponse>;
+  },
+
   getWasteRequestCommunications(requestId: number, token: string, limit = 50) {
     return requestJson<RequestCommunicationsResponse>(
       `/api/v1/waste-requests/${requestId}/communications?limit=${limit}`,
@@ -1254,6 +1422,52 @@ export const apiClient = {
       },
       { token },
     ) as Promise<CreateRequestCommunicationResponse>;
+  },
+
+  getWasteRequestCommunicationTemplates(requestId: number, token: string) {
+    return requestJson<CommunicationTemplatesResponse>(
+      `/api/v1/admin/waste-requests/${requestId}/communications/templates`,
+      { method: 'GET' },
+      { token },
+    ) as Promise<CommunicationTemplatesResponse>;
+  },
+
+  getAdminCommunicationsReport(
+    token: string,
+    params: {
+      state?: string;
+      direction?: string;
+      channel?: string;
+      customerVisible?: boolean;
+      search?: string;
+      limit?: number;
+    } = {},
+  ) {
+    const searchParams = new URLSearchParams();
+    if (params.state) {
+      searchParams.set('state', params.state);
+    }
+    if (params.direction) {
+      searchParams.set('direction', params.direction);
+    }
+    if (params.channel) {
+      searchParams.set('channel', params.channel);
+    }
+    if (params.customerVisible !== undefined) {
+      searchParams.set('customer_visible', params.customerVisible ? 'true' : 'false');
+    }
+    if (params.search) {
+      searchParams.set('search', params.search);
+    }
+    if (params.limit) {
+      searchParams.set('limit', String(params.limit));
+    }
+    const suffix = searchParams.toString() ? `?${searchParams.toString()}` : '';
+    return requestJson<AdminCommunicationsReportResponse>(
+      `/api/v1/admin/communications/report${suffix}`,
+      { method: 'GET' },
+      { token },
+    ) as Promise<AdminCommunicationsReportResponse>;
   },
 
   upsertPushSubscription(payload: UpsertPushSubscriptionPayload, token: string) {

@@ -143,6 +143,11 @@ MAINTENANCE_ENABLED="${DISPATCH_INCIDENT_MAINTENANCE_ENABLED:-0}"
 MAINTENANCE_DRY_RUN="${DISPATCH_INCIDENT_MAINTENANCE_DRY_RUN:-0}"
 MAINTENANCE_LIMIT="${DISPATCH_INCIDENT_MAINTENANCE_LIMIT:-500}"
 MAINTENANCE_OWNER_EMAIL="${DISPATCH_INCIDENT_AUTO_ASSIGN_ADMIN_EMAIL:-}"
+BILLING_FOLLOWUPS_ENABLED="${OFFLINE_BILLING_FOLLOWUP_AUTOMATION_ENABLED:-0}"
+BILLING_FOLLOWUPS_DRY_RUN="${OFFLINE_BILLING_FOLLOWUP_DRY_RUN:-0}"
+BILLING_FOLLOWUPS_LIMIT="${OFFLINE_BILLING_FOLLOWUP_LIMIT:-200}"
+BILLING_FOLLOWUPS_AFTER_HOURS="${OFFLINE_BILLING_FOLLOWUP_AFTER_HOURS:-72}"
+BILLING_FOLLOWUPS_REPEAT_HOURS="${OFFLINE_BILLING_FOLLOWUP_REPEAT_HOURS:-72}"
 
 VENV_PYTHON="${PROJECT_DIR}/.venv/bin/python"
 if [[ -x "${VENV_PYTHON}" ]]; then
@@ -207,6 +212,22 @@ if is_truthy "${MAINTENANCE_ENABLED}"; then
   "${PYTHON_BIN}" -m flask dispatch-incident-maintenance "${maint_args[@]}" || \
     echo "[$(LOG_TS)] dispatch-incident-maintenance failed"
   echo "[$(LOG_TS)] dispatch-incident-maintenance finished"
+fi
+
+if is_truthy "${BILLING_FOLLOWUPS_ENABLED}"; then
+  billing_args=(
+    --limit "${BILLING_FOLLOWUPS_LIMIT}"
+    --reminder-after-hours "${BILLING_FOLLOWUPS_AFTER_HOURS}"
+    --repeat-hours "${BILLING_FOLLOWUPS_REPEAT_HOURS}"
+    --log-reminders
+  )
+  if is_truthy "${BILLING_FOLLOWUPS_DRY_RUN}"; then
+    billing_args+=(--dry-run)
+  fi
+  echo "[$(LOG_TS)] offline-billing-followups starting"
+  "${PYTHON_BIN}" -m flask offline-billing-followups "${billing_args[@]}" || \
+    echo "[$(LOG_TS)] offline-billing-followups failed"
+  echo "[$(LOG_TS)] offline-billing-followups finished"
 fi
 
 echo "[$(LOG_TS)] ops-health-digest starting"

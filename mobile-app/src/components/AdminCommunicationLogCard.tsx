@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 import { Button, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
-import type { RequestCommunicationChannel, RequestCommunicationDirection, WasteRequestDetails } from '../api/client';
+import type {
+  CommunicationTemplate,
+  RequestCommunicationChannel,
+  RequestCommunicationDirection,
+  WasteRequestDetails,
+} from '../api/client';
 import { Field } from './Field';
 
 const directions: RequestCommunicationDirection[] = ['outbound', 'inbound', 'internal'];
@@ -8,6 +13,7 @@ const channels: RequestCommunicationChannel[] = ['email', 'phone', 'sms', 'manua
 
 type AdminCommunicationLogCardProps = {
   details: WasteRequestDetails | null;
+  templates?: CommunicationTemplate[] | null;
   isLoading: boolean;
   onSave: (
     requestId: number,
@@ -30,7 +36,7 @@ function formatLabel(value: string) {
 }
 
 export function AdminCommunicationLogCard(props: AdminCommunicationLogCardProps) {
-  const { details, isLoading, onSave } = props;
+  const { details, templates, isLoading, onSave } = props;
   const [direction, setDirection] = useState<RequestCommunicationDirection>('outbound');
   const [channel, setChannel] = useState<RequestCommunicationChannel>('email');
   const [subject, setSubject] = useState('');
@@ -45,10 +51,37 @@ export function AdminCommunicationLogCard(props: AdminCommunicationLogCardProps)
     return null;
   }
 
+  const applyTemplate = (template: CommunicationTemplate) => {
+    setDirection(template.direction as RequestCommunicationDirection);
+    setChannel(template.channel as RequestCommunicationChannel);
+    setSubject(template.subject || '');
+    setMessage(template.message || '');
+    setOutcome(template.outcome || '');
+    setCustomerVisible(Boolean(template.customer_visible));
+  };
+
   return (
     <View style={styles.card}>
       <Text style={styles.title}>Admin Communication Log</Text>
       <Text>Request #{details.request.id}</Text>
+
+      {templates?.length ? (
+        <View style={styles.templateBlock}>
+          <Text style={styles.sectionLabel}>Templates</Text>
+          <View style={styles.rowWrap}>
+            {templates.map((template) => (
+              <Pressable
+                key={template.key}
+                style={styles.templateChip}
+                onPress={() => applyTemplate(template)}
+                disabled={isLoading}
+              >
+                <Text style={styles.templateChipText}>{template.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      ) : null}
 
       <View style={styles.rowWrap}>
         {directions.map((option) => {
@@ -139,10 +172,31 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+  templateBlock: {
+    gap: 6,
+  },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4b5563',
+    textTransform: 'uppercase',
+  },
   rowWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+  },
+  templateChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#93c5fd',
+    backgroundColor: '#eff6ff',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  templateChipText: {
+    color: '#1d4ed8',
+    fontWeight: '600',
   },
   chip: {
     borderRadius: 999,

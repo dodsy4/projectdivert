@@ -414,6 +414,21 @@ print("Billing export includes invoice reference")
 PY
 
 log "Communication log smoke"
+COMM_TEMPLATES_BODY="$TMP_DIR/communication_templates.json"
+COMM_TEMPLATES_STATUS="$TMP_DIR/communication_templates.status"
+http_json GET "/api/v1/admin/waste-requests/$REQUEST_ID/communications/templates" "" "$ADMIN_TOKEN" "$COMM_TEMPLATES_BODY" "$COMM_TEMPLATES_STATUS"
+assert_status "$(cat "$COMM_TEMPLATES_STATUS")" "200" "Communication templates endpoint" "$COMM_TEMPLATES_BODY"
+python - <<PY "$COMM_TEMPLATES_BODY"
+import json,sys
+payload=json.load(open(sys.argv[1]))
+templates=payload.get("templates", [])
+keys=[item.get("key") for item in templates]
+if "invoice_sent" not in keys:
+    print("Invoice template missing")
+    sys.exit(1)
+print("Communication templates include invoice_sent")
+PY
+
 COMM_CREATE_BODY="$TMP_DIR/communication_create.json"
 COMM_CREATE_STATUS="$TMP_DIR/communication_create.status"
 http_json POST "/api/v1/admin/waste-requests/$REQUEST_ID/communications" \
@@ -432,6 +447,85 @@ if not payload.get("communications"):
     print("Communication list is empty")
     sys.exit(1)
 print("Communication list includes logged update")
+PY
+
+COMM_REPORT_BODY="$TMP_DIR/communication_report.json"
+COMM_REPORT_STATUS="$TMP_DIR/communication_report.status"
+http_json GET "/api/v1/admin/communications/report?direction=outbound&channel=email&search=SMOKE-INV-$REQUEST_ID&limit=20" "" "$ADMIN_TOKEN" "$COMM_REPORT_BODY" "$COMM_REPORT_STATUS"
+assert_status "$(cat "$COMM_REPORT_STATUS")" "200" "Communications report endpoint" "$COMM_REPORT_BODY"
+python - <<PY "$COMM_REPORT_BODY" "$REQUEST_ID"
+import json,sys
+payload=json.load(open(sys.argv[1]))
+rid=int(sys.argv[2])
+ids=[(item.get("request") or {}).get("id") for item in payload.get("items", [])]
+if rid not in ids:
+    print("Request missing from communications report")
+    sys.exit(1)
+print("Communications report includes logged request")
+PY
+
+COMM_EXPORT_BODY="$TMP_DIR/communication_export.csv"
+COMM_EXPORT_STATUS="$TMP_DIR/communication_export.status"
+http_json GET "/api/v1/admin/communications/export?search=SMOKE-INV-$REQUEST_ID&limit=20" "" "$ADMIN_TOKEN" "$COMM_EXPORT_BODY" "$COMM_EXPORT_STATUS"
+assert_status "$(cat "$COMM_EXPORT_STATUS")" "200" "Communications export endpoint" "$COMM_EXPORT_BODY"
+python - <<PY "$COMM_EXPORT_BODY" "$REQUEST_ID"
+import sys
+text=open(sys.argv[1]).read()
+rid=sys.argv[2]
+if f"SMOKE-INV-{rid}" not in text or "communication_id" not in text:
+    print("Communications export missing expected invoice reference")
+    sys.exit(1)
+print("Communications export includes invoice reference")
+PY
+
+log "Billing follow-up smoke"
+FOLLOWUPS_BODY="$TMP_DIR/billing_followups.json"
+FOLLOWUPS_STATUS="$TMP_DIR/billing_followups.status"
+http_json GET "/api/v1/admin/billing/followups?reminder_after_hours=0&repeat_hours=48&limit=20" "" "$ADMIN_TOKEN" "$FOLLOWUPS_BODY" "$FOLLOWUPS_STATUS"
+assert_status "$(cat "$FOLLOWUPS_STATUS")" "200" "Billing follow-ups endpoint" "$FOLLOWUPS_BODY"
+python - <<PY "$FOLLOWUPS_BODY" "$REQUEST_ID"
+import json,sys
+payload=json.load(open(sys.argv[1]))
+rid=int(sys.argv[2])
+ids=[(item.get("request") or {}).get("id") for item in payload.get("items", [])]
+if rid not in ids:
+    print("Request missing from billing follow-ups report")
+    sys.exit(1)
+print("Billing follow-ups report includes invoice-tracked request")
+PY
+
+FOLLOWUPS_MAINT_BODY="$TMP_DIR/billing_followups_maint.json"
+FOLLOWUPS_MAINT_STATUS="$TMP_DIR/billing_followups_maint.status"
+http_json POST "/api/v1/admin/billing/followups/maintenance" \
+  "{\"reminder_after_hours\":0,\"repeat_hours\":48,\"limit\":20,\"dry_run\":false,\"log_reminders\":true}" \
+  "$ADMIN_TOKEN" "$FOLLOWUPS_MAINT_BODY" "$FOLLOWUPS_MAINT_STATUS"
+assert_status "$(cat "$FOLLOWUPS_MAINT_STATUS")" "200" "Billing follow-up maintenance endpoint" "$FOLLOWUPS_MAINT_BODY"
+python - <<PY "$FOLLOWUPS_MAINT_BODY" "$REQUEST_ID"
+import json,sys
+payload=json.load(open(sys.argv[1]))
+rid=int(sys.argv[2])
+if payload.get("summary", {}).get("reminders_logged", 0) < 1:
+    print("Billing follow-up maintenance did not log any reminder communication")
+    sys.exit(1)
+ids=[item.get("request_id") for item in payload.get("items", [])]
+if rid not in ids:
+    print("Request missing from billing follow-up maintenance output")
+    sys.exit(1)
+print("Billing follow-up maintenance logged reminder communication")
+PY
+
+COMM_REMINDER_BODY="$TMP_DIR/communication_list_after_followup.json"
+COMM_REMINDER_STATUS="$TMP_DIR/communication_list_after_followup.status"
+http_json GET "/api/v1/waste-requests/$REQUEST_ID/communications?limit=20" "" "$ADMIN_TOKEN" "$COMM_REMINDER_BODY" "$COMM_REMINDER_STATUS"
+assert_status "$(cat "$COMM_REMINDER_STATUS")" "200" "Communication list after follow-up" "$COMM_REMINDER_BODY"
+python - <<PY "$COMM_REMINDER_BODY"
+import json,sys
+payload=json.load(open(sys.argv[1]))
+outcomes=[item.get("outcome") for item in payload.get("communications", [])]
+if "payment_reminder_sent" not in outcomes:
+    print("Payment reminder outcome missing after billing follow-up maintenance")
+    sys.exit(1)
+print("Billing follow-up maintenance created payment reminder communication")
 PY
 
 log "Payments readiness smoke"

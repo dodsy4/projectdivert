@@ -107,6 +107,15 @@ Install daily launchd automation (macOS):
   --env-file "$HOME/.projectdivert-ops-health.env"
 ```
 
+For an offline-billing launch, add these to the same env file so the daily runner also logs reminder communications for stale `invoice_sent` requests:
+```bash
+OFFLINE_BILLING_FOLLOWUP_AUTOMATION_ENABLED=1
+OFFLINE_BILLING_FOLLOWUP_DRY_RUN=0
+OFFLINE_BILLING_FOLLOWUP_LIMIT=200
+OFFLINE_BILLING_FOLLOWUP_AFTER_HOURS=72
+OFFLINE_BILLING_FOLLOWUP_REPEAT_HOURS=72
+```
+
 Remove automation:
 ```bash
 ./scripts/uninstall_daily_ops_health_digest_launchd.sh

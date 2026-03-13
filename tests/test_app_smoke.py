@@ -2836,3 +2836,219 @@ def test_admin_can_log_request_communications_and_customer_sees_visible_entries_
     request_payload = request_response.get_json()
     assert len(request_payload['communications']) == 1
     assert request_payload['communication_summary']['customer_visible_count'] == 1
+
+
+def test_admin_communication_templates_and_report_export(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+
+    _create_user(app_context, 'billingadmin5@example.com', 'Password123!', role='admin', name='Billing Admin 5')
+    _create_user(app_context, 'billingcustomer5@example.com', 'Password123!', role='customer', name='Billing Customer 5')
+
+    admin_headers = _auth_header(client, 'billingadmin5@example.com', 'Password123!')
+    customer_headers = _auth_header(client, 'billingcustomer5@example.com', 'Password123!')
+
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+    create_response = client.post(
+        '/api/v1/waste-requests',
+        json={
+            'requester_name': 'Billing Customer 5',
+            'requester_email': 'billingcustomer5@example.com',
+            'material_type': 'Wood',
+            'waste_amount': 1.2,
+            'waste_unit': 'Tonnes',
+            'match_radius_miles': 25,
+            'pickup_address': '1 Example Road',
+            'pickup_postcode': 'SW1A1AA',
+            'scheduled_pickup_at': scheduled_time,
+        },
+        headers=customer_headers,
+    )
+    assert create_response.status_code == 201
+    request_id = create_response.get_json()['request']['id']
+
+    billing_response = client.post(
+        f'/api/v1/admin/waste-requests/{request_id}/billing',
+        json={'state': 'invoice_sent', 'reference': 'INV-3005'},
+        headers=admin_headers,
+    )
+    assert billing_response.status_code == 200
+
+    template_response = client.get(
+        f'/api/v1/admin/waste-requests/{request_id}/communications/templates',
+        headers=admin_headers,
+    )
+    assert template_response.status_code == 200
+    templates = template_response.get_json()['templates']
+    invoice_template = next(item for item in templates if item['key'] == 'invoice_sent')
+    assert invoice_template['customer_visible'] is True
+    assert 'INV-3005' in invoice_template['message']
+
+    create_comm_response = client.post(
+        f'/api/v1/admin/waste-requests/{request_id}/communications',
+        json={
+            'direction': invoice_template['direction'],
+            'channel': invoice_template['channel'],
+            'subject': invoice_template['subject'],
+            'message': invoice_template['message'],
+            'outcome': invoice_template['outcome'],
+            'customer_visible': invoice_template['customer_visible'],
+        },
+        headers=admin_headers,
+    )
+    assert create_comm_response.status_code == 201
+
+    report_response = client.get(
+        '/api/v1/admin/communications/report?direction=outbound&channel=email&search=INV-3005&limit=10',
+        headers=admin_headers,
+    )
+    assert report_response.status_code == 200
+    report_payload = report_response.get_json()
+    assert report_payload['pagination']['total'] == 1
+    assert report_payload['items'][0]['request']['id'] == request_id
+    assert report_payload['summary']['direction_counts']['outbound'] == 1
+
+    export_response = client.get(
+        '/api/v1/admin/communications/export?search=INV-3005&limit=10',
+        headers=admin_headers,
+    )
+    assert export_response.status_code == 200
+    assert export_response.mimetype == 'text/csv'
+    export_text = export_response.get_data(as_text=True)
+    assert 'communication_id,request_id,request_status,billing_state,billing_reference' in export_text
+    assert 'INV-3005' in export_text
+
+
+def test_admin_billing_followups_report_and_maintenance(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+
+    _create_user(app_context, 'billingadmin6@example.com', 'Password123!', role='admin', name='Billing Admin 6')
+    _create_user(app_context, 'billingcustomer6@example.com', 'Password123!', role='customer', name='Billing Customer 6')
+
+    admin_headers = _auth_header(client, 'billingadmin6@example.com', 'Password123!')
+    customer_headers = _auth_header(client, 'billingcustomer6@example.com', 'Password123!')
+
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+    create_response = client.post(
+        '/api/v1/waste-requests',
+        json={
+            'requester_name': 'Billing Customer 6',
+            'requester_email': 'billingcustomer6@example.com',
+            'material_type': 'Metal',
+            'waste_amount': 2.0,
+            'waste_unit': 'Tonnes',
+            'match_radius_miles': 25,
+            'pickup_address': '2 Example Road',
+            'pickup_postcode': 'SW1A1AA',
+            'scheduled_pickup_at': scheduled_time,
+        },
+        headers=customer_headers,
+    )
+    assert create_response.status_code == 201
+    request_id = create_response.get_json()['request']['id']
+
+    billing_response = client.post(
+        f'/api/v1/admin/waste-requests/{request_id}/billing',
+        json={'state': 'invoice_sent', 'reference': 'INV-4006'},
+        headers=admin_headers,
+    )
+    assert billing_response.status_code == 200
+
+    with app_context.app.app_context():
+        booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
+        booking.billing_updated_at = datetime.utcnow() - timedelta(hours=96)
+        app_context.db.session.commit()
+
+    followup_response = client.get(
+        '/api/v1/admin/billing/followups?reminder_after_hours=24&repeat_hours=48&limit=10',
+        headers=admin_headers,
+    )
+    assert followup_response.status_code == 200
+    followup_payload = followup_response.get_json()
+    assert followup_payload['summary']['due_now_count'] == 1
+    assert followup_payload['items'][0]['request']['id'] == request_id
+    assert followup_payload['items'][0]['followup']['due_reason'] == 'invoice_age_exceeded'
+
+    maintenance_response = client.post(
+        '/api/v1/admin/billing/followups/maintenance',
+        json={
+            'reminder_after_hours': 24,
+            'repeat_hours': 48,
+            'limit': 10,
+            'dry_run': False,
+            'log_reminders': True,
+        },
+        headers=admin_headers,
+    )
+    assert maintenance_response.status_code == 200
+    maintenance_payload = maintenance_response.get_json()
+    assert maintenance_payload['summary']['reminders_logged'] == 1
+    assert maintenance_payload['items'][0]['request_id'] == request_id
+
+    communications_response = client.get(
+        f'/api/v1/waste-requests/{request_id}/communications?limit=20',
+        headers=admin_headers,
+    )
+    assert communications_response.status_code == 200
+    communications_payload = communications_response.get_json()
+    assert any(
+        row['outcome'] == 'payment_reminder_sent'
+        for row in communications_payload['communications']
+    )
+
+
+def test_admin_ops_health_reports_billing_followups_due(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setitem(app_context.app.config, 'OPS_HEALTH_BILLING_FOLLOWUPS_WARN', 1)
+    monkeypatch.setitem(app_context.app.config, 'OPS_HEALTH_BILLING_FOLLOWUPS_CRITICAL', 5)
+    monkeypatch.setitem(app_context.app.config, 'OFFLINE_BILLING_FOLLOWUP_AFTER_HOURS', 24)
+    monkeypatch.setitem(app_context.app.config, 'OFFLINE_BILLING_FOLLOWUP_REPEAT_HOURS', 48)
+
+    _create_user(app_context, 'billingadmin7@example.com', 'Password123!', role='admin', name='Billing Admin 7')
+    _create_user(app_context, 'billingcustomer7@example.com', 'Password123!', role='customer', name='Billing Customer 7')
+
+    admin_headers = _auth_header(client, 'billingadmin7@example.com', 'Password123!')
+    customer_headers = _auth_header(client, 'billingcustomer7@example.com', 'Password123!')
+
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+    create_response = client.post(
+        '/api/v1/waste-requests',
+        json={
+            'requester_name': 'Billing Customer 7',
+            'requester_email': 'billingcustomer7@example.com',
+            'material_type': 'Glass',
+            'waste_amount': 0.8,
+            'waste_unit': 'Tonnes',
+            'match_radius_miles': 25,
+            'pickup_address': '3 Example Road',
+            'pickup_postcode': 'SW1A1AA',
+            'scheduled_pickup_at': scheduled_time,
+        },
+        headers=customer_headers,
+    )
+    assert create_response.status_code == 201
+    request_id = create_response.get_json()['request']['id']
+
+    billing_response = client.post(
+        f'/api/v1/admin/waste-requests/{request_id}/billing',
+        json={'state': 'invoice_sent', 'reference': 'INV-5007'},
+        headers=admin_headers,
+    )
+    assert billing_response.status_code == 200
+
+    with app_context.app.app_context():
+        booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
+        booking.billing_updated_at = datetime.utcnow() - timedelta(hours=120)
+        app_context.db.session.commit()
+
+    ops_response = client.get(
+        '/api/v1/admin/ops/health?auth_window_minutes=60&dispatch_limit=100',
+        headers=admin_headers,
+    )
+    assert ops_response.status_code == 200
+    ops_payload = ops_response.get_json()
+    assert ops_payload['metrics']['billing']['followups_due'] >= 1
+    alert_codes = {row['code'] for row in ops_payload['alerts']}
+    assert 'billing_followups_warn' in alert_codes or 'billing_followups_critical' in alert_codes

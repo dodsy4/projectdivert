@@ -1598,7 +1598,40 @@ def _ops_health_thresholds():
         'lockout_events_warn': _int_threshold('OPS_HEALTH_LOCKOUT_EVENTS_WARN', 5, min_value=1),
         'admin_rate_limit_events_warn': _int_threshold('OPS_HEALTH_ADMIN_RATE_LIMIT_EVENTS_WARN', 5, min_value=1),
         'audit_5xx_events_warn': _int_threshold('OPS_HEALTH_AUDIT_5XX_EVENTS_WARN', 1, min_value=1),
+        'billing_followups_warn': _int_threshold('OPS_HEALTH_BILLING_FOLLOWUPS_WARN', 3, min_value=1),
+        'billing_followups_critical': _int_threshold(
+            'OPS_HEALTH_BILLING_FOLLOWUPS_CRITICAL',
+            10,
+            min_value=1,
+        ),
     }
+
+
+def _offline_billing_followup_limit(value=None):
+    if value is None:
+        value = app.config.get('OFFLINE_BILLING_FOLLOWUP_LIMIT', 200)
+    try:
+        return max(1, min(5000, int(value)))
+    except (TypeError, ValueError):
+        return 200
+
+
+def _offline_billing_followup_after_hours(value=None):
+    if value is None:
+        value = app.config.get('OFFLINE_BILLING_FOLLOWUP_AFTER_HOURS', 72)
+    try:
+        return max(0, min(24 * 365, int(value)))
+    except (TypeError, ValueError):
+        return 72
+
+
+def _offline_billing_followup_repeat_hours(value=None):
+    if value is None:
+        value = app.config.get('OFFLINE_BILLING_FOLLOWUP_REPEAT_HOURS', 72)
+    try:
+        return max(1, min(24 * 365, int(value)))
+    except (TypeError, ValueError):
+        return 72
 
 
 def _collect_ops_health_snapshot(auth_window_minutes=None, dispatch_limit=None, now=None):
@@ -1683,6 +1716,19 @@ def _collect_ops_health_snapshot(auth_window_minutes=None, dispatch_limit=None, 
     max_breach_minutes = 0
     oldest_pending_match_minutes = 0
     oldest_unassigned_match_minutes = 0
+    billing_followups = _collect_admin_billing_followups(
+        limit=_offline_billing_followup_limit(),
+        due_only=True,
+        now=now,
+    )
+    billing_due_count = int((billing_followups.get('summary') or {}).get('due_now_count') or 0)
+    billing_invoice_sent_candidates = int(
+        (billing_followups.get('summary') or {}).get('invoice_sent_candidates') or 0
+    )
+    billing_oldest_due_hours = float((billing_followups.get('summary') or {}).get('oldest_due_hours') or 0.0)
+    billing_oldest_invoice_age_hours = float(
+        (billing_followups.get('summary') or {}).get('oldest_invoice_age_hours') or 0.0
+    )
 
     for booking in dispatch_rows:
         status_key = (booking.status or '').strip().lower() or 'unknown'
@@ -1807,6 +1853,23 @@ def _collect_ops_health_snapshot(auth_window_minutes=None, dispatch_limit=None, 
             thresholds['audit_5xx_events_warn'],
         )
 
+    if billing_due_count >= thresholds['billing_followups_critical']:
+        _add_alert(
+            'billing_followups_critical',
+            'critical',
+            'Offline billing follow-ups exceeded critical threshold.',
+            billing_due_count,
+            thresholds['billing_followups_critical'],
+        )
+    elif billing_due_count >= thresholds['billing_followups_warn']:
+        _add_alert(
+            'billing_followups_warn',
+            'warning',
+            'Offline billing follow-ups exceeded warning threshold.',
+            billing_due_count,
+            thresholds['billing_followups_warn'],
+        )
+
     status = 'ok'
     if any(alert['severity'] == 'critical' for alert in alerts):
         status = 'critical'
@@ -1848,6 +1911,12 @@ def _collect_ops_health_snapshot(auth_window_minutes=None, dispatch_limit=None, 
                 'oldest_pending_match_minutes': oldest_pending_match_minutes,
                 'oldest_unassigned_match_minutes': oldest_unassigned_match_minutes,
             },
+            'billing': {
+                'invoice_sent_candidates': billing_invoice_sent_candidates,
+                'followups_due': billing_due_count,
+                'oldest_due_hours': billing_oldest_due_hours,
+                'oldest_invoice_age_hours': billing_oldest_invoice_age_hours,
+            },
         },
     }
 
@@ -1858,6 +1927,7 @@ def _format_ops_health_digest_text(snapshot):
     alerts = list(snapshot.get('alerts') or [])
     auth = (snapshot.get('metrics') or {}).get('auth') or {}
     dispatch = (snapshot.get('metrics') or {}).get('dispatch') or {}
+    billing = (snapshot.get('metrics') or {}).get('billing') or {}
     lines = [
         '[Project Divert] Ops Health Digest',
         'Status: {}'.format(status),
@@ -1875,6 +1945,11 @@ def _format_ops_health_digest_text(snapshot):
         '  incident_breach_total={}'.format(dispatch.get('incident_breach_total', 0)),
         '  incident_breach_critical={}'.format(dispatch.get('incident_breach_critical', 0)),
         '  oldest_pending_match_minutes={}'.format(dispatch.get('oldest_pending_match_minutes', 0)),
+        '',
+        'Billing metrics:',
+        '  invoice_sent_candidates={}'.format(billing.get('invoice_sent_candidates', 0)),
+        '  followups_due={}'.format(billing.get('followups_due', 0)),
+        '  oldest_due_hours={}'.format(billing.get('oldest_due_hours', 0)),
     ]
     if alerts:
         lines.extend(['', 'Active alerts:'])
@@ -3106,6 +3181,51 @@ def dispatch_incident_maintenance(
     click.echo(json.dumps(result, indent=2, sort_keys=True))
 
 
+@app.cli.command('offline-billing-followups')
+@click.option('--limit', type=int, default=None, help='Max invoice-sent rows to inspect.')
+@click.option('--search', default=None, help='Optional search across requester fields and billing reference.')
+@click.option(
+    '--reminder-after-hours',
+    type=int,
+    default=None,
+    help='Hours after invoice_sent before a reminder is due.',
+)
+@click.option(
+    '--repeat-hours',
+    type=int,
+    default=None,
+    help='Minimum hours between reminder communications.',
+)
+@click.option('--log-reminders', is_flag=True, help='Create payment reminder communication entries.')
+@click.option('--dry-run', is_flag=True, help='Compute due reminders without persisting changes.')
+def offline_billing_followups(limit, search, reminder_after_hours, repeat_hours, log_reminders, dry_run):
+    """Review and optionally log stale offline billing follow-ups."""
+    if limit is not None and limit < 1:
+        raise click.BadParameter('limit must be >= 1')
+    if reminder_after_hours is not None and reminder_after_hours < 0:
+        raise click.BadParameter('reminder-after-hours must be >= 0')
+    if repeat_hours is not None and repeat_hours < 1:
+        raise click.BadParameter('repeat-hours must be >= 1')
+
+    effective_log_reminders = bool(
+        log_reminders or _is_truthy(app.config.get('OFFLINE_BILLING_FOLLOWUP_AUTOMATION_ENABLED', False))
+    )
+    effective_dry_run = bool(dry_run or _is_truthy(app.config.get('OFFLINE_BILLING_FOLLOWUP_DRY_RUN', False)))
+
+    result = _run_offline_billing_followup_maintenance(
+        search=search,
+        reminder_after_hours=reminder_after_hours,
+        repeat_hours=repeat_hours,
+        limit=limit,
+        dry_run=effective_dry_run,
+        log_reminders=effective_log_reminders,
+        actor_user_id=None,
+        actor_email='offline-billing-followups@system.local',
+        source='cli_offline_billing_followups',
+    )
+    click.echo(json.dumps(result, indent=2, sort_keys=True))
+
+
 def _postcode_coordinates(postcode):
     endpoint = "http://api.postcodes.io/postcodes/{}".format(postcode)
     response = requests.get(endpoint, timeout=10)
@@ -3618,6 +3738,57 @@ OFFLINE_BILLING_STATES = {
 
 COMMUNICATION_DIRECTIONS = {'outbound', 'inbound', 'internal'}
 COMMUNICATION_CHANNELS = {'email', 'phone', 'sms', 'manual', 'other'}
+COMMUNICATION_TEMPLATE_DEFINITIONS = (
+    {
+        'key': 'invoice_sent',
+        'label': 'Invoice Sent',
+        'direction': 'outbound',
+        'channel': 'email',
+        'customer_visible': True,
+        'subject_template': 'Invoice for waste collection request #{request_id}',
+        'message_template': (
+            'Hi {requester_name}, your booking for request #{request_id} has been invoiced offline'
+            '{reference_clause}. Please use the invoice details sent separately to arrange payment.'
+        ),
+        'outcome': 'invoice_sent',
+    },
+    {
+        'key': 'payment_reminder',
+        'label': 'Payment Reminder',
+        'direction': 'outbound',
+        'channel': 'email',
+        'customer_visible': True,
+        'subject_template': 'Payment reminder for request #{request_id}',
+        'message_template': (
+            'Hi {requester_name}, this is a reminder that request #{request_id} remains outstanding in'
+            ' the offline billing workflow{reference_clause}. Please reply if you need invoice details re-sent.'
+        ),
+        'outcome': 'payment_reminder_sent',
+    },
+    {
+        'key': 'payout_recorded',
+        'label': 'Payout Recorded',
+        'direction': 'internal',
+        'channel': 'manual',
+        'customer_visible': False,
+        'subject_template': 'Carrier payout recorded for request #{request_id}',
+        'message_template': (
+            'Carrier payout has been recorded offline for request #{request_id}{reference_clause}.'
+            ' Billing workflow can now be marked complete.'
+        ),
+        'outcome': 'payout_recorded',
+    },
+)
+
+
+def _find_communication_template(key):
+    normalized_key = str(key or '').strip().lower()
+    if not normalized_key:
+        return None
+    for template in COMMUNICATION_TEMPLATE_DEFINITIONS:
+        if str(template.get('key') or '').strip().lower() == normalized_key:
+            return template
+    return None
 
 
 def _normalize_offline_billing_state(value, default=None):
@@ -3661,6 +3832,68 @@ def _serialize_request_communication_log(entry):
     }
 
 
+def _create_request_communication_log(
+    booking,
+    *,
+    direction,
+    channel,
+    message,
+    subject=None,
+    outcome=None,
+    contact_name=None,
+    contact_email=None,
+    contact_phone=None,
+    customer_visible=False,
+    created_by_user_id=None,
+    occurred_at=None,
+):
+    if not booking:
+        raise ValueError('booking is required')
+    if str(direction or '').strip().lower() not in COMMUNICATION_DIRECTIONS:
+        raise ValueError('direction must be a supported communication direction')
+    if str(channel or '').strip().lower() not in COMMUNICATION_CHANNELS:
+        raise ValueError('channel must be a supported communication channel')
+    normalized_message = str(message or '').strip()
+    if not normalized_message:
+        raise ValueError('message is required')
+
+    return WasteRequestCommunicationLog(
+        waste_removal_request_id=booking.id,
+        created_by_user_id=created_by_user_id,
+        direction=str(direction).strip().lower(),
+        channel=str(channel).strip().lower(),
+        subject=(str(subject or '').strip()[:255] or None),
+        message=normalized_message[:4000],
+        outcome=(str(outcome or '').strip()[:120] or None),
+        contact_name=(str(contact_name or '').strip()[:120] or None),
+        contact_email=(str(contact_email or '').strip()[:255] or None),
+        contact_phone=(str(contact_phone or '').strip()[:120] or None),
+        customer_visible=bool(customer_visible),
+        occurred_at=occurred_at or datetime.utcnow(),
+    )
+
+
+def _publish_request_communication_log_event(booking, entry, metadata=None):
+    if not booking or not entry:
+        return
+    event_metadata = {
+        'communication_log_id': entry.id,
+        'direction': entry.direction,
+        'channel': entry.channel,
+        'customer_visible': bool(entry.customer_visible),
+        'created_by_user_id': entry.created_by_user_id,
+    }
+    if metadata:
+        event_metadata.update(metadata)
+
+    _publish_waste_request_event(
+        booking.id,
+        'admin_communication_logged',
+        payload=_serialize_waste_request_snapshot(booking),
+        metadata=event_metadata,
+    )
+
+
 def _communication_logs_for_request(request_id, customer_visible_only=False, limit=50):
     query = WasteRequestCommunicationLog.query.filter(
         WasteRequestCommunicationLog.waste_removal_request_id == request_id
@@ -3694,6 +3927,373 @@ def _serialize_request_communication_summary(entries):
         'direction_counts': direction_counts,
         'channel_counts': channel_counts,
     }
+
+
+def _communication_template_context(booking):
+    reference = (booking.billing_reference or '').strip()
+    return {
+        'request_id': booking.id,
+        'requester_name': booking.requester_name or 'Customer',
+        'requester_email': booking.requester_email or '',
+        'billing_state': (booking.billing_state or '').strip().lower() or 'pending_offline_invoice',
+        'billing_reference': reference,
+        'reference_clause': f' under reference {reference}' if reference else '',
+    }
+
+
+def _serialize_communication_template(template, booking):
+    context = _communication_template_context(booking)
+    return {
+        'key': template['key'],
+        'label': template['label'],
+        'direction': template['direction'],
+        'channel': template['channel'],
+        'customer_visible': bool(template.get('customer_visible')),
+        'outcome': template.get('outcome'),
+        'subject': (template.get('subject_template') or '').format(**context),
+        'message': (template.get('message_template') or '').format(**context),
+    }
+
+
+def _build_admin_billing_followups_query(search=None):
+    query = WasteRemovalRequest.query.filter(
+        func.coalesce(func.lower(WasteRemovalRequest.billing_state), 'pending_offline_invoice') == 'invoice_sent'
+    )
+    if search:
+        pattern = '%{}%'.format(str(search).strip().lower())
+        query = query.filter(
+            or_(
+                func.lower(func.coalesce(WasteRemovalRequest.requester_name, '')).like(pattern),
+                func.lower(func.coalesce(WasteRemovalRequest.requester_email, '')).like(pattern),
+                func.lower(func.coalesce(WasteRemovalRequest.pickup_postcode, '')).like(pattern),
+                func.lower(func.coalesce(WasteRemovalRequest.billing_reference, '')).like(pattern),
+            )
+        )
+    return query
+
+
+def _hours_since(timestamp, now=None):
+    minutes = _minutes_since(timestamp, now=now)
+    if minutes is None:
+        return None
+    return round(minutes / 60.0, 1)
+
+
+def _latest_billing_communication(booking, *, outcomes=None, customer_visible=None, directions=None):
+    if not booking:
+        return None
+    query = WasteRequestCommunicationLog.query.filter(
+        WasteRequestCommunicationLog.waste_removal_request_id == booking.id
+    )
+    if outcomes:
+        lowered = [str(value).strip().lower() for value in outcomes if str(value).strip()]
+        if lowered:
+            query = query.filter(func.lower(func.coalesce(WasteRequestCommunicationLog.outcome, '')).in_(lowered))
+    if customer_visible is not None:
+        query = query.filter(WasteRequestCommunicationLog.customer_visible.is_(bool(customer_visible)))
+    if directions:
+        lowered = [str(value).strip().lower() for value in directions if str(value).strip()]
+        if lowered:
+            query = query.filter(func.lower(func.coalesce(WasteRequestCommunicationLog.direction, '')).in_(lowered))
+    return (
+        query.order_by(
+            WasteRequestCommunicationLog.occurred_at.desc(),
+            WasteRequestCommunicationLog.id.desc(),
+        )
+        .first()
+    )
+
+
+def _serialize_billing_followup_item(booking, reminder_after_hours=None, repeat_hours=None, now=None):
+    if not booking:
+        return None
+
+    now = now or datetime.utcnow()
+    reminder_after_hours = _offline_billing_followup_after_hours(reminder_after_hours)
+    repeat_hours = _offline_billing_followup_repeat_hours(repeat_hours)
+    invoice_anchor = booking.billing_updated_at or booking.created_at
+    invoice_age_hours = _hours_since(invoice_anchor, now=now) or 0.0
+    last_customer_touch = _latest_billing_communication(
+        booking,
+        customer_visible=True,
+        directions={'outbound', 'inbound'},
+    )
+    last_reminder = _latest_billing_communication(
+        booking,
+        outcomes={'payment_reminder_sent'},
+    )
+    hours_since_last_customer_touch = _hours_since(
+        getattr(last_customer_touch, 'occurred_at', None),
+        now=now,
+    )
+    hours_since_last_reminder = _hours_since(
+        getattr(last_reminder, 'occurred_at', None),
+        now=now,
+    )
+
+    due_now = False
+    due_reason = None
+    if invoice_age_hours >= reminder_after_hours:
+        if last_reminder is None:
+            due_now = True
+            due_reason = 'invoice_age_exceeded'
+        elif (hours_since_last_reminder or 0.0) >= repeat_hours:
+            due_now = True
+            due_reason = 'reminder_repeat_due'
+
+    payment_reminder_template = _find_communication_template('payment_reminder')
+    return {
+        'request': _serialize_waste_request(booking),
+        'followup': {
+            'due_now': due_now,
+            'due_reason': due_reason,
+            'reminder_after_hours': reminder_after_hours,
+            'repeat_hours': repeat_hours,
+            'invoice_age_hours': invoice_age_hours,
+            'hours_since_last_customer_touch': hours_since_last_customer_touch,
+            'hours_since_last_reminder': hours_since_last_reminder,
+            'last_customer_touch': _serialize_request_communication_log(last_customer_touch),
+            'last_reminder': _serialize_request_communication_log(last_reminder),
+            'recommended_template': (
+                _serialize_communication_template(payment_reminder_template, booking)
+                if payment_reminder_template
+                else None
+            ),
+        },
+    }
+
+
+def _collect_admin_billing_followups(search=None, reminder_after_hours=None, repeat_hours=None, limit=None, due_only=True, now=None):
+    now = now or datetime.utcnow()
+    reminder_after_hours = _offline_billing_followup_after_hours(reminder_after_hours)
+    repeat_hours = _offline_billing_followup_repeat_hours(repeat_hours)
+    limit = _offline_billing_followup_limit(limit)
+
+    query = _build_admin_billing_followups_query(search=search)
+    total_candidates = query.count()
+    rows = (
+        query.order_by(
+            func.coalesce(WasteRemovalRequest.billing_updated_at, WasteRemovalRequest.created_at).asc(),
+            WasteRemovalRequest.id.asc(),
+        )
+        .limit(limit)
+        .all()
+    )
+
+    items = []
+    due_count = 0
+    oldest_due_hours = 0.0
+    oldest_invoice_age_hours = 0.0
+
+    for booking in rows:
+        item = _serialize_billing_followup_item(
+            booking,
+            reminder_after_hours=reminder_after_hours,
+            repeat_hours=repeat_hours,
+            now=now,
+        )
+        followup = (item or {}).get('followup') or {}
+        oldest_invoice_age_hours = max(oldest_invoice_age_hours, float(followup.get('invoice_age_hours') or 0.0))
+        if followup.get('due_now'):
+            due_count += 1
+            oldest_due_hours = max(oldest_due_hours, float(followup.get('invoice_age_hours') or 0.0))
+        if due_only and not followup.get('due_now'):
+            continue
+        items.append(item)
+
+    return {
+        'items': items,
+        'summary': {
+            'scanned': len(rows),
+            'invoice_sent_candidates': total_candidates,
+            'due_now_count': due_count,
+            'oldest_due_hours': oldest_due_hours,
+            'oldest_invoice_age_hours': oldest_invoice_age_hours,
+        },
+        'filters': {
+            'search': search or '',
+            'due_only': bool(due_only),
+            'reminder_after_hours': reminder_after_hours,
+            'repeat_hours': repeat_hours,
+            'limit': limit,
+        },
+    }
+
+
+def _run_offline_billing_followup_maintenance(
+    *,
+    search=None,
+    reminder_after_hours=None,
+    repeat_hours=None,
+    limit=None,
+    dry_run=False,
+    log_reminders=True,
+    actor_user_id=None,
+    actor_email=None,
+    source='system_offline_billing_followup',
+    now=None,
+):
+    now = now or datetime.utcnow()
+    report = _collect_admin_billing_followups(
+        search=search,
+        reminder_after_hours=reminder_after_hours,
+        repeat_hours=repeat_hours,
+        limit=limit,
+        due_only=True,
+        now=now,
+    )
+    reminder_after_hours = report['filters']['reminder_after_hours']
+    repeat_hours = report['filters']['repeat_hours']
+    limit = report['filters']['limit']
+
+    reminders_planned = 0
+    reminders_logged = 0
+    changed_request_ids = []
+    publish_jobs = []
+    items = []
+
+    for row in report['items']:
+        booking = db.session.get(WasteRemovalRequest, row['request']['id'])
+        if not booking:
+            continue
+
+        followup = row.get('followup') or {}
+        planned_actions = []
+        applied_actions = []
+        if log_reminders and followup.get('due_now'):
+            planned_actions.append('log_payment_reminder')
+            reminders_planned += 1
+
+        item_summary = {
+            'request_id': booking.id,
+            'billing_reference': booking.billing_reference,
+            'billing_state': (booking.billing_state or '').strip().lower() or 'pending_offline_invoice',
+            'invoice_age_hours': followup.get('invoice_age_hours'),
+            'hours_since_last_customer_touch': followup.get('hours_since_last_customer_touch'),
+            'hours_since_last_reminder': followup.get('hours_since_last_reminder'),
+            'due_reason': followup.get('due_reason'),
+            'planned_actions': planned_actions,
+            'applied_actions': applied_actions,
+        }
+        items.append(item_summary)
+
+        if dry_run or not planned_actions:
+            continue
+
+        template = _find_communication_template('payment_reminder')
+        payload = _serialize_communication_template(template, booking) if template else None
+        if not payload:
+            continue
+
+        entry = _create_request_communication_log(
+            booking,
+            direction=payload['direction'],
+            channel=payload['channel'],
+            subject=payload['subject'],
+            message=payload['message'],
+            outcome=payload.get('outcome'),
+            contact_name=booking.requester_name,
+            contact_email=booking.requester_email,
+            customer_visible=payload.get('customer_visible'),
+            created_by_user_id=actor_user_id,
+            occurred_at=now,
+        )
+        db.session.add(entry)
+        db.session.flush()
+        publish_jobs.append(
+            {
+                'request_id': booking.id,
+                'entry_id': entry.id,
+                'metadata': {
+                    'automation': True,
+                    'source': source,
+                    'admin_user_id': actor_user_id,
+                    'actor_email': actor_email,
+                },
+            }
+        )
+        applied_actions.append('log_payment_reminder')
+        changed_request_ids.append(booking.id)
+        reminders_logged += 1
+
+    if not dry_run and changed_request_ids:
+        db.session.commit()
+        for job in publish_jobs:
+            booking = db.session.get(WasteRemovalRequest, job['request_id'])
+            entry = db.session.get(WasteRequestCommunicationLog, job['entry_id'])
+            if not booking or not entry:
+                continue
+            _publish_request_communication_log_event(
+                booking,
+                entry,
+                metadata=job['metadata'],
+            )
+            _notify_mobile_push_for_waste_event(
+                booking,
+                'admin_communication_logged',
+                metadata=job['metadata'],
+            )
+
+    return {
+        'executed_at': now.isoformat() + 'Z',
+        'dry_run': bool(dry_run),
+        'options': {
+            'search': search or '',
+            'reminder_after_hours': reminder_after_hours,
+            'repeat_hours': repeat_hours,
+            'limit': limit,
+            'log_reminders': bool(log_reminders),
+        },
+        'summary': {
+            'scanned': report['summary']['scanned'],
+            'invoice_sent_candidates': report['summary']['invoice_sent_candidates'],
+            'due_now_count': report['summary']['due_now_count'],
+            'reminders_planned': reminders_planned,
+            'reminders_logged': reminders_logged if not dry_run else 0,
+            'changed_request_count': len(set(changed_request_ids)) if not dry_run else 0,
+            'oldest_due_hours': report['summary']['oldest_due_hours'],
+        },
+        'items': items,
+    }
+
+
+def _build_admin_communications_query(
+    state=None,
+    direction=None,
+    channel=None,
+    customer_visible=None,
+    search=None,
+):
+    query = (
+        WasteRequestCommunicationLog.query
+        .join(
+            WasteRemovalRequest,
+            WasteRemovalRequest.id == WasteRequestCommunicationLog.waste_removal_request_id,
+        )
+    )
+    if state and state != 'all':
+        query = query.filter(
+            func.coalesce(func.lower(WasteRemovalRequest.billing_state), 'pending_offline_invoice') == state
+        )
+    if direction and direction != 'all':
+        query = query.filter(func.lower(WasteRequestCommunicationLog.direction) == direction)
+    if channel and channel != 'all':
+        query = query.filter(func.lower(WasteRequestCommunicationLog.channel) == channel)
+    if customer_visible is True:
+        query = query.filter(WasteRequestCommunicationLog.customer_visible.is_(True))
+    elif customer_visible is False:
+        query = query.filter(WasteRequestCommunicationLog.customer_visible.is_(False))
+    if search:
+        pattern = '%{}%'.format(search.lower())
+        query = query.filter(
+            or_(
+                func.lower(func.coalesce(WasteRequestCommunicationLog.subject, '')).like(pattern),
+                func.lower(func.coalesce(WasteRequestCommunicationLog.message, '')).like(pattern),
+                func.lower(func.coalesce(WasteRemovalRequest.requester_email, '')).like(pattern),
+                func.lower(func.coalesce(WasteRemovalRequest.billing_reference, '')).like(pattern),
+            )
+        )
+    return query
 
 
 def _serialize_waste_request(booking):
@@ -9261,6 +9861,93 @@ def api_admin_export_billing_requests():
     return response
 
 
+@app.route('/api/v1/admin/billing/followups', methods=['GET'])
+@jwt_required(roles={'admin'})
+def api_admin_list_billing_followups():
+    try:
+        limit = _parse_optional_int_query(request.args.get('limit'), 'limit', min_value=1, max_value=500)
+        due_only = _parse_optional_bool_query(request.args.get('due_only'), 'due_only')
+        reminder_after_hours = _parse_optional_int_query(
+            request.args.get('reminder_after_hours'),
+            'reminder_after_hours',
+            min_value=0,
+            max_value=24 * 365,
+        )
+        repeat_hours = _parse_optional_int_query(
+            request.args.get('repeat_hours'),
+            'repeat_hours',
+            min_value=1,
+            max_value=24 * 365,
+        )
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    search = str(request.args.get('search') or '').strip() or None
+    report = _collect_admin_billing_followups(
+        search=search,
+        reminder_after_hours=reminder_after_hours,
+        repeat_hours=repeat_hours,
+        limit=limit,
+        due_only=True if due_only is None else bool(due_only),
+    )
+    return jsonify(report)
+
+
+@app.route('/api/v1/admin/billing/followups/maintenance', methods=['POST'])
+@jwt_required(roles={'admin'})
+def api_admin_run_billing_followup_maintenance():
+    payload = request.get_json(silent=True) or {}
+    limit = payload.get('limit')
+    reminder_after_hours = payload.get('reminder_after_hours')
+    repeat_hours = payload.get('repeat_hours')
+    dry_run = bool(payload.get('dry_run', False))
+    log_reminders = bool(payload.get('log_reminders', True))
+    search = str(payload.get('search') or '').strip() or None
+
+    try:
+        if limit is not None:
+            limit = _parse_optional_int_query(limit, 'limit', min_value=1, max_value=500)
+        if reminder_after_hours is not None:
+            reminder_after_hours = _parse_optional_int_query(
+                reminder_after_hours,
+                'reminder_after_hours',
+                min_value=0,
+                max_value=24 * 365,
+            )
+        if repeat_hours is not None:
+            repeat_hours = _parse_optional_int_query(
+                repeat_hours,
+                'repeat_hours',
+                min_value=1,
+                max_value=24 * 365,
+            )
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    try:
+        result = _run_offline_billing_followup_maintenance(
+            search=search,
+            reminder_after_hours=reminder_after_hours,
+            repeat_hours=repeat_hours,
+            limit=limit,
+            dry_run=dry_run,
+            log_reminders=log_reminders,
+            actor_user_id=_current_jwt_user_id(),
+            actor_email=_current_jwt_email(),
+            source='api_admin_billing_followups',
+        )
+    except SQLAlchemyError:
+        db.session.rollback()
+        app.logger.exception('Billing follow-up maintenance failed.')
+        return jsonify({'error': 'Failed to run billing follow-up maintenance'}), 500
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Billing follow-up maintenance failed.')
+        return jsonify({'error': 'Failed to run billing follow-up maintenance'}), 500
+
+    return jsonify(result)
+
+
 @app.route('/api/v1/admin/carrier-companies', methods=['GET'])
 @jwt_required(roles={'admin'})
 def api_admin_list_carrier_companies():
@@ -10832,7 +11519,7 @@ def api_get_waste_request_communications(request_id):
         return jsonify({'error': str(exc)}), 400
 
     limit = limit or 50
-    customer_visible_only = _current_jwt_role() == 'customer'
+    customer_visible_only = _current_jwt_role() in {'customer', 'driver'}
     entries = _communication_logs_for_request(
         request_id,
         customer_visible_only=customer_visible_only,
@@ -10847,6 +11534,24 @@ def api_get_waste_request_communications(request_id):
                 'customer_visible_only': customer_visible_only,
                 'limit': limit,
             },
+        }
+    )
+
+
+@app.route('/api/v1/admin/waste-requests/<int:request_id>/communications/templates', methods=['GET'])
+@jwt_required(roles={'admin'})
+def api_admin_get_waste_request_communication_templates(request_id):
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        return jsonify({'error': 'Waste request not found'}), 404
+
+    return jsonify(
+        {
+            'request_id': request_id,
+            'templates': [
+                _serialize_communication_template(template, booking)
+                for template in COMMUNICATION_TEMPLATE_DEFINITIONS
+            ],
         }
     )
 
@@ -10886,18 +11591,18 @@ def api_admin_create_waste_request_communication(request_id):
     else:
         occurred_at = datetime.utcnow()
 
-    entry = WasteRequestCommunicationLog(
-        waste_removal_request_id=request_id,
-        created_by_user_id=_current_jwt_user_id(),
+    entry = _create_request_communication_log(
+        booking,
         direction=direction,
         channel=channel,
         subject=subject,
-        message=message[:4000],
+        message=message,
         outcome=outcome,
         contact_name=contact_name,
         contact_email=contact_email,
         contact_phone=contact_phone,
         customer_visible=customer_visible,
+        created_by_user_id=_current_jwt_user_id(),
         occurred_at=occurred_at,
     )
 
@@ -10909,19 +11614,7 @@ def api_admin_create_waste_request_communication(request_id):
         app.logger.exception('Failed to create communication log for request %s.', request_id)
         return jsonify({'error': 'Failed to create communication log'}), 500
 
-    metadata = {
-        'communication_log_id': entry.id,
-        'direction': direction,
-        'channel': channel,
-        'customer_visible': customer_visible,
-        'created_by_user_id': entry.created_by_user_id,
-    }
-    _publish_waste_request_event(
-        booking.id,
-        'admin_communication_logged',
-        payload=_serialize_waste_request_snapshot(booking),
-        metadata=metadata,
-    )
+    _publish_request_communication_log_event(booking, entry)
 
     entries = _communication_logs_for_request(
         request_id,
@@ -10937,6 +11630,202 @@ def api_admin_create_waste_request_communication(request_id):
             'request': _serialize_waste_request_snapshot(booking),
         }
     ), 201
+
+
+@app.route('/api/v1/admin/communications/report', methods=['GET'])
+@jwt_required(roles={'admin'})
+def api_admin_communications_report():
+    try:
+        limit = _parse_optional_int_query(request.args.get('limit'), 'limit', min_value=1, max_value=500)
+        offset = _parse_optional_int_query(request.args.get('offset'), 'offset', min_value=0)
+        customer_visible = _parse_optional_bool_query(request.args.get('customer_visible'), 'customer_visible')
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    limit = limit or 50
+    offset = offset or 0
+
+    state = _normalize_offline_billing_state(request.args.get('state'), default='all')
+    if state != 'all' and state not in OFFLINE_BILLING_STATES:
+        return jsonify({'error': 'Invalid billing state filter', 'allowed_states': ['all'] + sorted(OFFLINE_BILLING_STATES)}), 400
+
+    direction = str(request.args.get('direction') or '').strip().lower() or 'all'
+    if direction != 'all' and direction not in COMMUNICATION_DIRECTIONS:
+        return jsonify({'error': 'Invalid direction filter', 'allowed_directions': ['all'] + sorted(COMMUNICATION_DIRECTIONS)}), 400
+
+    channel = str(request.args.get('channel') or '').strip().lower() or 'all'
+    if channel != 'all' and channel not in COMMUNICATION_CHANNELS:
+        return jsonify({'error': 'Invalid channel filter', 'allowed_channels': ['all'] + sorted(COMMUNICATION_CHANNELS)}), 400
+
+    search = str(request.args.get('search') or '').strip() or None
+
+    try:
+        query = _build_admin_communications_query(
+            state=state,
+            direction=direction,
+            channel=channel,
+            customer_visible=customer_visible,
+            search=search,
+        )
+        total = query.count()
+        rows = (
+            query.order_by(
+                WasteRequestCommunicationLog.occurred_at.desc(),
+                WasteRequestCommunicationLog.id.desc(),
+            )
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        direction_counts = {
+            row[0] or 'unknown': row[1]
+            for row in (
+                query.with_entities(
+                    func.coalesce(func.lower(WasteRequestCommunicationLog.direction), 'unknown'),
+                    func.count(WasteRequestCommunicationLog.id),
+                )
+                .group_by(func.coalesce(func.lower(WasteRequestCommunicationLog.direction), 'unknown'))
+                .all()
+            )
+        }
+        channel_counts = {
+            row[0] or 'unknown': row[1]
+            for row in (
+                query.with_entities(
+                    func.coalesce(func.lower(WasteRequestCommunicationLog.channel), 'unknown'),
+                    func.count(WasteRequestCommunicationLog.id),
+                )
+                .group_by(func.coalesce(func.lower(WasteRequestCommunicationLog.channel), 'unknown'))
+                .all()
+            )
+        }
+    except SQLAlchemyError:
+        app.logger.exception('Failed to query communications report.')
+        return jsonify({'error': 'Failed to query communications report'}), 500
+
+    items = []
+    for row in rows:
+        booking = db.session.get(WasteRemovalRequest, row.waste_removal_request_id)
+        items.append(
+            {
+                'communication': _serialize_request_communication_log(row),
+                'request': _serialize_waste_request(booking) if booking else None,
+            }
+        )
+
+    return jsonify(
+        {
+            'items': items,
+            'pagination': {
+                'limit': limit,
+                'offset': offset,
+                'returned': len(items),
+                'total': total,
+                'has_more': (offset + len(items)) < total,
+            },
+            'filters': {
+                'state': state,
+                'direction': direction,
+                'channel': channel,
+                'customer_visible': customer_visible,
+                'search': search or '',
+            },
+            'summary': {
+                'direction_counts': direction_counts,
+                'channel_counts': channel_counts,
+            },
+        }
+    )
+
+
+@app.route('/api/v1/admin/communications/export', methods=['GET'])
+@jwt_required(roles={'admin'})
+def api_admin_communications_export():
+    try:
+        limit = _parse_optional_int_query(request.args.get('limit'), 'limit', min_value=1, max_value=5000)
+        customer_visible = _parse_optional_bool_query(request.args.get('customer_visible'), 'customer_visible')
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    limit = limit or 1000
+    state = _normalize_offline_billing_state(request.args.get('state'), default='all')
+    if state != 'all' and state not in OFFLINE_BILLING_STATES:
+        return jsonify({'error': 'Invalid billing state filter', 'allowed_states': ['all'] + sorted(OFFLINE_BILLING_STATES)}), 400
+    direction = str(request.args.get('direction') or '').strip().lower() or 'all'
+    if direction != 'all' and direction not in COMMUNICATION_DIRECTIONS:
+        return jsonify({'error': 'Invalid direction filter', 'allowed_directions': ['all'] + sorted(COMMUNICATION_DIRECTIONS)}), 400
+    channel = str(request.args.get('channel') or '').strip().lower() or 'all'
+    if channel != 'all' and channel not in COMMUNICATION_CHANNELS:
+        return jsonify({'error': 'Invalid channel filter', 'allowed_channels': ['all'] + sorted(COMMUNICATION_CHANNELS)}), 400
+    search = str(request.args.get('search') or '').strip() or None
+
+    try:
+        rows = (
+            _build_admin_communications_query(
+                state=state,
+                direction=direction,
+                channel=channel,
+                customer_visible=customer_visible,
+                search=search,
+            )
+            .order_by(
+                WasteRequestCommunicationLog.occurred_at.desc(),
+                WasteRequestCommunicationLog.id.desc(),
+            )
+            .limit(limit)
+            .all()
+        )
+    except SQLAlchemyError:
+        app.logger.exception('Failed to export communications report.')
+        return jsonify({'error': 'Failed to export communications report'}), 500
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        [
+            'communication_id',
+            'request_id',
+            'request_status',
+            'billing_state',
+            'billing_reference',
+            'direction',
+            'channel',
+            'customer_visible',
+            'subject',
+            'message',
+            'outcome',
+            'contact_name',
+            'contact_email',
+            'contact_phone',
+            'occurred_at',
+        ]
+    )
+    for row in rows:
+        booking = db.session.get(WasteRemovalRequest, row.waste_removal_request_id)
+        writer.writerow(
+            [
+                row.id,
+                row.waste_removal_request_id,
+                booking.status if booking else '',
+                (booking.billing_state if booking and booking.billing_state else 'pending_offline_invoice'),
+                booking.billing_reference if booking and booking.billing_reference else '',
+                row.direction,
+                row.channel,
+                bool(row.customer_visible),
+                row.subject or '',
+                row.message or '',
+                row.outcome or '',
+                row.contact_name or '',
+                row.contact_email or '',
+                row.contact_phone or '',
+                row.occurred_at.isoformat() + 'Z' if row.occurred_at else '',
+            ]
+        )
+
+    filename = 'communications_report_{}.csv'.format(datetime.utcnow().strftime('%Y%m%d_%H%M%S'))
+    response = Response(buffer.getvalue(), mimetype='text/csv')
+    response.headers['Content-Disposition'] = 'attachment; filename={}'.format(filename)
+    return response
 
 
 @app.route('/api/v1/admin/waste-requests/<int:request_id>/timeline', methods=['GET'])

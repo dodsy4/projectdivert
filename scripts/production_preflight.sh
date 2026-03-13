@@ -214,6 +214,22 @@ else
   warn "ops health digest delivery is not configured"
 fi
 
+if [[ "${PAYMENTS_ENABLED:-0}" =~ ^(1|true|TRUE|yes|YES|on|ON)$ ]]; then
+  pass "offline billing follow-up automation not required while payments are enabled"
+else
+  if [[ "${OFFLINE_BILLING_FOLLOWUP_AUTOMATION_ENABLED:-0}" =~ ^(1|true|TRUE|yes|YES|on|ON)$ ]]; then
+    pass "offline billing follow-up automation is enabled"
+  else
+    warn "offline billing follow-up automation is disabled"
+  fi
+
+  if [[ -n "${OFFLINE_BILLING_FOLLOWUP_AFTER_HOURS:-}" ]]; then
+    pass "offline billing follow-up threshold is configured"
+  else
+    warn "OFFLINE_BILLING_FOLLOWUP_AFTER_HOURS not set; default threshold will be used"
+  fi
+fi
+
 if [[ -f "${HOME}/.projectdivert-db-backup.env" || -n "${BACKUP_OUTPUT_DIR:-}" ]]; then
   pass "backup automation env appears configured"
 else

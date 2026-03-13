@@ -10,7 +10,9 @@ import {
   View,
 } from 'react-native';
 import { apiClient } from './src/api/client';
+import { AdminBillingFollowupsCard } from './src/components/AdminBillingFollowupsCard';
 import { AdminBillingQueueCard } from './src/components/AdminBillingQueueCard';
+import { AdminCommunicationsReportCard } from './src/components/AdminCommunicationsReportCard';
 import { AdminComplianceReviewCard } from './src/components/AdminComplianceReviewCard';
 import { AdminDriverEligibilityCard } from './src/components/AdminDriverEligibilityCard';
 import { AdminLaunchBillingCard } from './src/components/AdminLaunchBillingCard';
@@ -79,6 +81,8 @@ export default function App() {
     isBootstrappingSession,
     isComplianceQueueLoading,
     isBillingQueueLoading,
+    isBillingFollowupsLoading,
+    isCommunicationsReportLoading,
     isAdminDriversLoading,
     isDriverComplianceLoading,
     info,
@@ -88,6 +92,9 @@ export default function App() {
     driverRelevantRequestDetails,
     adminComplianceReviewQueue,
     adminBillingQueue,
+    adminBillingFollowups,
+    communicationTemplates,
+    adminCommunicationsReport,
     adminDrivers,
     driverOwnCompliance,
     currentRole,
@@ -107,10 +114,13 @@ export default function App() {
     onUploadComplianceDocument,
     onLoadComplianceReviewQueue,
     onLoadAdminBillingQueue,
+    onLoadAdminBillingFollowups,
+    onLoadAdminCommunicationsReport,
     onLoadAdminDrivers,
     onLoadDriverOwnCompliance,
     onReviewComplianceDocument,
     onUpdateBillingWorkflow,
+    onRunAdminBillingFollowupMaintenance,
     onInspectBillingRequest,
     onCreateRequestCommunication,
   } = useWasteMobileController();
@@ -336,6 +346,19 @@ export default function App() {
                   onRefresh={onLoadAdminBillingQueue}
                   onInspectRequest={onInspectBillingRequest}
                 />
+                <AdminBillingFollowupsCard
+                  report={adminBillingFollowups}
+                  isLoading={isBillingFollowupsLoading}
+                  onRefresh={onLoadAdminBillingFollowups}
+                  onRunMaintenance={onRunAdminBillingFollowupMaintenance}
+                  onInspectRequest={onInspectBillingRequest}
+                />
+                <AdminCommunicationsReportCard
+                  report={adminCommunicationsReport}
+                  isLoading={isCommunicationsReportLoading}
+                  onRefresh={onLoadAdminCommunicationsReport}
+                  onInspectRequest={onInspectBillingRequest}
+                />
                 <AdminLaunchBillingCard />
                 <AdminDriverEligibilityCard
                   drivers={adminDrivers}
@@ -376,6 +399,7 @@ export default function App() {
                     audience={currentRole === 'admin' ? 'admin' : 'customer'}
                     onUpdateBillingWorkflow={onUpdateBillingWorkflow}
                     onCreateCommunicationLog={onCreateRequestCommunication}
+                    communicationTemplates={communicationTemplates}
                   />
                 )}
               </>

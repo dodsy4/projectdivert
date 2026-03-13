@@ -1,6 +1,6 @@
 import React from 'react';
 import { ActivityIndicator, Button, StyleSheet, Text, View } from 'react-native';
-import type { CreateWasteRequestResponse, WasteRequestDetails } from '../../api/client';
+import type { CommunicationTemplatesResponse, CreateWasteRequestResponse, WasteRequestDetails } from '../../api/client';
 import { AdminBillingWorkflowCard } from '../../components/AdminBillingWorkflowCard';
 import { AdminCommunicationLogCard } from '../../components/AdminCommunicationLogCard';
 import { BillingCommunicationPanel } from '../../components/BillingCommunicationPanel';
@@ -38,6 +38,7 @@ type RequestStatusScreenProps = {
       customer_visible?: boolean;
     },
   ) => void;
+  communicationTemplates?: CommunicationTemplatesResponse | null;
 };
 
 export function RequestStatusScreen(props: RequestStatusScreenProps) {
@@ -55,6 +56,7 @@ export function RequestStatusScreen(props: RequestStatusScreenProps) {
     audience = 'customer',
     onUpdateBillingWorkflow,
     onCreateCommunicationLog,
+    communicationTemplates,
   } = props;
 
   return (
@@ -109,6 +111,7 @@ export function RequestStatusScreen(props: RequestStatusScreenProps) {
       {audience === 'admin' && onCreateCommunicationLog ? (
         <AdminCommunicationLogCard
           details={relevantRequestDetails}
+          templates={communicationTemplates?.templates || null}
           isLoading={isLoading}
           onSave={onCreateCommunicationLog}
         />

@@ -32,6 +32,11 @@ FAIL_ON_CRITICAL="${OPS_HEALTH_DIGEST_FAIL_ON_CRITICAL:-0}"
 MAINTENANCE_ENABLED="${DISPATCH_INCIDENT_MAINTENANCE_ENABLED:-0}"
 MAINTENANCE_DRY_RUN="${DISPATCH_INCIDENT_MAINTENANCE_DRY_RUN:-0}"
 MAINTENANCE_OWNER_EMAIL="${DISPATCH_INCIDENT_AUTO_ASSIGN_ADMIN_EMAIL:-}"
+BILLING_FOLLOWUPS_ENABLED="${OFFLINE_BILLING_FOLLOWUP_AUTOMATION_ENABLED:-0}"
+BILLING_FOLLOWUPS_DRY_RUN="${OFFLINE_BILLING_FOLLOWUP_DRY_RUN:-0}"
+BILLING_FOLLOWUPS_LIMIT="${OFFLINE_BILLING_FOLLOWUP_LIMIT:-200}"
+BILLING_FOLLOWUPS_AFTER_HOURS="${OFFLINE_BILLING_FOLLOWUP_AFTER_HOURS:-72}"
+BILLING_FOLLOWUPS_REPEAT_HOURS="${OFFLINE_BILLING_FOLLOWUP_REPEAT_HOURS:-72}"
 
 is_truthy() {
   local value
@@ -77,6 +82,22 @@ if is_truthy "${MAINTENANCE_ENABLED}"; then
       echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] dispatch-incident-maintenance failed"
     echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] dispatch-incident-maintenance finished"
   fi
+fi
+
+if is_truthy "${BILLING_FOLLOWUPS_ENABLED}"; then
+  billing_args=(
+    --limit "${BILLING_FOLLOWUPS_LIMIT}"
+    --reminder-after-hours "${BILLING_FOLLOWUPS_AFTER_HOURS}"
+    --repeat-hours "${BILLING_FOLLOWUPS_REPEAT_HOURS}"
+    --log-reminders
+  )
+  if is_truthy "${BILLING_FOLLOWUPS_DRY_RUN}"; then
+    billing_args+=(--dry-run)
+  fi
+  echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] offline-billing-followups starting"
+  python -m flask offline-billing-followups "${billing_args[@]}" || \
+    echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] offline-billing-followups failed"
+  echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] offline-billing-followups finished"
 fi
 
 echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] ops-health-digest starting"

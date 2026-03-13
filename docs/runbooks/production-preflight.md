@@ -35,6 +35,7 @@ Conditional checks:
 - `MAIL_PROVIDER=sendgrid` requires `SENDGRID_API_KEY` and `MAIL_FROM_EMAIL`
 - `PAYMENTS_ENABLED=1` requires Stripe secrets
 - `COMPLIANCE_STORAGE_BACKEND=s3` requires S3 config
+- `PAYMENTS_ENABLED=0` checks whether offline billing follow-up automation is enabled and thresholded
 
 ## Important Flags
 - `--allow-local-db`: only for local rehearsal; disables the managed-DB requirement
@@ -54,7 +55,9 @@ Warnings are allowed only when they are intentional for the specific release. Ty
 2. Run `python -m flask db upgrade`
 3. Run the staging smoke:
    `BASE_URL=http://127.0.0.1:5052 ./scripts/full_staging_smoke.sh`
-4. Confirm backup automation exists and the last restore drill is still current
+4. For an offline-billing launch, also run:
+   `BASE_URL=http://127.0.0.1:5052 ./scripts/offline_billing_ops_smoke.sh`
+5. Confirm backup automation exists and the last restore drill is still current
 
 ## Failure Interpretation
 - `database URI points at localhost`: app will miss Neon/managed Postgres and break at runtime
@@ -62,3 +65,4 @@ Warnings are allowed only when they are intentional for the specific release. Ty
 - `SECRET_KEY is using the development default`: session and auth security are not launch-safe
 - `MAIL_PROVIDER=console`: notifications will not leave the process
 - `COMPLIANCE_STORAGE_BACKEND=local`: evidence files are not durable across app instances
+- `offline billing follow-up automation is disabled`: invoicing reminders still depend entirely on manual review
