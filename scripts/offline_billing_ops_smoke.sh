@@ -204,6 +204,37 @@ if "payment_reminder_sent" not in outcomes:
 print("Payment reminder communication created")
 PY
 
+log "Billing follow-up acknowledgement and closure"
+FOLLOWUP_ACK_BODY="$TMP_DIR/followup_ack.json"
+FOLLOWUP_ACK_STATUS="$TMP_DIR/followup_ack.status"
+http_json POST "/api/v1/admin/waste-requests/$REQUEST_ID/billing-followup" \
+  "{\"state\":\"acknowledged\",\"notes\":\"Billing smoke acknowledgement\"}" \
+  "$ADMIN_TOKEN" "$FOLLOWUP_ACK_BODY" "$FOLLOWUP_ACK_STATUS"
+assert_status "$(cat "$FOLLOWUP_ACK_STATUS")" "200" "Billing follow-up acknowledge endpoint" "$FOLLOWUP_ACK_BODY"
+python - <<'PY' "$FOLLOWUP_ACK_BODY"
+import json,sys
+payload=json.load(open(sys.argv[1]))
+if (payload.get("followup") or {}).get("state") != "acknowledged":
+    print("Billing follow-up acknowledgement did not persist")
+    sys.exit(1)
+print("Billing follow-up acknowledged")
+PY
+
+FOLLOWUP_CLOSE_BODY="$TMP_DIR/followup_close.json"
+FOLLOWUP_CLOSE_STATUS="$TMP_DIR/followup_close.status"
+http_json POST "/api/v1/admin/waste-requests/$REQUEST_ID/billing-followup" \
+  "{\"state\":\"closed\",\"notes\":\"Billing smoke closure\"}" \
+  "$ADMIN_TOKEN" "$FOLLOWUP_CLOSE_BODY" "$FOLLOWUP_CLOSE_STATUS"
+assert_status "$(cat "$FOLLOWUP_CLOSE_STATUS")" "200" "Billing follow-up close endpoint" "$FOLLOWUP_CLOSE_BODY"
+python - <<'PY' "$FOLLOWUP_CLOSE_BODY"
+import json,sys
+payload=json.load(open(sys.argv[1]))
+if (payload.get("followup") or {}).get("state") != "closed":
+    print("Billing follow-up closure did not persist")
+    sys.exit(1)
+print("Billing follow-up closed")
+PY
+
 echo
 echo "OFFLINE BILLING OPS SMOKE PASSED"
 echo "request_id=$REQUEST_ID"

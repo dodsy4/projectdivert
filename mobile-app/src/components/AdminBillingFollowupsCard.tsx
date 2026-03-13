@@ -19,6 +19,13 @@ type AdminBillingFollowupsCardProps = {
     dryRun?: boolean;
     logReminders?: boolean;
   }) => void | Promise<unknown>;
+  onUpdateFollowup: (
+    requestId: number,
+    params: {
+      state: 'open' | 'acknowledged' | 'closed';
+      notes?: string;
+    },
+  ) => void | Promise<unknown>;
   onInspectRequest: (requestId: number) => void;
 };
 
@@ -27,10 +34,11 @@ function formatLabel(value: string) {
 }
 
 export function AdminBillingFollowupsCard(props: AdminBillingFollowupsCardProps) {
-  const { report, isLoading, onRefresh, onRunMaintenance, onInspectRequest } = props;
+  const { report, isLoading, onRefresh, onRunMaintenance, onUpdateFollowup, onInspectRequest } = props;
   const [search, setSearch] = useState('');
   const [reminderAfterHours, setReminderAfterHours] = useState('72');
   const [repeatHours, setRepeatHours] = useState('72');
+  const [noteDrafts, setNoteDrafts] = useState<Record<number, string>>({});
 
   useEffect(() => {
     if (!report) {
@@ -59,6 +67,12 @@ export function AdminBillingFollowupsCard(props: AdminBillingFollowupsCardProps)
       repeatHours: Number.isFinite(parsedRepeatHours) ? parsedRepeatHours : 72,
       dryRun,
       logReminders: true,
+    });
+
+  const updateFollowup = (requestId: number, state: 'open' | 'acknowledged' | 'closed') =>
+    onUpdateFollowup(requestId, {
+      state,
+      notes: noteDrafts[requestId] || undefined,
     });
 
   return (
@@ -114,6 +128,9 @@ export function AdminBillingFollowupsCard(props: AdminBillingFollowupsCardProps)
           <Text style={styles.summaryText}>
             Oldest due: {report.summary.oldest_due_hours}h | Oldest invoice age: {report.summary.oldest_invoice_age_hours}h
           </Text>
+          <Text style={styles.summaryText}>
+            Open: {report.summary.state_counts?.open ?? 0} | Acknowledged: {report.summary.state_counts?.acknowledged ?? 0} | Closed: {report.summary.state_counts?.closed ?? 0}
+          </Text>
 
           {report.items.length === 0 ? (
             <Text style={styles.emptyText}>No invoice follow-ups are due with the current thresholds.</Text>
@@ -126,14 +143,44 @@ export function AdminBillingFollowupsCard(props: AdminBillingFollowupsCardProps)
               </Text>
               <Text>Reference: {item.request.billing_workflow?.reference || 'None'}</Text>
               <Text>Status: {formatLabel(item.request.status || 'unknown')}</Text>
+              <Text>Follow-up state: {formatLabel(item.followup.workflow?.state || 'open')}</Text>
               <Text>Invoice age: {item.followup.invoice_age_hours}h</Text>
               <Text>Due reason: {formatLabel(item.followup.due_reason || 'invoice_age_exceeded')}</Text>
+              {item.followup.suppressed_reason ? (
+                <Text>Suppressed: {formatLabel(item.followup.suppressed_reason)}</Text>
+              ) : null}
               <Text>
                 Last reminder: {item.followup.hours_since_last_reminder ?? 'never'}{typeof item.followup.hours_since_last_reminder === 'number' ? 'h ago' : ''}
               </Text>
               <Text>
                 Last customer touch: {item.followup.hours_since_last_customer_touch ?? 'never'}{typeof item.followup.hours_since_last_customer_touch === 'number' ? 'h ago' : ''}
               </Text>
+              <Field
+                label="Follow-up notes"
+                value={noteDrafts[item.request.id] ?? item.followup.workflow?.notes ?? ''}
+                onChangeText={(value) =>
+                  setNoteDrafts((current) => ({
+                    ...current,
+                    [item.request.id]: value,
+                  }))
+                }
+                placeholder="Handled by phone, waiting on reply, etc."
+              />
+              <Button
+                title="Acknowledge follow-up"
+                onPress={() => updateFollowup(item.request.id, 'acknowledged')}
+                disabled={isLoading}
+              />
+              <Button
+                title="Close follow-up"
+                onPress={() => updateFollowup(item.request.id, 'closed')}
+                disabled={isLoading}
+              />
+              <Button
+                title="Reopen follow-up"
+                onPress={() => updateFollowup(item.request.id, 'open')}
+                disabled={isLoading}
+              />
               <Button
                 title="View request"
                 onPress={() => onInspectRequest(item.request.id)}

@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="820" viewBox="0 0 1500 820" fill="none">
+  <rect width="1500" height="820" fill="#F3F0E8"/>
+  <text x="750" y="60" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="34" font-weight="700" fill="#17322F">
+    Project Divert Mobile App
+  </text>
+  <text x="750" y="92" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#4A635E">
+    Illustrative phone mockup of the current build and launch-mode workflow
+  </text>
+
+  <g transform="translate(95 130)">
+    <rect x="0" y="0" width="360" height="620" rx="42" fill="#1F2625"/>
+    <rect x="18" y="18" width="324" height="584" rx="34" fill="#FFFDF8"/>
+    <rect x="130" y="10" width="100" height="12" rx="6" fill="#2C3332"/>
+    <text x="162" y="52" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#17322F">Book Collection</text>
+    <text x="162" y="78" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#6A7C78">Customer view</text>
+
+    <rect x="40" y="108" width="280" height="70" rx="18" fill="#E7F0ED"/>
+    <text x="58" y="134" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#2B5A52">Launch mode</text>
+    <text x="58" y="156" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#17322F">Billing arranged offline</text>
+    <text x="58" y="174" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#5A726D">Request now, invoice later</text>
+
+    <g font-family="Helvetica, Arial, sans-serif" fill="#17322F">
+      <rect x="40" y="198" width="280" height="52" rx="14" fill="#F7F3EB"/>
+      <text x="56" y="220" font-size="11" fill="#6F7168">Material</text>
+      <text x="56" y="239" font-size="15">Mixed Plastic</text>
+
+      <rect x="40" y="262" width="132" height="52" rx="14" fill="#F7F3EB"/>
+      <text x="56" y="284" font-size="11" fill="#6F7168">Amount</text>
+      <text x="56" y="303" font-size="15">1.5 Tonnes</text>
+
+      <rect x="188" y="262" width="132" height="52" rx="14" fill="#F7F3EB"/>
+      <text x="204" y="284" font-size="11" fill="#6F7168">Radius</text>
+      <text x="204" y="303" font-size="15">25 miles</text>
+
+      <rect x="40" y="326" width="280" height="52" rx="14" fill="#F7F3EB"/>
+      <text x="56" y="348" font-size="11" fill="#6F7168">Pickup</text>
+      <text x="56" y="367" font-size="15">1 Billing Smoke Road</text>
+
+      <rect x="40" y="390" width="280" height="52" rx="14" fill="#F7F3EB"/>
+      <text x="56" y="412" font-size="11" fill="#6F7168">Scheduled</text>
+      <text x="56" y="431" font-size="15">Tomorrow, 09:00</text>
+    </g>
+
+    <rect x="40" y="468" width="280" height="56" rx="18" fill="#17322F"/>
+    <text x="180" y="502" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="17" font-weight="700" fill="#FFFDF8">Create Request</text>
+
+    <text x="40" y="562" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#6A7C78">
+      After booking, the customer sees request status,
+    </text>
+    <text x="40" y="580" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#6A7C78">
+      offline billing notes, and visible communications.
+    </text>
+  </g>
+
+  <g transform="translate(570 130)">
+    <rect x="0" y="0" width="360" height="620" rx="42" fill="#1F2625"/>
+    <rect x="18" y="18" width="324" height="584" rx="34" fill="#FFFDF8"/>
+    <rect x="130" y="10" width="100" height="12" rx="6" fill="#2C3332"/>
+    <text x="162" y="52" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#17322F">Request Status</text>
+    <text x="162" y="78" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#6A7C78">Customer / admin detail view</text>
+
+    <rect x="40" y="108" width="280" height="88" rx="18" fill="#EEF4F2"/>
+    <text x="58" y="132" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#2B5A52">Live snapshot</text>
+    <text x="58" y="154" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#17322F">Request #18 · pending match</text>
+    <text x="58" y="174" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4A635E">Dispatch: 10 offers sent, 10 open</text>
+    <text x="58" y="190" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4A635E">Assigned driver: Unassigned</text>
+
+    <rect x="40" y="212" width="280" height="72" rx="18" fill="#F6EEE2"/>
+    <text x="58" y="236" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#8B5E13">Billing</text>
+    <text x="58" y="258" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#17322F">Invoice sent · Ref SMOKE-INV-18</text>
+    <text x="58" y="276" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#6A7C78">Offline invoice tracked in app</text>
+
+    <rect x="40" y="298" width="280" height="92" rx="18" fill="#EEF4F2"/>
+    <text x="58" y="322" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#2B5A52">Compliance</text>
+    <text x="58" y="344" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#17322F">Collection evidence required</text>
+    <text x="58" y="364" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#4A635E">Waste transfer note: pending</text>
+    <text x="58" y="380" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#4A635E">Proof of collection photo: pending</text>
+
+    <rect x="40" y="406" width="280" height="138" rx="18" fill="#F7F3EB"/>
+    <text x="58" y="430" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#6A5C4C">Communications</text>
+    <text x="58" y="452" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#17322F">• Invoice sent to customer</text>
+    <text x="58" y="472" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#17322F">• Payment reminder sent</text>
+    <text x="58" y="492" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#17322F">• Internal note: follow-up acknowledged</text>
+    <text x="58" y="520" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#6A7C78">Customer sees only visible comms.</text>
+
+    <rect x="40" y="560" width="132" height="56" rx="18" fill="#17322F"/>
+    <text x="106" y="594" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#FFFDF8">Refresh</text>
+    <rect x="188" y="560" width="132" height="56" rx="18" fill="#D9E8E3"/>
+    <text x="254" y="594" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#17322F">Track</text>
+  </g>
+
+  <g transform="translate(1045 130)">
+    <rect x="0" y="0" width="360" height="620" rx="42" fill="#1F2625"/>
+    <rect x="18" y="18" width="324" height="584" rx="34" fill="#FFFDF8"/>
+    <rect x="130" y="10" width="100" height="12" rx="6" fill="#2C3332"/>
+    <text x="162" y="52" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#17322F">Admin Ops</text>
+    <text x="162" y="78" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#6A7C78">Current mobile-admin mode</text>
+
+    <rect x="40" y="108" width="280" height="84" rx="18" fill="#FBE7E5"/>
+    <text x="58" y="132" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#8A3D32">Ops health</text>
+    <text x="58" y="154" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#17322F">Status: critical</text>
+    <text x="58" y="174" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#6A7C78">8 incident breaches · 0 billing follow-ups due</text>
+
+    <rect x="40" y="206" width="280" height="152" rx="18" fill="#EEF4F2"/>
+    <text x="58" y="230" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#2B5A52">Billing follow-ups</text>
+    <text x="58" y="252" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#17322F">Request #18 · invoice sent</text>
+    <text x="58" y="272" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#4A635E">State: acknowledged</text>
+    <text x="58" y="288" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#4A635E">Last reminder: 2h ago</text>
+    <rect x="58" y="306" width="244" height="40" rx="12" fill="#F7F3EB"/>
+    <text x="72" y="331" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#6A5C4C">Notes: customer said transfer lands tomorrow</text>
+
+    <rect x="58" y="366" width="244" height="44" rx="14" fill="#17322F"/>
+    <text x="180" y="393" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#FFFDF8">Close follow-up</text>
+    <rect x="58" y="420" width="116" height="40" rx="14" fill="#D9E8E3"/>
+    <text x="116" y="445" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#17322F">Reopen</text>
+    <rect x="186" y="420" width="116" height="40" rx="14" fill="#F6EEE2"/>
+    <text x="244" y="445" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#17322F">View request</text>
+
+    <rect x="40" y="478" width="280" height="94" rx="18" fill="#F7F3EB"/>
+    <text x="58" y="502" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#6A5C4C">Admin capabilities</text>
+    <text x="58" y="524" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#17322F">• Dispatch queue + override</text>
+    <text x="58" y="542" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#17322F">• Compliance review queue</text>
+    <text x="58" y="560" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#17322F">• Billing queue, exports, comms report</text>
+  </g>
+</svg>

@@ -311,6 +311,14 @@ class WasteRemovalRequest(db.Model):
         db.ForeignKey('users.id'),
         index=True,
     )
+    billing_followup_state = db.Column(db.String(32), index=True)
+    billing_followup_notes = db.Column(db.Text)
+    billing_followup_updated_at = db.Column(db.DateTime, index=True)
+    billing_followup_updated_by_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id'),
+        index=True,
+    )
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     def __repr__(self):
@@ -1536,7 +1544,7 @@ def _parse_optional_bool_query(value, label):
 
 
 def _parse_optional_int_query(value, label, min_value=None, max_value=None):
-    raw = str(value or '').strip()
+    raw = '' if value is None else str(value).strip()
     if not raw:
         return None
     try:
@@ -3735,6 +3743,7 @@ OFFLINE_BILLING_STATES = {
     'payout_recorded',
     'cancelled',
 }
+BILLING_FOLLOWUP_STATES = {'open', 'acknowledged', 'closed'}
 
 COMMUNICATION_DIRECTIONS = {'outbound', 'inbound', 'internal'}
 COMMUNICATION_CHANNELS = {'email', 'phone', 'sms', 'manual', 'other'}
@@ -3798,6 +3807,25 @@ def _normalize_offline_billing_state(value, default=None):
     return normalized
 
 
+def _normalize_billing_followup_state(value, default=None):
+    normalized = str(value or '').strip().lower().replace('-', '_').replace(' ', '_')
+    if not normalized:
+        return default
+    return normalized
+
+
+def _effective_billing_followup_state(booking, default='open'):
+    if not booking:
+        return default
+    normalized = _normalize_billing_followup_state(getattr(booking, 'billing_followup_state', None))
+    if normalized in BILLING_FOLLOWUP_STATES:
+        return normalized
+    billing_state = (booking.billing_state or '').strip().lower() or 'pending_offline_invoice'
+    if billing_state != 'invoice_sent':
+        return 'closed'
+    return default
+
+
 def _serialize_request_billing_workflow(booking):
     if not booking:
         return None
@@ -3808,6 +3836,35 @@ def _serialize_request_billing_workflow(booking):
         'notes': booking.billing_notes,
         'updated_at': booking.billing_updated_at.isoformat() if booking.billing_updated_at else None,
         'updated_by_user_id': booking.billing_updated_by_user_id,
+    }
+
+
+def _serialize_request_billing_followup_workflow(booking):
+    if not booking:
+        return None
+
+    billing_state = (booking.billing_state or '').strip().lower() or 'pending_offline_invoice'
+    has_explicit_tracking = any(
+        [
+            getattr(booking, 'billing_followup_state', None),
+            getattr(booking, 'billing_followup_notes', None),
+            getattr(booking, 'billing_followup_updated_at', None),
+            getattr(booking, 'billing_followup_updated_by_user_id', None),
+        ]
+    )
+    if billing_state != 'invoice_sent' and not has_explicit_tracking:
+        return None
+
+    return {
+        'state': _effective_billing_followup_state(booking),
+        'notes': booking.billing_followup_notes,
+        'updated_at': (
+            booking.billing_followup_updated_at.isoformat()
+            if booking.billing_followup_updated_at
+            else None
+        ),
+        'updated_by_user_id': booking.billing_followup_updated_by_user_id,
+        'active': billing_state == 'invoice_sent',
     }
 
 
@@ -4011,6 +4068,14 @@ def _serialize_billing_followup_item(booking, reminder_after_hours=None, repeat_
     now = now or datetime.utcnow()
     reminder_after_hours = _offline_billing_followup_after_hours(reminder_after_hours)
     repeat_hours = _offline_billing_followup_repeat_hours(repeat_hours)
+    workflow = _serialize_request_billing_followup_workflow(booking) or {
+        'state': _effective_billing_followup_state(booking),
+        'notes': None,
+        'updated_at': None,
+        'updated_by_user_id': None,
+        'active': (booking.billing_state or '').strip().lower() == 'invoice_sent',
+    }
+    workflow_state = str(workflow.get('state') or 'open').strip().lower()
     invoice_anchor = booking.billing_updated_at or booking.created_at
     invoice_age_hours = _hours_since(invoice_anchor, now=now) or 0.0
     last_customer_touch = _latest_billing_communication(
@@ -4033,7 +4098,12 @@ def _serialize_billing_followup_item(booking, reminder_after_hours=None, repeat_
 
     due_now = False
     due_reason = None
-    if invoice_age_hours >= reminder_after_hours:
+    suppressed_reason = None
+    if workflow_state == 'acknowledged':
+        suppressed_reason = 'acknowledged'
+    elif workflow_state == 'closed':
+        suppressed_reason = 'closed'
+    elif invoice_age_hours >= reminder_after_hours:
         if last_reminder is None:
             due_now = True
             due_reason = 'invoice_age_exceeded'
@@ -4045,8 +4115,10 @@ def _serialize_billing_followup_item(booking, reminder_after_hours=None, repeat_
     return {
         'request': _serialize_waste_request(booking),
         'followup': {
+            'workflow': workflow,
             'due_now': due_now,
             'due_reason': due_reason,
+            'suppressed_reason': suppressed_reason,
             'reminder_after_hours': reminder_after_hours,
             'repeat_hours': repeat_hours,
             'invoice_age_hours': invoice_age_hours,
@@ -4084,6 +4156,8 @@ def _collect_admin_billing_followups(search=None, reminder_after_hours=None, rep
     due_count = 0
     oldest_due_hours = 0.0
     oldest_invoice_age_hours = 0.0
+    state_counts = {state: 0 for state in sorted(BILLING_FOLLOWUP_STATES)}
+    suppressed_count = 0
 
     for booking in rows:
         item = _serialize_billing_followup_item(
@@ -4093,10 +4167,16 @@ def _collect_admin_billing_followups(search=None, reminder_after_hours=None, rep
             now=now,
         )
         followup = (item or {}).get('followup') or {}
+        workflow = (followup.get('workflow') or {})
+        workflow_state = str(workflow.get('state') or 'open').strip().lower()
+        if workflow_state in state_counts:
+            state_counts[workflow_state] += 1
         oldest_invoice_age_hours = max(oldest_invoice_age_hours, float(followup.get('invoice_age_hours') or 0.0))
         if followup.get('due_now'):
             due_count += 1
             oldest_due_hours = max(oldest_due_hours, float(followup.get('invoice_age_hours') or 0.0))
+        elif followup.get('suppressed_reason'):
+            suppressed_count += 1
         if due_only and not followup.get('due_now'):
             continue
         items.append(item)
@@ -4109,6 +4189,8 @@ def _collect_admin_billing_followups(search=None, reminder_after_hours=None, rep
             'due_now_count': due_count,
             'oldest_due_hours': oldest_due_hours,
             'oldest_invoice_age_hours': oldest_invoice_age_hours,
+            'suppressed_count': suppressed_count,
+            'state_counts': state_counts,
         },
         'filters': {
             'search': search or '',
@@ -4168,10 +4250,12 @@ def _run_offline_billing_followup_maintenance(
             'request_id': booking.id,
             'billing_reference': booking.billing_reference,
             'billing_state': (booking.billing_state or '').strip().lower() or 'pending_offline_invoice',
+            'followup_state': str((followup.get('workflow') or {}).get('state') or 'open'),
             'invoice_age_hours': followup.get('invoice_age_hours'),
             'hours_since_last_customer_touch': followup.get('hours_since_last_customer_touch'),
             'hours_since_last_reminder': followup.get('hours_since_last_reminder'),
             'due_reason': followup.get('due_reason'),
+            'suppressed_reason': followup.get('suppressed_reason'),
             'planned_actions': planned_actions,
             'applied_actions': applied_actions,
         }
@@ -4326,6 +4410,7 @@ def _serialize_waste_request(booking):
             booking.incident_last_escalated_at.isoformat() if booking.incident_last_escalated_at else None
         ),
         'billing_workflow': _serialize_request_billing_workflow(booking),
+        'billing_followup_workflow': _serialize_request_billing_followup_workflow(booking),
         'created_at': booking.created_at.isoformat() if booking.created_at else None,
     }
 
@@ -11462,6 +11547,16 @@ def api_admin_update_waste_request_billing(request_id):
     if updated:
         booking.billing_updated_at = datetime.utcnow()
         booking.billing_updated_by_user_id = _current_jwt_user_id()
+        if billing_state == 'invoice_sent':
+            current_followup_state = _normalize_billing_followup_state(booking.billing_followup_state)
+            if current_followup_state not in BILLING_FOLLOWUP_STATES:
+                booking.billing_followup_state = 'open'
+                booking.billing_followup_updated_at = booking.billing_updated_at
+                booking.billing_followup_updated_by_user_id = _current_jwt_user_id()
+        elif booking.billing_followup_state != 'closed':
+            booking.billing_followup_state = 'closed'
+            booking.billing_followup_updated_at = booking.billing_updated_at
+            booking.billing_followup_updated_by_user_id = _current_jwt_user_id()
 
     if not updated:
         return jsonify(
@@ -11500,6 +11595,114 @@ def api_admin_update_waste_request_billing(request_id):
             'request': _serialize_waste_request(booking),
             'billing': _billing_summary(),
             'financials': _financial_summary_for_request(booking.id),
+        }
+    )
+
+
+@app.route('/api/v1/admin/waste-requests/<int:request_id>/billing-followup', methods=['POST'])
+@jwt_required(roles={'admin'})
+def api_admin_update_waste_request_billing_followup(request_id):
+    booking = db.session.get(WasteRemovalRequest, request_id)
+    if not booking:
+        return jsonify({'error': 'Waste request not found'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    followup_state = _normalize_billing_followup_state(payload.get('state'))
+    if followup_state not in BILLING_FOLLOWUP_STATES:
+        return jsonify(
+            {
+                'error': 'Invalid billing follow-up state',
+                'allowed_states': sorted(BILLING_FOLLOWUP_STATES),
+            }
+        ), 400
+
+    billing_state = (booking.billing_state or '').strip().lower() or 'pending_offline_invoice'
+    if billing_state != 'invoice_sent' and followup_state in {'open', 'acknowledged'}:
+        return jsonify(
+            {
+                'error': 'Billing follow-up can only remain open or acknowledged while the request is invoice_sent',
+                'billing_state': billing_state,
+            }
+        ), 400
+
+    next_notes = str(payload.get('notes') or '').strip()
+    next_notes = next_notes[:2000] if next_notes else None
+    previous_state = _effective_billing_followup_state(booking)
+    updated = False
+
+    if booking.billing_followup_state != followup_state:
+        booking.billing_followup_state = followup_state
+        updated = True
+    if booking.billing_followup_notes != next_notes:
+        booking.billing_followup_notes = next_notes
+        updated = True
+
+    if updated:
+        booking.billing_followup_updated_at = datetime.utcnow()
+        booking.billing_followup_updated_by_user_id = _current_jwt_user_id()
+
+    if not updated:
+        return jsonify(
+            {
+                'updated': False,
+                'previous_state': previous_state,
+                'request': _serialize_waste_request(booking),
+                'followup': _serialize_request_billing_followup_workflow(booking),
+            }
+        )
+
+    outcome_map = {
+        'open': 'billing_followup_reopened',
+        'acknowledged': 'billing_followup_acknowledged',
+        'closed': 'billing_followup_closed',
+    }
+    log_entry = _create_request_communication_log(
+        booking,
+        direction='internal',
+        channel='manual',
+        subject='Billing follow-up {} for request #{}'.format(followup_state, booking.id),
+        message=next_notes
+        or 'Billing follow-up marked {} by admin for request #{}.'.format(followup_state, booking.id),
+        outcome=outcome_map.get(followup_state),
+        customer_visible=False,
+        created_by_user_id=_current_jwt_user_id(),
+    )
+    db.session.add(log_entry)
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Failed to update billing follow-up workflow for request %s.', request_id)
+        return jsonify({'error': 'Failed to update billing follow-up workflow'}), 500
+
+    metadata = {
+        'previous_state': previous_state,
+        'followup_state': followup_state,
+        'updated_by_user_id': booking.billing_followup_updated_by_user_id,
+    }
+    _publish_waste_request_event(
+        booking.id,
+        'admin_billing_followup_updated',
+        payload=_serialize_waste_request_snapshot(booking),
+        metadata=metadata,
+    )
+    _publish_request_communication_log_event(
+        booking,
+        log_entry,
+        metadata={
+            'source': 'admin_billing_followup_update',
+            'followup_state': followup_state,
+        },
+    )
+
+    return jsonify(
+        {
+            'updated': True,
+            'previous_state': previous_state,
+            'request': _serialize_waste_request(booking),
+            'followup': _serialize_request_billing_followup_workflow(booking),
+            'communication': _serialize_request_communication_log(log_entry),
         }
     )
 

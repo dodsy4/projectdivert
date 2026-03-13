@@ -32,8 +32,16 @@ export function RequestDetailsPanel({ details, audience = 'customer' }: RequestD
       <Text>
         Offline billing state: {details.request.billing_workflow?.state?.replace(/_/g, ' ') || 'pending offline invoice'}
       </Text>
+      {details.request.billing_followup_workflow ? (
+        <Text>
+          Billing follow-up: {details.request.billing_followup_workflow.state?.replace(/_/g, ' ') || 'open'}
+        </Text>
+      ) : null}
       {details.request.billing_workflow?.reference ? (
         <Text>Billing reference: {details.request.billing_workflow.reference}</Text>
+      ) : null}
+      {details.request.billing_followup_workflow?.notes ? (
+        <Text>Follow-up notes: {details.request.billing_followup_workflow.notes}</Text>
       ) : null}
       {details.latest_location ? (
         <Text>

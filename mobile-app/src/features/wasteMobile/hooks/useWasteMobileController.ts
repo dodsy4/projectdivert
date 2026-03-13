@@ -361,6 +361,40 @@ export function useWasteMobileController() {
     [auth, onLoadAdminBillingFollowups, onLoadAdminCommunicationsReport, setError, setInfo],
   );
 
+  const onUpdateBillingFollowup = useCallback(
+    async (requestId: number, payload: { state: string; notes?: string }) => {
+      if (!auth || auth.user.role !== 'admin') {
+        return;
+      }
+
+      setError(null);
+      setInfo(null);
+      setIsBillingFollowupsLoading(true);
+
+      try {
+        await apiClient.updateBillingFollowup(requestId, payload, auth.access_token);
+        const snapshot = await fetchRequestSnapshot(requestId, auth.access_token);
+        setRequestDetails(snapshot);
+        await onLoadAdminBillingFollowups();
+        await onLoadAdminCommunicationsReport();
+        setInfo(`Updated billing follow-up workflow for request #${requestId}.`);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unable to update billing follow-up workflow.');
+      } finally {
+        setIsBillingFollowupsLoading(false);
+      }
+    },
+    [
+      auth,
+      fetchRequestSnapshot,
+      onLoadAdminBillingFollowups,
+      onLoadAdminCommunicationsReport,
+      setError,
+      setInfo,
+      setRequestDetails,
+    ],
+  );
+
   const onLoadDriverOwnCompliance = useCallback(async () => {
     if (!auth || auth.user.role !== 'driver') {
       return;
@@ -712,6 +746,7 @@ export function useWasteMobileController() {
     onLoadDriverOwnCompliance,
     onReviewComplianceDocument,
     onUpdateBillingWorkflow,
+    onUpdateBillingFollowup,
     onRunAdminBillingFollowupMaintenance,
     onInspectBillingRequest,
     onCreateRequestCommunication,

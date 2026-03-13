@@ -345,6 +345,16 @@ export type BillingWorkflow = {
   updated_by_user_id?: number | null;
 };
 
+export type BillingFollowupWorkflowState = 'open' | 'acknowledged' | 'closed';
+
+export type BillingFollowupWorkflow = {
+  state: BillingFollowupWorkflowState | string;
+  notes?: string | null;
+  updated_at?: string | null;
+  updated_by_user_id?: number | null;
+  active?: boolean;
+};
+
 export type RequestCommunicationDirection = 'outbound' | 'inbound' | 'internal';
 export type RequestCommunicationChannel = 'email' | 'phone' | 'sms' | 'manual' | 'other';
 
@@ -388,6 +398,7 @@ export type WasteRequest = {
   status: string;
   assigned_driver_user_id?: number | null;
   billing_workflow?: BillingWorkflow | null;
+  billing_followup_workflow?: BillingFollowupWorkflow | null;
   created_at: string;
 };
 
@@ -481,8 +492,10 @@ export type AdminBillingQueueResponse = {
 };
 
 export type BillingFollowup = {
+  workflow?: BillingFollowupWorkflow | null;
   due_now: boolean;
   due_reason?: string | null;
+  suppressed_reason?: string | null;
   reminder_after_hours: number;
   repeat_hours: number;
   invoice_age_hours: number;
@@ -506,6 +519,8 @@ export type AdminBillingFollowupsResponse = {
     due_now_count: number;
     oldest_due_hours: number;
     oldest_invoice_age_hours: number;
+    suppressed_count?: number;
+    state_counts?: Record<string, number>;
   };
   filters: {
     search: string;
@@ -523,6 +538,19 @@ export type RunBillingFollowupMaintenancePayload = {
   limit?: number;
   dry_run?: boolean;
   log_reminders?: boolean;
+};
+
+export type UpdateBillingFollowupPayload = {
+  state: BillingFollowupWorkflowState | string;
+  notes?: string;
+};
+
+export type UpdateBillingFollowupResponse = {
+  updated: boolean;
+  previous_state: string;
+  request: WasteRequest;
+  followup: BillingFollowupWorkflow | null;
+  communication?: RequestCommunicationLog | null;
 };
 
 export type BillingFollowupMaintenanceResponse = {
@@ -548,10 +576,12 @@ export type BillingFollowupMaintenanceResponse = {
     request_id: number;
     billing_reference?: string | null;
     billing_state: string;
+    followup_state: string;
     invoice_age_hours?: number | null;
     hours_since_last_customer_touch?: number | null;
     hours_since_last_reminder?: number | null;
     due_reason?: string | null;
+    suppressed_reason?: string | null;
     planned_actions: string[];
     applied_actions: string[];
   }>;
@@ -1399,6 +1429,21 @@ export const apiClient = {
       },
       { token },
     ) as Promise<BillingFollowupMaintenanceResponse>;
+  },
+
+  updateBillingFollowup(
+    requestId: number,
+    payload: UpdateBillingFollowupPayload,
+    token: string,
+  ) {
+    return requestJson<UpdateBillingFollowupResponse>(
+      `/api/v1/admin/waste-requests/${requestId}/billing-followup`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      { token },
+    ) as Promise<UpdateBillingFollowupResponse>;
   },
 
   getWasteRequestCommunications(requestId: number, token: string, limit = 50) {

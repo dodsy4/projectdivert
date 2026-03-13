@@ -120,6 +120,7 @@ export default function App() {
     onLoadDriverOwnCompliance,
     onReviewComplianceDocument,
     onUpdateBillingWorkflow,
+    onUpdateBillingFollowup,
     onRunAdminBillingFollowupMaintenance,
     onInspectBillingRequest,
     onCreateRequestCommunication,
@@ -351,6 +352,7 @@ export default function App() {
                   isLoading={isBillingFollowupsLoading}
                   onRefresh={onLoadAdminBillingFollowups}
                   onRunMaintenance={onRunAdminBillingFollowupMaintenance}
+                  onUpdateFollowup={onUpdateBillingFollowup}
                   onInspectRequest={onInspectBillingRequest}
                 />
                 <AdminCommunicationsReportCard

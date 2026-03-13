@@ -3052,3 +3052,159 @@ def test_admin_ops_health_reports_billing_followups_due(client, app_context, mon
     assert ops_payload['metrics']['billing']['followups_due'] >= 1
     alert_codes = {row['code'] for row in ops_payload['alerts']}
     assert 'billing_followups_warn' in alert_codes or 'billing_followups_critical' in alert_codes
+
+
+def test_admin_billing_followup_maintenance_accepts_zero_hour_threshold(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+
+    _create_user(app_context, 'billingadmin8@example.com', 'Password123!', role='admin', name='Billing Admin 8')
+    _create_user(app_context, 'billingcustomer8@example.com', 'Password123!', role='customer', name='Billing Customer 8')
+
+    admin_headers = _auth_header(client, 'billingadmin8@example.com', 'Password123!')
+    customer_headers = _auth_header(client, 'billingcustomer8@example.com', 'Password123!')
+
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+    create_response = client.post(
+        '/api/v1/waste-requests',
+        json={
+            'requester_name': 'Billing Customer 8',
+            'requester_email': 'billingcustomer8@example.com',
+            'material_type': 'Cardboard',
+            'waste_amount': 1.0,
+            'waste_unit': 'Tonnes',
+            'match_radius_miles': 25,
+            'pickup_address': '4 Example Road',
+            'pickup_postcode': 'SW1A1AA',
+            'scheduled_pickup_at': scheduled_time,
+        },
+        headers=customer_headers,
+    )
+    assert create_response.status_code == 201
+    request_id = create_response.get_json()['request']['id']
+
+    billing_response = client.post(
+        f'/api/v1/admin/waste-requests/{request_id}/billing',
+        json={'state': 'invoice_sent', 'reference': 'INV-6008'},
+        headers=admin_headers,
+    )
+    assert billing_response.status_code == 200
+
+    maintenance_response = client.post(
+        '/api/v1/admin/billing/followups/maintenance',
+        json={
+            'reminder_after_hours': 0,
+            'repeat_hours': 48,
+            'limit': 10,
+            'dry_run': False,
+            'log_reminders': True,
+        },
+        headers=admin_headers,
+    )
+    assert maintenance_response.status_code == 200
+    maintenance_payload = maintenance_response.get_json()
+    assert maintenance_payload['summary']['reminders_logged'] >= 1
+    assert request_id in [item['request_id'] for item in maintenance_payload['items']]
+
+
+def test_admin_can_acknowledge_and_close_billing_followups(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+
+    _create_user(app_context, 'billingadmin9@example.com', 'Password123!', role='admin', name='Billing Admin 9')
+    _create_user(app_context, 'billingcustomer9@example.com', 'Password123!', role='customer', name='Billing Customer 9')
+
+    admin_headers = _auth_header(client, 'billingadmin9@example.com', 'Password123!')
+    customer_headers = _auth_header(client, 'billingcustomer9@example.com', 'Password123!')
+
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+    create_response = client.post(
+        '/api/v1/waste-requests',
+        json={
+            'requester_name': 'Billing Customer 9',
+            'requester_email': 'billingcustomer9@example.com',
+            'material_type': 'Wood',
+            'waste_amount': 1.2,
+            'waste_unit': 'Tonnes',
+            'match_radius_miles': 25,
+            'pickup_address': '5 Example Road',
+            'pickup_postcode': 'SW1A1AA',
+            'scheduled_pickup_at': scheduled_time,
+        },
+        headers=customer_headers,
+    )
+    assert create_response.status_code == 201
+    request_id = create_response.get_json()['request']['id']
+
+    billing_response = client.post(
+        f'/api/v1/admin/waste-requests/{request_id}/billing',
+        json={'state': 'invoice_sent', 'reference': 'INV-7009'},
+        headers=admin_headers,
+    )
+    assert billing_response.status_code == 200
+    assert billing_response.get_json()['request']['billing_followup_workflow']['state'] == 'open'
+
+    with app_context.app.app_context():
+        booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
+        booking.billing_updated_at = datetime.utcnow() - timedelta(hours=96)
+        app_context.db.session.commit()
+
+    acknowledge_response = client.post(
+        f'/api/v1/admin/waste-requests/{request_id}/billing-followup',
+        json={'state': 'acknowledged', 'notes': 'Called customer, waiting for remittance advice.'},
+        headers=admin_headers,
+    )
+    assert acknowledge_response.status_code == 200
+    acknowledge_payload = acknowledge_response.get_json()
+    assert acknowledge_payload['updated'] is True
+    assert acknowledge_payload['followup']['state'] == 'acknowledged'
+
+    followup_response = client.get(
+        '/api/v1/admin/billing/followups?reminder_after_hours=24&repeat_hours=48&limit=10',
+        headers=admin_headers,
+    )
+    assert followup_response.status_code == 200
+    followup_payload = followup_response.get_json()
+    assert followup_payload['summary']['due_now_count'] == 0
+    assert followup_payload['summary']['state_counts']['acknowledged'] >= 1
+
+    maintenance_response = client.post(
+        '/api/v1/admin/billing/followups/maintenance',
+        json={
+            'reminder_after_hours': 24,
+            'repeat_hours': 48,
+            'limit': 10,
+            'dry_run': False,
+            'log_reminders': True,
+        },
+        headers=admin_headers,
+    )
+    assert maintenance_response.status_code == 200
+    assert maintenance_response.get_json()['summary']['reminders_logged'] == 0
+
+    close_response = client.post(
+        f'/api/v1/admin/waste-requests/{request_id}/billing-followup',
+        json={'state': 'closed', 'notes': 'Customer confirmed bank transfer outside the app.'},
+        headers=admin_headers,
+    )
+    assert close_response.status_code == 200
+    close_payload = close_response.get_json()
+    assert close_payload['followup']['state'] == 'closed'
+
+    admin_comm_response = client.get(
+        f'/api/v1/waste-requests/{request_id}/communications?limit=20',
+        headers=admin_headers,
+    )
+    assert admin_comm_response.status_code == 200
+    admin_outcomes = [row['outcome'] for row in admin_comm_response.get_json()['communications']]
+    assert 'billing_followup_acknowledged' in admin_outcomes
+    assert 'billing_followup_closed' in admin_outcomes
+
+    customer_comm_response = client.get(
+        f'/api/v1/waste-requests/{request_id}/communications?limit=20',
+        headers=customer_headers,
+    )
+    assert customer_comm_response.status_code == 200
+    customer_outcomes = [row['outcome'] for row in customer_comm_response.get_json()['communications']]
+    assert 'billing_followup_acknowledged' not in customer_outcomes
+    assert 'billing_followup_closed' not in customer_outcomes
