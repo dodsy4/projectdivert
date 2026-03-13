@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="860" viewBox="0 0 1500 860" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1500" y2="860" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F4EFE4"/>
+      <stop offset="1" stop-color="#E2E8DC"/>
+    </linearGradient>
+    <linearGradient id="hero" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#17322F"/>
+      <stop offset="1" stop-color="#2C5C52"/>
+    </linearGradient>
+    <linearGradient id="map" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#E4EFE9"/>
+      <stop offset="1" stop-color="#CBDDD2"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1500" height="860" fill="url(#bg)"/>
+  <text x="750" y="58" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="34" font-weight="700" fill="#17322F">
+    Project Divert Launch Concept
+  </text>
+  <text x="750" y="92" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#4E655F">
+    The same product shaped like a cleaner consumer marketplace app
+  </text>
+
+  <g transform="translate(90 140)">
+    <rect x="0" y="0" width="360" height="640" rx="42" fill="#182120"/>
+    <rect x="18" y="18" width="324" height="604" rx="34" fill="#FFFDF8"/>
+    <rect x="130" y="10" width="100" height="12" rx="6" fill="#2C3332"/>
+
+    <rect x="32" y="36" width="292" height="188" rx="28" fill="url(#hero)"/>
+    <text x="54" y="78" font-family="Helvetica, Arial, sans-serif" font-size="28" font-weight="700" fill="#FFFDF8">
+      Same-day waste
+    </text>
+    <text x="54" y="110" font-family="Helvetica, Arial, sans-serif" font-size="28" font-weight="700" fill="#FFFDF8">
+      pickup, handled.
+    </text>
+    <text x="54" y="146" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#D6E5DF">
+      Book in under a minute. Track every stage.
+    </text>
+    <rect x="54" y="168" width="164" height="42" rx="21" fill="#F2B94B"/>
+    <text x="136" y="194" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#17322F">
+      Book collection
+    </text>
+
+    <rect x="32" y="246" width="292" height="84" rx="22" fill="#F6F1E7"/>
+    <text x="52" y="273" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#6F6A5C">Pickup address</text>
+    <text x="52" y="298" font-family="Helvetica, Arial, sans-serif" font-size="17" fill="#17322F">1 Billing Smoke Road, SW1A 1AA</text>
+    <text x="52" y="318" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#667B76">We’ll match the closest compliant carrier</text>
+
+    <rect x="32" y="346" width="138" height="84" rx="22" fill="#E9F1EE"/>
+    <text x="50" y="373" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#2A5C52">Material</text>
+    <text x="50" y="400" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#17322F">Mixed Plastic</text>
+
+    <rect x="186" y="346" width="138" height="84" rx="22" fill="#F8EFE0"/>
+    <text x="204" y="373" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#8A5A19">Estimated billing</text>
+    <text x="204" y="400" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#17322F">Offline invoice</text>
+
+    <rect x="32" y="450" width="292" height="118" rx="22" fill="#EEF4F2"/>
+    <text x="52" y="477" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#2A5C52">Why it feels better</text>
+    <text x="52" y="502" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#17322F">• One clear primary action</text>
+    <text x="52" y="523" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#17322F">• Pricing/billing story is explicit</text>
+    <text x="52" y="544" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#17322F">• Address and trust cues are elevated</text>
+  </g>
+
+  <g transform="translate(570 140)">
+    <rect x="0" y="0" width="360" height="640" rx="42" fill="#182120"/>
+    <rect x="18" y="18" width="324" height="604" rx="34" fill="#FFFDF8"/>
+    <rect x="130" y="10" width="100" height="12" rx="6" fill="#2C3332"/>
+
+    <rect x="32" y="36" width="292" height="286" rx="28" fill="url(#map)"/>
+    <path d="M56 92C106 74 120 126 160 122C214 116 222 84 288 104" stroke="#8FB59D" stroke-width="12" stroke-linecap="round"/>
+    <path d="M66 178C104 212 158 182 194 214C228 244 252 216 290 240" stroke="#BCD2C2" stroke-width="14" stroke-linecap="round"/>
+    <path d="M80 270C114 228 162 254 210 196" stroke="#D5E2D8" stroke-width="10" stroke-linecap="round"/>
+    <circle cx="120" cy="126" r="18" fill="#17322F"/>
+    <circle cx="120" cy="126" r="8" fill="#FFFDF8"/>
+    <circle cx="244" cy="214" r="18" fill="#F2B94B"/>
+    <circle cx="244" cy="214" r="8" fill="#17322F"/>
+    <text x="52" y="62" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#17322F">Live tracking</text>
+
+    <rect x="32" y="338" width="292" height="88" rx="22" fill="#17322F"/>
+    <text x="52" y="365" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#E4EFE9">Driver assigned</text>
+    <text x="52" y="390" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#FFFDF8">Samir is 12 min away</text>
+    <text x="52" y="412" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#CDE0D8">Carrier docs verified • vehicle location live</text>
+
+    <rect x="32" y="442" width="292" height="64" rx="20" fill="#F6F1E7"/>
+    <text x="52" y="468" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#6F6A5C">Progress</text>
+    <text x="52" y="493" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#17322F">Booked → Matched → En route → Collected</text>
+
+    <rect x="32" y="522" width="292" height="56" rx="20" fill="#EEF4F2"/>
+    <text x="52" y="556" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#17322F">Invoice will be sent after collection</text>
+  </g>
+
+  <g transform="translate(1050 140)">
+    <rect x="0" y="0" width="360" height="640" rx="42" fill="#182120"/>
+    <rect x="18" y="18" width="324" height="604" rx="34" fill="#FFFDF8"/>
+    <rect x="130" y="10" width="100" height="12" rx="6" fill="#2C3332"/>
+
+    <text x="162" y="60" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#17322F">
+      Driver workflow
+    </text>
+    <text x="162" y="86" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#6A7C78">
+      Cleaner, more guided evidence capture
+    </text>
+
+    <rect x="32" y="118" width="292" height="72" rx="22" fill="#EEF4F2"/>
+    <text x="52" y="146" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#2A5C52">Active job</text>
+    <text x="52" y="170" font-family="Helvetica, Arial, sans-serif" font-size="17" fill="#17322F">Request #18 · 1.5 tonnes Mixed Plastic</text>
+
+    <rect x="32" y="206" width="292" height="106" rx="22" fill="#F7F3EB"/>
+    <text x="52" y="234" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#6A5C4C">Complete collection</text>
+    <text x="52" y="258" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#17322F">1. Take proof-of-collection photo</text>
+    <text x="52" y="280" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#17322F">2. Upload waste transfer note</text>
+    <text x="52" y="300" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#667B76">Job can’t complete until both are verified</text>
+
+    <rect x="32" y="330" width="138" height="112" rx="22" fill="#E9F1EE"/>
+    <rect x="52" y="352" width="98" height="54" rx="14" fill="#D4E2DC"/>
+    <text x="101" y="385" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#17322F">Camera</text>
+    <text x="101" y="426" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#2A5C52">Photo ready</text>
+
+    <rect x="186" y="330" width="138" height="112" rx="22" fill="#F6EEE2"/>
+    <rect x="206" y="352" width="98" height="54" rx="14" fill="#E8D9BE"/>
+    <text x="255" y="385" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#17322F">Document</text>
+    <text x="255" y="426" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#8A5A19">WTN uploaded</text>
+
+    <rect x="32" y="462" width="292" height="56" rx="20" fill="#17322F"/>
+    <text x="178" y="496" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#FFFDF8">
+      Mark as collected
+    </text>
+
+    <rect x="32" y="534" width="292" height="56" rx="20" fill="#EEF4F2"/>
+    <text x="52" y="567" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#17322F">
+      Completion blocked until compliance is green
+    </text>
+  </g>
+</svg>
