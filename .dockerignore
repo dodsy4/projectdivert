@@ -1,0 +1,12 @@
+.git
+.venv
+__pycache__
+*.pyc
+.env
+.env.*
+!.env.example
+node_modules
+mobile-app/node_modules
+tmp
+.pytest_cache
+*.log
