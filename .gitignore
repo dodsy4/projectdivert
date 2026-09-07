@@ -3,11 +3,24 @@ __pycache__/
 .ipynb_checkpoints/
 .DS_Store
 error.log
+*.log
 .env
 .env.*
 !.env.example
 *.pem
 *.key
+
+# Confidential/client data - never commit real business or client records
+encore_clients.csv
+clients.csv
+sites_clean.csv
+sites.xlsx
+contact_sheet.csv
+contact_sheet
+request_sheet.csv
+request_sheet
+
+# Mobile app (Expo/React Native)
 node_modules/
 .expo/
 dist/
