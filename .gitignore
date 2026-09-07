@@ -3,3 +3,19 @@ __pycache__/
 .ipynb_checkpoints/
 .DS_Store
 error.log
+
+# Confidential/client data - never commit real business or client records
+encore_clients.csv
+clients.csv
+sites_clean.csv
+sites.xlsx
+contact_sheet.csv
+contact_sheet
+request_sheet.csv
+request_sheet
+*.log
+.env
+.env.*
+!.env.example
+*.pem
+*.key
