@@ -12,9 +12,10 @@ It began as a materials marketplace with a Scope 3 carbon accounting engine, and
 - Request/response workflow between suppliers and reuse partners
 
 **Carbon accounting engine**
-- Calculates net avoided CO2e for every diversion, comparing landfill vs. recycling vs. reuse pathways
-- Emission factors sourced from DEFRA, WRAP, and other public datasets, applied per material type and transport distance
-- Distance-weighted routing via the Google Maps Distance Matrix API
+- ISO 14040/14044-aligned life-cycle model (`project_divert_lca.py`) calculating net avoided kg CO2e per diversion: landfill baseline vs. reuse/recycle scenarios, with an avoided-virgin-production credit
+- Cited emission factors in a versioned dataset (`data/lca/emission_factors.csv`) drawn from UK DESNZ conversion factors, the ICE embodied-carbon database, and WRAP
+- Per-stage breakdown (disposal, transport, reprocessing, avoided virgin production) with source provenance; real road distances via the Google Maps Distance Matrix API
+- Methodology, system boundary and limitations documented in [`docs/lca-methodology.md`](./docs/lca-methodology.md)
 
 **Waste removal & dispatch**
 - Customers submit waste-removal requests; drivers receive and accept dispatch offers
@@ -24,7 +25,11 @@ It began as a materials marketplace with a Scope 3 carbon accounting engine, and
 **Compliance & statutory tracking**
 - Digital tracking of Waste Transfer Notes (WTNs) and other compliance documents
 - Driver and carrier-company compliance document upload, review, and verification workflow
-- Full audit trail (`AuthAuditEvent`) for authentication and admin actions
+
+**Audit logging**
+- `AuthAuditEvent` — dedicated trail for authentication events
+- `AuditEvent` — application-wide trail: every state-changing request is captured (actor, IP, action, entity, status) by an `after_request` hook, with explicit before/after diffs recorded at critical sites (dispatch, payments, compliance, status changes)
+- Admin views: `GET /admin/audit` (HTML) and `GET /api/v1/admin/audit-events` (JSON)
 
 **Authentication & security**
 - JWT-based auth with refresh tokens, email verification, and password reset flows
@@ -41,7 +46,7 @@ It began as a materials marketplace with a Scope 3 carbon accounting engine, and
 
 ## Tech stack
 
-**Backend:** Python, Flask, SQLAlchemy, PostgreSQL, Redis, PyJWT, Stripe API, boto3 (S3-compatible storage), SendGrid, Pandas
+**Backend:** Python, Flask, SQLAlchemy, Alembic, PostgreSQL, Redis, PyJWT, Stripe API, boto3 (S3-compatible storage), SendGrid, Pandas
 **Mobile:** Expo, React Native, TypeScript
 **Ops:** Gunicorn, Render (deployment), pytest, GitHub Actions (secret scanning)
 

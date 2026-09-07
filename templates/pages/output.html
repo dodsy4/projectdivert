@@ -1,28 +1,126 @@
 {% extends 'layouts/main.html' %}
-{% block title %}Output{% endblock %}
+{% block title %}Diversion Carbon Assessment{% endblock %}
 {% block content %}
-<div class="row">
-  <div class="col-sm-8">
-    <h2>Carbon and Cost Comparison</h2>
-    <p class="text-muted">Estimated impact comparing traditional disposal vs divert routes.</p>
+<style>
+  .lca-shell { margin-top: 16px; max-width: 900px; }
+  .lca-shell h2 { margin-bottom: 2px; }
+  .lca-fu { color: #587089; font-size: 13px; margin: 0 0 18px; }
+  .lca-headline {
+    display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px;
+  }
+  .lca-card {
+    flex: 1 1 200px; border: 1px solid #d7e0ea; border-radius: 8px;
+    padding: 14px 16px; background: #fff;
+  }
+  .lca-card .label { font-size: 12px; color: #6b7d90; text-transform: uppercase; letter-spacing: .04em; }
+  .lca-card .value { font-size: 24px; font-weight: 700; color: #1f6f43; margin-top: 4px; }
+  .lca-card .value.negative { color: #b23b3b; }
+  .lca-card .sub { font-size: 12px; color: #6b7d90; margin-top: 2px; }
+  table.lca-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 8px; }
+  table.lca-table th, table.lca-table td {
+    padding: 7px 9px; border-bottom: 1px solid #e4ebf2; text-align: left;
+  }
+  table.lca-table th { background: #f2f6fa; color: #435a72; }
+  table.lca-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .lca-section-title { margin: 22px 0 6px; font-size: 15px; }
+  .lca-credit { color: #1f6f43; }
+  .lca-burden { color: #444; }
+  .lca-sources { font-size: 12px; color: #566; }
+  .lca-sources li { margin-bottom: 3px; }
+  .lca-warn { background: #fff6e5; border: 1px solid #f0d9a8; border-radius: 6px; padding: 8px 12px; font-size: 12px; margin-bottom: 14px; }
+  .lca-method-note { font-size: 12px; color: #6b7d90; margin-top: 18px; }
+</style>
 
-    <p class="subtitle">Landfill Monetary Cost: {{ output.landfill_monetary_cost }}</p>
-    <p class="subtitle">Landfill Carbon: {{ output.landfill_transport_carbon }}</p>
+<div class="lca-shell">
+  <h2>Diversion Carbon Assessment</h2>
+  <p class="lca-fu">
+    Functional unit: {{ output.functional_unit }} &middot;
+    Assessed quantity: {{ '%.3g' % output.mass_tonnes }} tonnes of {{ output.material }}
+    ({{ output.unit }} entered) &middot; ISO 14040/14044-aligned, GWP100.
+  </p>
 
-    <p class="subtitle">MRF Monetary Cost: {{ output.traditional_cost}}</p>
-    <p class="subtitle">MRF Carbon: {{ output.traditional_carbon }}</p>
+  {% if output.warnings %}
+  <div class="lca-warn">
+    <strong>Data notes:</strong>
+    <ul>{% for w in output.warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
 
-    <p class="subtitle">MRF to Reprocessor Monetary Cost: {{ output.mrf_to_reprocessor_cost }}</p>
-    <p class="subtitle">MRF to Reprocessor Carbon: {{ output.mrf_to_reprocessor_carbon }}</p>
-
-    <p class="subtitle">Divert Monetary Cost: {{ output.divert_cost }}</p>
-    <p class="subtitle">Divert Carbon (Reuse): {{ output.divert_reuse_total_carbon }}</p>
-    <p class="subtitle">Divert Carbon (Recycle): {{ output.divert_recycle_total_carbon }}</p>
-
-    <div style="margin-top:16px;">
-      <a href="/output" class="btn btn-primary">Run Another Calculation</a>
-      <a href="/materials" class="btn btn-default">View Materials</a>
+  <div class="lca-headline">
+    <div class="lca-card">
+      <div class="label">Landfill baseline</div>
+      <div class="value lca-burden">{{ '%.0f' % output.baseline_kg }} kg CO&#8322;e</div>
+      <div class="sub">disposal + counterfactual haul ({{ '%.0f' % output.landfill_distance_km }} km)</div>
     </div>
+    <div class="lca-card">
+      <div class="label">Net avoided &mdash; reuse</div>
+      <div class="value {{ 'negative' if output.reuse.net_avoided_kg < 0 else '' }}">
+        {{ '%+.0f' % output.reuse.net_avoided_kg }} kg CO&#8322;e
+      </div>
+      <div class="sub">{{ '%+.0f' % output.reuse.net_avoided_per_tonne }} kg CO&#8322;e / tonne</div>
+    </div>
+    <div class="lca-card">
+      <div class="label">Net avoided &mdash; recycle</div>
+      <div class="value {{ 'negative' if output.recycle.net_avoided_kg < 0 else '' }}">
+        {{ '%+.0f' % output.recycle.net_avoided_kg }} kg CO&#8322;e
+      </div>
+      <div class="sub">{{ '%+.0f' % output.recycle.net_avoided_per_tonne }} kg CO&#8322;e / tonne</div>
+    </div>
+  </div>
+
+  {% for pathway in [output.reuse, output.recycle] %}
+  <h3 class="lca-section-title">{{ pathway.pathway | capitalize }} pathway &mdash; life-cycle stages</h3>
+  <table class="lca-table">
+    <thead>
+      <tr><th>Scenario</th><th>Stage</th><th class="num">kg CO&#8322;e</th><th>Basis</th></tr>
+    </thead>
+    <tbody>
+      {% for stage in pathway.stages %}
+      <tr>
+        <td>{{ stage.scenario }}</td>
+        <td class="{{ 'lca-credit' if stage.kg_co2e < 0 else '' }}">{{ stage.stage.replace('_', ' ') }}</td>
+        <td class="num {{ 'lca-credit' if stage.kg_co2e < 0 else '' }}">{{ '%+.1f' % stage.kg_co2e }}</td>
+        <td>{{ stage.detail }}</td>
+      </tr>
+      {% endfor %}
+      <tr>
+        <th colspan="2">Net avoided emissions (baseline &minus; diversion)</th>
+        <th class="num">{{ '%+.1f' % pathway.net_avoided_kg }}</th>
+        <th></th>
+      </tr>
+    </tbody>
+  </table>
+  {% endfor %}
+
+  <h3 class="lca-section-title">Emission factor sources</h3>
+  <ul class="lca-sources">
+    {% for src in output.recycle.factor_provenance %}
+    <li>
+      <a href="{{ src.source_url }}" target="_blank" rel="noopener">{{ src.source }}</a>
+      ({{ src.source_year }}) &mdash; {{ src.gwp_basis }}, data quality: {{ src.data_quality }}
+    </li>
+    {% endfor %}
+  </ul>
+
+  <h3 class="lca-section-title">Cost comparison (user-supplied)</h3>
+  <table class="lca-table">
+    <tbody>
+      <tr><td>Traditional disposal cost</td><td class="num">&pound;{{ '%.2f' % output.cost.traditional }}</td></tr>
+      <tr><td>Diversion cost</td><td class="num">&pound;{{ '%.2f' % output.cost.divert }}</td></tr>
+      <tr><th>Saving</th><th class="num">&pound;{{ '%.2f' % output.cost.saving }}</th></tr>
+    </tbody>
+  </table>
+
+  <p class="lca-method-note">
+    Method: attributional cradle-to-grave LCA following ISO 14040:2006 / ISO 14044:2006,
+    using published secondary emission factors (UK DESNZ, ICE database, WRAP). This is not an
+    independently critically-reviewed comparative assertion. See
+    <code>docs/lca-methodology.md</code> for goal &amp; scope, system boundary and limitations.
+  </p>
+
+  <div style="margin-top:16px;">
+    <a href="/output" class="btn btn-primary">Run another assessment</a>
+    <a href="/materials" class="btn btn-default">View materials</a>
   </div>
 </div>
 {% endblock %}

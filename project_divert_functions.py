@@ -27,19 +27,33 @@ def _normalize_material_column(frame):
     return normalized
 
 
-suppliers = pd.read_csv('data/df3.csv')
-sites = pd.read_excel('sites.xlsx')
-divert_output = pd.read_csv('divert_db.csv')
-reuse_offset = _normalize_material_column(pd.read_csv('reuse_offset.csv'))
-recycle_offset = _normalize_material_column(pd.read_excel('recycle_offset.csv'))
-carbon_equivalencies = pd.read_excel('carbon_equivalencies.csv')
+def _safe_read(reader, path, **kwargs):
+    """Read a bundled reference file, tolerating a missing/unreadable file.
 
-divert_output['reuse_offset'] = ''
-divert_output['recycle_offset'] = ''
-divert_output['reuse_offset'] = pd.to_numeric(divert_output['reuse_offset'])
-divert_output['recycle_offset'] = pd.to_numeric(divert_output['recycle_offset'])
-reuse_offset.set_index(keys='material', inplace=True)
-recycle_offset.set_index(keys='material', inplace=True)
+    Several reference datasets are optional in a fresh checkout (they are seeded
+    into the database and refreshed from there at runtime). Import of this module
+    must never fail just because one of the source files is absent.
+    """
+    try:
+        return reader(path, **kwargs)
+    except Exception:
+        return pd.DataFrame()
+
+
+suppliers = _safe_read(pd.read_csv, 'data/df3.csv')
+sites = _safe_read(pd.read_excel, 'sites.xlsx')
+divert_output = _safe_read(pd.read_csv, 'divert_db.csv')
+reuse_offset = _normalize_material_column(_safe_read(pd.read_csv, 'reuse_offset.csv'))
+recycle_offset = _normalize_material_column(_safe_read(pd.read_excel, 'recycle_offset.csv'))
+carbon_equivalencies = _safe_read(pd.read_excel, 'carbon_equivalencies.csv')
+
+if not divert_output.empty:
+    divert_output['reuse_offset'] = np.nan
+    divert_output['recycle_offset'] = np.nan
+if 'material' in reuse_offset.columns:
+    reuse_offset.set_index(keys='material', inplace=True)
+if 'material' in recycle_offset.columns:
+    recycle_offset.set_index(keys='material', inplace=True)
 
 API_KEY = (os.getenv('GOOGLE_MAPS_API_KEY') or '').strip()
 
@@ -312,83 +326,14 @@ def shortest_ditance_calculator_charity_input(suppliers, sup_type, origin, n):
     return di[0]
 
 
-def landfill_monetary_calculator_input(tonnage):
-    
-    print('Landfill Monetary Cost: {}'.format((tonnage * 100) + 114))
-    
-def landfill_monetary_calculator(divert_output):
-    
-    divert_output.landfill_monetary = (divert_output.tonnage * 100) + 114
-    
+# NOTE: the transport-carbon and offset "calculator" helpers that used to live
+# here (landfill_carbon_transport_cost, mrf_carbon_transport_cost,
+# reuse_offset_calculator, equivalency_calculator, ...) applied undocumented
+# magic multipliers (x0.85, x1.2, +114). They are retired in favour of the
+# ISO 14040/14044-aligned model in project_divert_lca.py, driven by a cited
+# emission-factor dataset (data/lca/emission_factors.csv).
 
-def landfill_carbon_transport_cost(suppliers, origin):
-   
-    landfill_distance = shortest_ditance_calculator_input(suppliers, 'Landfill', origin, 1)
-    landfill_cost = landfill_distance * 0.85
 
-    return landfill_cost
-
-def mrf_carbon_transport_cost(suppliers, origin):
-    
-    mrf_distance = shortest_ditance_calculator_input(suppliers, 'MRF', origin, 1)
-    mrf_cost = mrf_distance * 0.85
-
-    return mrf_cost
-
-def mrf_to_reproccessor_carbon_transport_cost(suppliers, origin):
-    
-    mrf_distance = shortest_ditance_calculator_input2(suppliers, 'MRF', origin, 1)
-    mrf_cost = mrf_distance * 0.85
-
-    return mrf_cost
-
-def divert_carbon_transport_cost(suppliers, origin):
-    
-    divert_distance = shortest_ditance_calculator_charity_input(suppliers, 'Charity', origin, 1)
-    divert_cost = divert_distance * 0.85
-    
-    return divert_cost
-
-def transport_carbon_cost_calculator_input(project, sites, suppliers):
-    
-    postcode = sites['site_postcode'][sites['project_title'] == project].to_list()[0]
-    
-    sites_list = list(sites.project_title)
-    print('Site: {} \nPostcode: {} \n'.format(project, postcode))
-    if project in sites_list:
-        print('Landfill Transport Carbon: {} \n'.format(landfill_carbon_transport_cost(suppliers, postcode)))  
-            
-        print('MRF Transport Carbon: {} \n'.format(mrf_carbon_transport_cost(suppliers, postcode)))
-            
-        print('MRF to Reproccessor Transport Carbon: {}'.format(mrf_to_reproccessor_carbon_transport_cost(suppliers, postcode)*1.2))
-            
-        #df['divert_transport_carbon'].loc[i] = divert_carbon_transport_cost(suppliers, postcode)
-                  
-
-def reuse_offset_calculator(divert_output, reuse_offset):
-    for i, row in divert_output.iterrows():
-        mat = divert_output['waste_stream'].loc[i]
-        g=reuse_offset.index
-        g=g.to_list()
-        if mat in g:
-            divert_output['reuse_offset'].loc[i] = divert_output.tonnage.loc[i] * reuse_offset.loc[f'{mat}', 'Emission Factor (kg CO2 equivalents/ tonne)']
-            
-def recycle_offset_calculator(divert_output, recycle_offset):
-    for i, row in divert_output.iterrows():
-        mat = divert_output['waste_stream'].loc[i]
-        g=recycle_offset.index
-        g=g.to_list()
-        if mat in g:
-            divert_output['recycling_offset'].loc[i] = divert_output.tonnage.loc[i] * recycle_offset.loc[f'{mat}', 'Emission Factor (kg CO2 equivalents/ tonne or sq m)']
-        else:
-            divert_output['recycle_offset'][i] = (divert_output['reuse_offset'][i] * 0.85)
-            
-
-def equivalency_calculator(carbon_offset, carbon_equivalencies):
-    for i, row in carbon_equivalencies.iterrows():
-        print(carbon_equivalencies.equivalency[i], ':', math.floor(carbon_offset/carbon_equivalencies['emission factor (kg co2 equivalents/ tonne)'][i]))
-        
-        
 def numeric_distance(origin, destination, return_none_on_failure=False):
     try:
         values = google_maps_distance(destination, origin)
