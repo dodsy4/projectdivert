@@ -4,6 +4,9 @@ __pycache__/
 .DS_Store
 error.log
 *.log
+
+# Runtime-generated uploads (test runs and local dev write here)
+static/uploads/
 .env
 .env.*
 !.env.example
