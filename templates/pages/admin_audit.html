@@ -1,0 +1,123 @@
+{% extends 'layouts/main.html' %}
+{% block title %}Audit Log{% endblock %}
+{% block content %}
+<style>
+  .audit-shell { margin-top: 16px; }
+  .audit-shell h2 { margin-bottom: 4px; }
+  .audit-meta { color: #587089; font-size: 13px; margin-bottom: 14px; }
+  .audit-filter-bar {
+    margin: 0 0 14px; padding: 12px;
+    border: 1px solid #d7e0ea; border-radius: 8px; background: #f7fafc;
+  }
+  .audit-filter-bar label { display: block; font-size: 12px; color: #587089; margin-bottom: 2px; }
+  .audit-filter-bar .field { display: inline-block; margin: 0 10px 8px 0; vertical-align: top; }
+  .audit-filter-bar input { padding: 4px 6px; border: 1px solid #c7d2dd; border-radius: 4px; }
+  .audit-table-wrap {
+    overflow-x: auto; border: 1px solid #d7e0ea; border-radius: 8px; background: #fff;
+  }
+  table.audit-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.audit-table th, table.audit-table td {
+    padding: 8px 10px; border-bottom: 1px solid #e4ebf2; text-align: left; vertical-align: top;
+  }
+  table.audit-table th { background: #f2f6fa; color: #435a72; font-weight: 600; white-space: nowrap; }
+  table.audit-table code { font-size: 12px; }
+  .audit-action { font-weight: 600; color: #2c3e50; }
+  .audit-source { display: inline-block; padding: 1px 6px; border-radius: 3px; background: #eef2f6; font-size: 11px; }
+  .audit-changes { margin: 0; font-size: 12px; color: #566; white-space: pre-wrap; max-width: 360px; }
+  .audit-pager { margin-top: 14px; }
+</style>
+
+<div class="audit-shell">
+  <h2>Audit Log</h2>
+  <p class="audit-meta">
+    Application-wide record of state-changing actions.
+    {{ total }} event{{ '' if total == 1 else 's' }} match the current filter.
+    Authentication events live in the dedicated auth audit trail.
+  </p>
+
+  <form class="audit-filter-bar" method="get" action="/admin/audit">
+    <div class="field">
+      <label for="f-action">Action</label>
+      <input id="f-action" type="text" name="action" value="{{ filters.action }}" placeholder="dispatch.override">
+    </div>
+    <div class="field">
+      <label for="f-entity-type">Entity type</label>
+      <input id="f-entity-type" type="text" name="entity_type" value="{{ filters.entity_type }}" placeholder="waste_request">
+    </div>
+    <div class="field">
+      <label for="f-entity-id">Entity ID</label>
+      <input id="f-entity-id" type="text" name="entity_id" value="{{ filters.entity_id }}">
+    </div>
+    <div class="field">
+      <label for="f-actor-id">Actor user ID</label>
+      <input id="f-actor-id" type="text" name="actor_user_id" value="{{ filters.actor_user_id }}">
+    </div>
+    <div class="field">
+      <label for="f-actor-email">Actor email</label>
+      <input id="f-actor-email" type="text" name="actor_email" value="{{ filters.actor_email }}">
+    </div>
+    <div class="field">
+      <label for="f-source">Source</label>
+      <input id="f-source" type="text" name="source" value="{{ filters.source }}" placeholder="api / web / admin">
+    </div>
+    <div class="field">
+      <label>&nbsp;</label>
+      <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+      <a href="/admin/audit" class="btn btn-default btn-sm">Reset</a>
+    </div>
+  </form>
+
+  <div class="audit-table-wrap">
+    <table class="audit-table">
+      <thead>
+        <tr>
+          <th>When (UTC)</th>
+          <th>Action</th>
+          <th>Entity</th>
+          <th>Actor</th>
+          <th>Source</th>
+          <th>Method / Path</th>
+          <th>Status</th>
+          <th>Changes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for event in events %}
+        <tr>
+          <td>{{ event.occurred_at }}</td>
+          <td class="audit-action">{{ event.action }}</td>
+          <td>
+            {% if event.entity_type %}{{ event.entity_type }}{% if event.entity_id %} #{{ event.entity_id }}{% endif %}{% else %}&mdash;{% endif %}
+          </td>
+          <td>
+            {% if event.actor.user_id %}#{{ event.actor.user_id }}{% endif %}
+            {% if event.actor.email %}<br><small>{{ event.actor.email }}</small>{% endif %}
+            {% if event.actor.role %}<br><small>{{ event.actor.role }}</small>{% endif %}
+          </td>
+          <td><span class="audit-source">{{ event.source }}</span></td>
+          <td><code>{{ event.http_method }} {{ event.path }}</code></td>
+          <td>{{ event.status_code or '' }}</td>
+          <td>
+            {% if event.changes %}
+            <pre class="audit-changes">{{ event.changes | tojson(indent=2) }}</pre>
+            {% else %}&mdash;{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8">No audit events match this filter.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="audit-pager">
+    {% if page > 1 %}
+      <a class="btn btn-default btn-sm" href="{{ request.path }}?{{ request.query_string.decode() | replace('page=' ~ page, 'page=' ~ (page - 1)) }}">&larr; Newer</a>
+    {% endif %}
+    {% if has_more %}
+      <a class="btn btn-default btn-sm" href="{{ request.path }}?page={{ page + 1 }}&action={{ filters.action }}&entity_type={{ filters.entity_type }}&entity_id={{ filters.entity_id }}&actor_user_id={{ filters.actor_user_id }}&actor_email={{ filters.actor_email }}&source={{ filters.source }}">Older &rarr;</a>
+    {% endif %}
+    <span class="audit-meta">Page {{ page }}</span>
+  </div>
+</div>
+{% endblock %}

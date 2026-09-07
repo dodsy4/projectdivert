@@ -28,7 +28,7 @@ try:
     import boto3
 except Exception:  # pragma: no cover - optional dependency
     boto3 = None
-from flask import Flask, Response, g, jsonify, render_template, request, flash, redirect, stream_with_context, url_for
+from flask import Flask, Response, g, jsonify, render_template, request, flash, redirect, stream_with_context, url_for, has_request_context
 from flask_moment import Moment
 from forms import *
 import logging
@@ -38,6 +38,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from project_divert_functions import *
+import project_divert_lca
 import math
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -54,8 +55,8 @@ login_manager = LoginManager(app)
 login_manager.login_view = 'login_page'
 login_manager.login_message = 'Please log in to continue.'
 
-class c(db.Model):
-    __tablename__ = 'c'
+class Charity(db.Model):
+    __tablename__ = 'charities'
 
     id = db.Column(db.Integer, primary_key=True)
     type = db.Column(db.String(120))
@@ -162,6 +163,48 @@ class AuthAuditEvent(db.Model):
         )
 
 
+class AuditEvent(db.Model):
+    """Application-wide audit trail.
+
+    Every state-changing request writes one row here (see ``record_audit_event``
+    and the ``after_request`` hook). ``AuthAuditEvent`` remains the dedicated
+    store for authentication events; this table is the superset for everything
+    else (dispatch, payments, compliance, marketplace, admin actions).
+    """
+
+    __tablename__ = 'audit_events'
+
+    id = db.Column(db.Integer, primary_key=True)
+    occurred_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    action = db.Column(db.String(80), nullable=False, index=True)
+    entity_type = db.Column(db.String(64), index=True)
+    entity_id = db.Column(db.String(64), index=True)
+    actor_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), index=True)
+    actor_role = db.Column(db.String(32), index=True)
+    actor_email = db.Column(db.String(255), index=True)
+    actor_ip = db.Column(db.String(64))
+    user_agent = db.Column(db.String(255))
+    source = db.Column(db.String(16), nullable=False, default='web', index=True)
+    http_method = db.Column(db.String(8))
+    path = db.Column(db.String(255))
+    status_code = db.Column(db.Integer, index=True)
+    request_id = db.Column(db.String(32), index=True)
+    summary = db.Column(db.String(255))
+    changes = db.Column(db.JSON, nullable=False, default=dict)
+
+    __table_args__ = (
+        db.Index('ix_audit_events_entity', 'entity_type', 'entity_id'),
+    )
+
+    def __repr__(self):
+        return '<AuditEvent action={} entity={}:{} actor={}>'.format(
+            self.action,
+            self.entity_type,
+            self.entity_id,
+            self.actor_user_id,
+        )
+
+
 class AuthSecurityBlocklist(db.Model):
     __tablename__ = 'auth_security_blocklist'
 
@@ -219,8 +262,8 @@ class MobilePushSubscription(db.Model):
             self.is_active,
         )
 
-class m(db.Model):
-    __tablename__ = 'm'
+class Material(db.Model):
+    __tablename__ = 'materials'
 
     id = db.Column(db.Integer, primary_key=True)
     waste_stream = db.Column(db.String)
@@ -230,42 +273,44 @@ class m(db.Model):
     county = db.Column(db.String(120))
     postcode = db.Column(db.String(120))
     condition = db.Column(db.String(120))
-    dimensions = db.Column(db.String(120)) 
+    dimensions = db.Column(db.String(120))
     image_link1 = db.Column(db.String(120))
     image_link2 = db.Column(db.String(120))
     image_link3 = db.Column(db.String(120))
     longitude = db.Column(db.Float(5))
     latitude = db.Column(db.Float(5))
-    
+
     def __repr__(self):
         return '<Material {}>'.format(self.waste_stream)
 
-class output(db.Model):
-    __tablename__ = 'output'
+
+class DiversionEstimate(db.Model):
+    __tablename__ = 'diversion_estimates'
 
     id = db.Column(db.Integer, primary_key=True)
     material = db.Column(db.String(120))
-    amount = db.Column(db.String(120))
+    amount = db.Column(db.Numeric(12, 3))
     unit = db.Column(db.String(120))
     site_address = db.Column(db.String(120))
     traditional_address = db.Column(db.String(120))
     divert_address = db.Column(db.String(120))
-    traditional_cost = db.Column(db.String(120))
-    divert_cost = db.Column(db.String(120))
+    traditional_cost = db.Column(db.Numeric(12, 2))
+    divert_cost = db.Column(db.Numeric(12, 2))
 
-    # TODO: implement any missing fields, as a database migration using Flask-Migrate
     def __repr__(self):
-        return '<Output {}>'.format(self.material)
+        return '<DiversionEstimate {}>'.format(self.material)
 
-class r(db.Model):
-    __tablename__ = 'r'
+
+class MaterialRequest(db.Model):
+    __tablename__ = 'material_requests'
+
     id = db.Column(db.Integer, primary_key=True)
     mat_id = db.Column(db.Integer, nullable=False)
     e_id = db.Column(db.String(120), nullable=False)
     message = db.Column(db.String(120))
 
     def __repr__(self):
-        return '<Request {}>'.format(self.mat_id)
+        return '<MaterialRequest {}>'.format(self.mat_id)
 
 
 class WasteRemovalRequest(db.Model):
@@ -1436,6 +1481,31 @@ def _serialize_auth_audit_event(row):
     }
 
 
+def _serialize_audit_event(row):
+    if not row:
+        return None
+    return {
+        'id': row.id,
+        'occurred_at': row.occurred_at.isoformat() + 'Z' if row.occurred_at else None,
+        'action': row.action,
+        'entity_type': row.entity_type,
+        'entity_id': row.entity_id,
+        'actor': {
+            'user_id': row.actor_user_id,
+            'role': row.actor_role,
+            'email': row.actor_email,
+            'ip': row.actor_ip,
+        },
+        'source': row.source,
+        'http_method': row.http_method,
+        'path': row.path,
+        'status_code': row.status_code,
+        'request_id': row.request_id,
+        'summary': row.summary,
+        'changes': row.changes or {},
+    }
+
+
 def _normalize_auth_block_identifier(identifier_type, identifier_value):
     id_type = str(identifier_type or '').strip().lower()
     raw_value = str(identifier_value or '').strip()
@@ -2074,6 +2144,189 @@ def _audit_auth_event(event_type, success, status_code, email=None, user_id=None
             payload['user_id'],
         )
     _persist_auth_audit_event(payload, occurred_at=occurred_at)
+
+
+# ---------------------------------------------------------------------------
+# Application-wide audit log
+# ---------------------------------------------------------------------------
+
+_AUDIT_JSON_MAX_CHARS = 8000
+
+# Paths that must never generate a generic audit row even though they can be
+# non-GET. Authentication flows are already covered by AuthAuditEvent.
+_AUDIT_SKIP_PREFIXES = ('/static/', '/health', '/healthz', '/favicon', '/api/v1/auth/')
+_AUDIT_SKIP_EXACT = {'/api/v1/health', '/api/v1/ping', '/login', '/register'}
+
+# request.url_rule.rule -> (action, entity_type). Rules not listed here still get
+# a generic row ("<method> <rule>") so nothing slips through unaudited.
+_AUDIT_ROUTE_REGISTRY = {
+    '/api/v1/waste-requests': ('waste_request.create', 'waste_request'),
+    '/api/v1/waste-requests/<int:request_id>/status': ('waste_request.status_change', 'waste_request'),
+    '/api/v1/waste-requests/<int:request_id>/location': ('waste_request.location_update', 'waste_request'),
+    '/api/v1/waste-requests/<int:request_id>/dispatch/accept': ('dispatch_offer.accept', 'waste_request'),
+    '/api/v1/push-subscriptions': ('push_subscription.register', 'push_subscription'),
+    '/admin/dispatch/override': ('dispatch.override', 'waste_request'),
+    '/admin/dispatch/incident': ('dispatch.incident_create', 'waste_request'),
+    '/admin/dispatch/incident-owner': ('dispatch.incident_owner', 'waste_request'),
+    '/output': ('diversion_estimate.create', 'diversion_estimate'),
+    '/material_input': ('material.create', 'material'),
+    '/material/<int:mat_id>/request': ('material_request.create', 'material_request'),
+    '/submit_details1': ('charity.create', 'charity'),
+    '/submit_details2': ('charity.create', 'charity'),
+    '/submit_details3': ('charity.create', 'charity'),
+    '/logout': ('auth.logout', 'user'),
+}
+
+
+def _audit_actor():
+    """Resolve who is acting on the current request.
+
+    Returns a dict with user_id / role / email / source. API requests carry a
+    verified JWT (``g.jwt_claims``); web requests use the Flask-Login session.
+    """
+    claims = _current_jwt_claims()
+    if claims:
+        return {
+            'user_id': _current_jwt_user_id(),
+            'role': _current_jwt_role() or None,
+            'email': _current_jwt_email() or None,
+            'source': 'api',
+        }
+    try:
+        if current_user and current_user.is_authenticated:
+            role = str(getattr(current_user, 'role', '') or '').strip().lower() or None
+            return {
+                'user_id': getattr(current_user, 'id', None),
+                'role': role,
+                'email': getattr(current_user, 'email', None),
+                'source': 'admin' if role == 'admin' else 'web',
+            }
+    except Exception:
+        pass
+    # Unauthenticated request inside a request context is still a web action.
+    source = 'web' if has_request_context() else 'system'
+    return {'user_id': None, 'role': None, 'email': None, 'source': source}
+
+
+def _audit_request_id():
+    existing = getattr(g, 'request_id', None)
+    if not existing:
+        existing = uuid.uuid4().hex
+        try:
+            g.request_id = existing
+        except Exception:
+            pass
+    return existing
+
+
+def _json_safe(value):
+    try:
+        json.dumps(value, separators=(',', ':'), default=str)
+        return value
+    except Exception:
+        return str(value)
+
+
+def _audit_diff(before, after):
+    """Return {field: [old, new]} for keys whose value changed."""
+    before = before or {}
+    after = after or {}
+    changes = {}
+    for key in set(before) | set(after):
+        old = before.get(key)
+        new = after.get(key)
+        if old != new:
+            changes[str(key)] = [_json_safe(old), _json_safe(new)]
+    return changes
+
+
+def _snapshot(obj, fields):
+    """Grab a plain-dict snapshot of model attributes for diffing."""
+    if obj is None:
+        return {}
+    return {field: _json_safe(getattr(obj, field, None)) for field in fields}
+
+
+def _persist_audit_event(row_values):
+    try:
+        with db.engine.begin() as connection:
+            connection.execute(AuditEvent.__table__.insert().values(**row_values))
+    except Exception:
+        # Audit persistence must never break the request it describes.
+        app.logger.exception('Failed to persist audit event.')
+
+
+def record_audit_event(
+    action,
+    entity_type=None,
+    entity_id=None,
+    summary=None,
+    changes=None,
+    status_code=None,
+    source=None,
+    actor=None,
+    occurred_at=None,
+):
+    """Write one application audit row (DB + structured log).
+
+    Safe to call from within a request handler: the DB write runs on its own
+    connection so it is never rolled back with the request transaction, and any
+    failure is swallowed after logging.
+    """
+    actor = actor or _audit_actor()
+    occurred_at = occurred_at or datetime.utcnow()
+    try:
+        g.audit_explicitly_recorded = True
+    except Exception:
+        pass
+    changes = changes or {}
+    if not isinstance(changes, dict):
+        changes = {'value': _json_safe(changes)}
+
+    try:
+        method = request.method
+        path = request.path
+        user_agent = str((request.user_agent.string or '')[:255])
+        ip = _request_client_ip()
+    except Exception:
+        method = path = user_agent = ip = None
+
+    # Round-trip through JSON so any non-serialisable value is coerced to a
+    # string here rather than blowing up the DB write later.
+    serialized_changes = json.dumps(changes, separators=(',', ':'), default=str)
+    if len(serialized_changes) > _AUDIT_JSON_MAX_CHARS:
+        changes = {'_truncated': True, 'field_count': len(changes)}
+    else:
+        changes = json.loads(serialized_changes)
+
+    row_values = {
+        'occurred_at': occurred_at,
+        'action': str(action or 'unknown')[:80],
+        'entity_type': (str(entity_type)[:64] if entity_type else None),
+        'entity_id': (str(entity_id)[:64] if entity_id not in (None, '') else None),
+        'actor_user_id': _to_int_or_none(actor.get('user_id')),
+        'actor_role': (str(actor.get('role'))[:32] if actor.get('role') else None),
+        'actor_email': (_normalize_email(actor.get('email')) or None),
+        'actor_ip': (str(ip)[:64] if ip else None),
+        'user_agent': (user_agent or None),
+        'source': (str(source or actor.get('source') or 'web')[:16]),
+        'http_method': (str(method)[:8] if method else None),
+        'path': (str(path)[:255] if path else None),
+        'status_code': _to_int_or_none(status_code),
+        'request_id': _audit_request_id(),
+        'summary': (str(summary)[:255] if summary else None),
+        'changes': changes,
+    }
+
+    log_payload = {k: v for k, v in row_values.items() if k != 'changes'}
+    log_payload['occurred_at'] = occurred_at.isoformat() + 'Z'
+    log_payload['change_fields'] = sorted(changes.keys())
+    try:
+        app.logger.info('audit %s', json.dumps(log_payload, separators=(',', ':'), default=str))
+    except Exception:
+        app.logger.info('audit action=%s entity=%s:%s', action, entity_type, entity_id)
+
+    _persist_audit_event(row_values)
 
 
 def _is_valid_email(email):
@@ -3668,10 +3921,23 @@ def _accept_dispatch_offer(booking, offer, assigned_driver_user_id=None):
         match_radius_miles=offer.match_radius_miles,
     )
     db.session.add(match_row)
+    previous_status = booking.status
     if assigned_driver_user_id is not None:
         booking.assigned_driver_user_id = assigned_driver_user_id
     booking.status = 'matched'
     db.session.commit()
+
+    record_audit_event(
+        action='dispatch_offer.accept',
+        entity_type='waste_request',
+        entity_id=booking.id,
+        summary='Dispatch offer #{} accepted; provider {}'.format(offer.id, offer.provider_name),
+        changes={
+            'status': [previous_status, booking.status],
+            'assigned_driver_user_id': [None, assigned_driver_user_id],
+            'dispatch_offer_id': [None, offer.id],
+        },
+    )
     return match_row, 'accepted'
 
 
@@ -3723,6 +3989,17 @@ def _require_form_fields(form_data, required_fields):
     if missing:
         raise ValueError('Missing required field(s): {}.'.format(', '.join(missing)))
     return cleaned
+
+
+def _require_positive_number(value, label, allow_zero=False):
+    """Parse a user-supplied numeric field, raising ValueError with a friendly message."""
+    try:
+        number = float(str(value).strip().replace(',', ''))
+    except (TypeError, ValueError):
+        raise ValueError('Please enter a valid number for {}.'.format(label))
+    if number < 0 or (number == 0 and not allow_zero):
+        raise ValueError('Please enter a {} greater than {}.'.format(label, '0' if not allow_zero else 'or equal to 0'))
+    return number
 
 
 def _parse_datetime_or_error(value, label):
@@ -6084,7 +6361,7 @@ def _factor_value(frame, row_key, column_name):
 
 def _seed_materials_if_empty():
     try:
-        if m.query.first() is not None:
+        if Material.query.first() is not None:
             return
 
         csv_path = os.path.join(app.root_path, 'material_sheet.csv')
@@ -6100,7 +6377,7 @@ def _seed_materials_if_empty():
                     continue
 
                 db.session.add(
-                    m(
+                    Material(
                         waste_stream=waste_stream,
                         amount=_to_int_or_none(row.get('amount')),
                         address=(row.get('address') or '').strip() or None,
@@ -6137,6 +6414,53 @@ def ensure_core_tables():
         app._core_tables_checked = True
     except Exception:
         app.logger.exception('Failed creating core tables on startup.')
+
+
+@app.before_request
+def _assign_request_id():
+    g.request_id = uuid.uuid4().hex
+    g.audit_explicitly_recorded = False
+
+
+def _audit_should_capture(response):
+    if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        return False
+    path = request.path or ''
+    if path in _AUDIT_SKIP_EXACT or path.startswith(_AUDIT_SKIP_PREFIXES):
+        return False
+    # Only successful mutations. Failed auth / validation noise is either handled
+    # by _audit_auth_event or simply not interesting for the audit trail.
+    if response.status_code >= 400:
+        return False
+    # A handler already wrote a richer, explicit row for this request.
+    if getattr(g, 'audit_explicitly_recorded', False):
+        return False
+    return True
+
+
+@app.after_request
+def _audit_state_changes(response):
+    try:
+        if _audit_should_capture(response):
+            rule = request.url_rule.rule if request.url_rule else request.path
+            action, entity_type = _AUDIT_ROUTE_REGISTRY.get(
+                rule,
+                ('{}.{}'.format(request.method.lower(), rule), None),
+            )
+            entity_id = None
+            for candidate in ('request_id', 'material_id', 'mat_id', 'document_id', 'id'):
+                if request.view_args and candidate in request.view_args:
+                    entity_id = request.view_args[candidate]
+                    break
+            record_audit_event(
+                action=action,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                status_code=response.status_code,
+            )
+    except Exception:
+        app.logger.exception('after_request audit capture failed.')
+    return response
 #----------------------------------------------------------------------------#
 # Filters.
 #----------------------------------------------------------------------------#
@@ -6595,7 +6919,7 @@ def map():
     radius_raw = request.args.get('radius', '').strip()
     filter_applied = False
 
-    materials_query = m.query.filter(m.latitude.isnot(None), m.longitude.isnot(None))
+    materials_query = Material.query.filter(Material.latitude.isnot(None), Material.longitude.isnot(None))
     materials_with_coords = materials_query.all()
 
     if postcode and radius_raw:
@@ -6615,10 +6939,10 @@ def map():
             radius_km = radius_miles * 1.60934
             materials_with_coords = materials_query.filter(
                 func.acos(
-                    func.sin(func.radians(target_lat)) * func.sin(func.radians(m.latitude))
+                    func.sin(func.radians(target_lat)) * func.sin(func.radians(Material.latitude))
                     + func.cos(func.radians(target_lat))
-                    * func.cos(func.radians(m.latitude))
-                    * func.cos(func.radians(m.longitude) - (func.radians(target_long)))
+                    * func.cos(func.radians(Material.latitude))
+                    * func.cos(func.radians(Material.longitude) - (func.radians(target_long)))
                 )
                 * 6371
                 <= radius_km
@@ -7630,8 +7954,6 @@ def create_output_form():
 
 @app.route('/output', methods=['POST'])
 def create_output_submission():
-    # TODO: insert form data as a new Venue record in the db, instead
-    # TODO: modify data to be the data object returned from db insertion
     error=False
     try:
         form = _require_form_fields(
@@ -7654,17 +7976,25 @@ def create_output_submission():
             if not custom_material:
                 raise ValueError('Please enter a material when selecting Other.')
             material = custom_material[:120]
-        amount = form['amount']
+        amount = _require_positive_number(form['amount'], 'amount')
         unit = form['unit']
         site_address = form['site_address']
         traditional_address = form['traditional_address']
         divert_address = form['divert_address']
-        traditional_cost = form['traditional_cost']
-        divert_cost = form['divert_cost']
+        traditional_cost = _require_positive_number(form['traditional_cost'], 'traditional cost', allow_zero=True)
+        divert_cost = _require_positive_number(form['divert_cost'], 'divert cost', allow_zero=True)
 
-        g = output(material=material, amount=amount, unit=unit, site_address=site_address, traditional_address=traditional_address, 
-                        divert_address=divert_address, traditional_cost=traditional_cost, divert_cost=divert_cost)
-        db.session.add(g)
+        estimate = DiversionEstimate(
+            material=material,
+            amount=amount,
+            unit=unit,
+            site_address=site_address,
+            traditional_address=traditional_address,
+            divert_address=divert_address,
+            traditional_cost=traditional_cost,
+            divert_cost=divert_cost,
+        )
+        db.session.add(estimate)
         db.session.commit()
     
     except ValueError as exc:
@@ -7687,107 +8017,114 @@ def create_output_submission():
     
     return redirect("/result")
 
-def fun(material, amount, unit, site_address, traditional_address, divert_address, traditional_cost):
-    _ensure_reference_data_loaded()
-    
-    if _normalize_material_name(material) == 'carpet tiles':
-        if unit == 'Square Meters':
-            amount=(amount*4.3)/1000
+# Approximate unit masses (tonnes) for materials quoted per item or per m2.
+_MATERIAL_ITEM_TONNES = {
+    'pallets': 0.025,
+    'task chair': 0.015,
+    'carpet tiles': 0.0043,
+}
+_CARPET_TILE_KG_PER_SQM = 4.3
 
-    reuse_key = _material_factor_key(reuse_offset, material)
-    if reuse_key is None:
-        raise ValueError('No reuse factor configured for material "{}".'.format(material))
-    reuse_factor = _factor_value(reuse_offset, reuse_key, 'Emission Factor (kg CO2 equivalents/ tonne)')
-    reuse_embodied_carbon = amount * reuse_factor
 
-    recycle_key = _material_factor_key(recycle_offset, material)
-    if recycle_key is not None:
-        recycle_column = 'Emission Factor (kg CO2 equivalents/ tonne or sq m)'
-        if recycle_column not in recycle_offset.columns:
-            recycle_column = 'Emission Factor (kg CO2 equivalents/ tonne)'
-        recycle_factor = _factor_value(recycle_offset, recycle_key, recycle_column)
-        recycle_embodied_carbon = amount * recycle_factor
-    else:
-        recycle_embodied_carbon = reuse_embodied_carbon * 0.85
+def _diversion_mass_tonnes(material, amount, unit):
+    """Convert a user-entered quantity to tonnes for the LCA model."""
+    amount = float(amount)
+    material_key = _normalize_material_name(material)
+    unit_norm = str(unit or '').strip().lower()
 
-    traditional_distance = numeric_distance(
-        traditional_address,
-        site_address,
-        return_none_on_failure=True,
-    )
-    divert_distance = numeric_distance(
-        divert_address,
-        site_address,
-        return_none_on_failure=True,
-    )
-    if traditional_distance is None or divert_distance is None:
+    if unit_norm in ('tonnes', 'tonne', 't', 'metric tonnes'):
+        return amount
+    if unit_norm in ('kg', 'kilograms', 'kilogrammes'):
+        return amount / 1000.0
+    if unit_norm in ('square meters', 'square metres', 'sq m', 'm2', 'm^2'):
+        if material_key == 'carpet tiles':
+            return (amount * _CARPET_TILE_KG_PER_SQM) / 1000.0
         raise ValueError(
-            'Could not calculate transport distance because the Google Maps API is unavailable. '
-            'Please check API key and billing.'
+            'Area units are only supported for carpet tiles. Enter {} in tonnes or kg.'.format(material)
         )
+    if unit_norm in ('per item', 'item', 'items', 'each', 'unit', 'units'):
+        per_item = _MATERIAL_ITEM_TONNES.get(material_key)
+        if per_item is None:
+            raise ValueError(
+                'No per-item weight is configured for {}. Enter the quantity in tonnes.'.format(material)
+            )
+        return amount * per_item
+    # Fall back to treating the number as tonnes.
+    return amount
 
-    mrf_transport_carbon  = traditional_distance * 0.85
-    landfill_transport_carbon = mrf_transport_carbon * 1.2
-    landfill_monetary_cost = traditional_cost + 114
-    mrf_to_reprocessor_cost = traditional_cost
-    mrf_to_reprocessor_transport_carbon = mrf_transport_carbon * 1.2
-    divert_transport_carbon  = divert_distance * 0.85
-        
-    return mrf_transport_carbon, landfill_transport_carbon, landfill_monetary_cost, mrf_to_reprocessor_cost, mrf_to_reprocessor_transport_carbon, divert_transport_carbon, reuse_embodied_carbon, recycle_embodied_carbon
+
+def _distance_km_or_error(origin, destination, label):
+    miles = numeric_distance(origin, destination, return_none_on_failure=True)
+    if miles is None:
+        raise ValueError(
+            'Could not calculate the {} transport distance because the Google Maps '
+            'Distance Matrix API is unavailable. Check the API key and billing.'.format(label)
+        )
+    return float(miles) * project_divert_lca.MILES_TO_KM
+
+
+def assess_diversion_estimate(estimate):
+    """Run the ISO 14040/44 LCA model for a stored DiversionEstimate row.
+
+    Returns a template-ready dict comparing the landfill baseline with the reuse
+    and recycle diversion pathways, plus the user-supplied cost comparison.
+    """
+    mass_tonnes = _diversion_mass_tonnes(estimate.material, estimate.amount, estimate.unit)
+
+    # The "traditional" address routes the landfill counterfactual haul; the
+    # "divert" address is the reprocessor / reuse destination.
+    landfill_distance_km = _distance_km_or_error(
+        estimate.traditional_address, estimate.site_address, 'landfill'
+    )
+    collection_distance_km = _distance_km_or_error(
+        estimate.divert_address, estimate.site_address, 'diversion'
+    )
+
+    pathways = project_divert_lca.assess_pathways(
+        estimate.material,
+        mass_tonnes,
+        collection_distance_km=collection_distance_km,
+        landfill_distance_km=landfill_distance_km,
+    )
+
+    traditional_cost = float(estimate.traditional_cost or 0)
+    divert_cost = float(estimate.divert_cost or 0)
+
+    return {
+        'material': estimate.material,
+        'mass_tonnes': mass_tonnes,
+        'unit': estimate.unit,
+        'functional_unit': project_divert_lca.FUNCTIONAL_UNIT,
+        'collection_distance_km': collection_distance_km,
+        'landfill_distance_km': landfill_distance_km,
+        'baseline_kg': pathways['recycle'].baseline_kg,
+        'reuse': pathways['reuse'].as_dict(),
+        'recycle': pathways['recycle'].as_dict(),
+        'best_net_avoided_kg': max(
+            pathways['reuse'].net_avoided_kg, pathways['recycle'].net_avoided_kg
+        ),
+        'cost': {
+            'traditional': traditional_cost,
+            'divert': divert_cost,
+            'saving': traditional_cost - divert_cost,
+        },
+        'warnings': sorted(set(pathways['reuse'].warnings) | set(pathways['recycle'].warnings)),
+    }
 
 
 @app.route('/result')
 def show_output():
-  output_query = db.session.query(output).order_by(output.id.desc()).first()
-  
+    estimate = db.session.query(DiversionEstimate).order_by(DiversionEstimate.id.desc()).first()
+    if not estimate:
+        return render_template('errors/404.html')
 
-  if not output_query: 
-    return render_template('errors/404.html')
+    try:
+        result = assess_diversion_estimate(estimate)
+    except (ValueError, project_divert_lca.LcaDataError) as exc:
+        flash(str(exc))
+        return redirect('/output')
 
-  try:
-    g = fun(
-      output_query.material,
-      float(output_query.amount),
-      output_query.unit,
-      output_query.site_address,
-      output_query.traditional_address,
-      output_query.divert_address,
-      float(output_query.traditional_cost),
-    )
-  except ValueError as exc:
-    flash(str(exc))
-    return redirect('/output')
-  
-  mrf_transport_carbon = g[0]
-  landfill_transport_carbon = g[1]
-  landfill_monetary_cost = g[2]
-  mrf_to_reprocessor_cost = g[3]
-  mrf_to_reprocessor_transport_carbon = g[4]
-  divert_transport_carbon = g[5]
-  reuse_embodied_carbon = g[6]
-  recycle_embodied_carbon = g[7]
-
-  
-
-  data = {
-    "mrf_transport_carbon": mrf_transport_carbon,
-    "landfill_transport_carbon": landfill_transport_carbon,
-    "landfill_monetary_cost": landfill_monetary_cost,
-    "mrf_to_reprocessor_cost": mrf_to_reprocessor_cost,
-    "mrf_to_reprocessor_transport_carbon": mrf_to_reprocessor_transport_carbon,
-    "mrf_to_reprocessor_embodied_carbon": (recycle_embodied_carbon * 0.7),
-    "divert_transport_carbon": divert_transport_carbon,
-    "reuse_embodied_carbon": reuse_embodied_carbon,
-    "recycle_embodied_carbon": recycle_embodied_carbon,
-    "divert_cost": output_query.divert_cost,
-    "traditional_cost": output_query.traditional_cost,
-    "traditional_carbon": (mrf_transport_carbon - (recycle_embodied_carbon * 0.7)),
-    "divert_recycle_total_carbon": (-recycle_embodied_carbon + divert_transport_carbon),
-    "divert_reuse_total_carbon": (-reuse_embodied_carbon + divert_transport_carbon),
-    "mrf_to_reprocessor_carbon": (mrf_to_reprocessor_transport_carbon - (recycle_embodied_carbon * 0.7))
-  }
-
-  return render_template('pages/output.html', output=data)
+    return render_template('pages/output.html', output=result)
 #  Create Account
 #  ----------------------------------------------------------------
 
@@ -7809,7 +8146,7 @@ def _create_account_submission(account_type):
         if not selected_type:
             selected_type = 'Charity'
 
-        charity = c(
+        charity = Charity(
             name=form.get('name'),
             type=selected_type,
             email=form.get('email'),
@@ -7958,10 +8295,13 @@ def create_material_submission():
         image_link1, image_link2, image_link3 = _encode_material_images(image_refs)
 
 
-        charity = m(waste_stream=waste_stream, amount=amount, address=address, city=city, county=county, postcode=postcode, dimensions=dimensions, condition=condition, 
-                    image_link1=image_link1, image_link2=image_link2, image_link3=image_link3, longitude=longitude, latitude=latitude)
-        
-        db.session.add(charity)
+        material_listing = Material(
+            waste_stream=waste_stream, amount=amount, address=address, city=city, county=county,
+            postcode=postcode, dimensions=dimensions, condition=condition,
+            image_link1=image_link1, image_link2=image_link2, image_link3=image_link3,
+            longitude=longitude, latitude=latitude)
+
+        db.session.add(material_listing)
         db.session.commit()
     
     except ValueError as exc:
@@ -7992,10 +8332,10 @@ def materials():
     radius_raw = request.args.get('radius', '').strip()
     filter_applied = False
     materials_data = []
-    base_query = m.query
+    base_query = Material.query
 
     if search_term:
-        base_query = base_query.filter(m.waste_stream.ilike(f'%{search_term}%'))
+        base_query = base_query.filter(Material.waste_stream.ilike(f'%{search_term}%'))
         filter_applied = True
 
     if postcode and radius_raw:
@@ -8015,10 +8355,10 @@ def materials():
             radius_km = radius_miles * 1.60934
             filtered_materials = base_query.filter(
                 func.acos(
-                    func.sin(func.radians(target_lat)) * func.sin(func.radians(m.latitude))
+                    func.sin(func.radians(target_lat)) * func.sin(func.radians(Material.latitude))
                     + func.cos(func.radians(target_lat))
-                    * func.cos(func.radians(m.latitude))
-                    * func.cos(func.radians(m.longitude) - (func.radians(target_long)))
+                    * func.cos(func.radians(Material.latitude))
+                    * func.cos(func.radians(Material.longitude) - (func.radians(target_long)))
                 )
                 * 6371
                 <= radius_km
@@ -8046,7 +8386,7 @@ def materials():
 def search_materials():
 
     search_term = request.form.get('search_term', '')
-    search_result = db.session.query(m).filter(m.waste_stream.ilike(f'%{search_term}%')).all()
+    search_result = db.session.query(Material).filter(Material.waste_stream.ilike(f'%{search_term}%')).all()
     data = []
 
     for result in search_result:
@@ -8066,9 +8406,9 @@ def search_materials():
 @app.route('/materials/<int:material_id>')
 def show_material(material_id):
   
-    material = m.query.get(material_id)
+    material = Material.query.get(material_id)
 
-    if not material: 
+    if not material:
         return render_template('errors/404.html')
 
     data = {
@@ -8091,13 +8431,13 @@ def show_material(material_id):
 
 @app.route('/materials_filtered/<string:location_id>')
 def show_site_material(location_id):
-    all_areas = m.query.filter(m.city == location_id)
-    all_areas = m.query.with_entities(func.count(m.id), m.city, m.county).group_by(m.city, m.county).all()
+    all_areas = Material.query.filter(Material.city == location_id)
+    all_areas = Material.query.with_entities(func.count(Material.id), Material.city, Material.county).group_by(Material.city, Material.county).all()
     data = []
 
     for area in all_areas:
         if area.city == location_id:
-            area_projects = m.query.filter_by(county=area.county).filter_by(city=area.city).all()
+            area_projects = Material.query.filter_by(county=area.county).filter_by(city=area.city).all()
         
             project_data = []
         
@@ -8133,8 +8473,7 @@ def request_material_form(mat_id):
     error=False
     email_sent = False
     try:
-        mat_id = mat_id
-        material = m.query.get(mat_id)
+        material = Material.query.get(mat_id)
         if not material:
             return render_template('errors/404.html'), 404
 
@@ -8146,7 +8485,7 @@ def request_material_form(mat_id):
 
         message = request.form['message']
         
-        qui = r(mat_id=mat_id, e_id=email, message=message)
+        qui = MaterialRequest(mat_id=mat_id, e_id=email, message=message)
         db.session.add(qui)
         db.session.commit()
 
@@ -9237,11 +9576,112 @@ def api_admin_auth_audit_export():
             ]
         )
 
-    output = buffer.getvalue()
+    csv_bytes = buffer.getvalue()
     filename = 'auth_audit_export_{}.csv'.format(datetime.utcnow().strftime('%Y%m%d_%H%M%S'))
-    response = Response(output, mimetype='text/csv')
+    response = Response(csv_bytes, mimetype='text/csv')
     response.headers['Content-Disposition'] = 'attachment; filename={}'.format(filename)
     return response
+
+
+def _build_audit_events_query(args):
+    query = AuditEvent.query
+    action = str(args.get('action') or '').strip()
+    if action:
+        query = query.filter(AuditEvent.action.ilike('%{}%'.format(action)))
+    entity_type = str(args.get('entity_type') or '').strip()
+    if entity_type:
+        query = query.filter(AuditEvent.entity_type == entity_type)
+    entity_id = str(args.get('entity_id') or '').strip()
+    if entity_id:
+        query = query.filter(AuditEvent.entity_id == entity_id)
+    actor_user_id = _to_int_or_none(args.get('actor_user_id'))
+    if actor_user_id is not None:
+        query = query.filter(AuditEvent.actor_user_id == actor_user_id)
+    actor_email = _normalize_email(args.get('actor_email'))
+    if actor_email:
+        query = query.filter(AuditEvent.actor_email == actor_email)
+    source = str(args.get('source') or '').strip()
+    if source:
+        query = query.filter(AuditEvent.source == source)
+    return query
+
+
+@app.route('/api/v1/admin/audit-events', methods=['GET'])
+@jwt_required(roles={'admin'})
+def api_admin_audit_events():
+    try:
+        limit = _parse_optional_int_query(request.args.get('limit'), 'limit', min_value=1, max_value=500)
+        offset = _parse_optional_int_query(request.args.get('offset'), 'offset', min_value=0)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    limit = limit or 50
+    offset = offset or 0
+
+    try:
+        query = _build_audit_events_query(request.args)
+        total = query.count()
+        rows = (
+            query.order_by(AuditEvent.occurred_at.desc(), AuditEvent.id.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+    except SQLAlchemyError:
+        app.logger.exception('Failed to query audit events.')
+        return jsonify({'error': 'Failed to query audit events'}), 500
+
+    return jsonify(
+        {
+            'items': [_serialize_audit_event(row) for row in rows],
+            'pagination': {
+                'limit': limit,
+                'offset': offset,
+                'returned': len(rows),
+                'total': total,
+                'has_more': (offset + len(rows)) < total,
+            },
+        }
+    )
+
+
+@app.route('/admin/audit', methods=['GET'])
+def admin_audit_log():
+    if not _current_user_is_admin():
+        flash('Admin access required.')
+        return redirect('/login')
+
+    try:
+        page = max(1, int(request.args.get('page', '1')))
+    except (TypeError, ValueError):
+        page = 1
+    per_page = 50
+
+    query = _build_audit_events_query(request.args)
+    total = query.count()
+    rows = (
+        query.order_by(AuditEvent.occurred_at.desc(), AuditEvent.id.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
+    )
+
+    return render_template(
+        'pages/admin_audit.html',
+        events=[_serialize_audit_event(row) for row in rows],
+        total=total,
+        page=page,
+        per_page=per_page,
+        has_more=(page * per_page) < total,
+        filters={
+            'action': request.args.get('action', ''),
+            'entity_type': request.args.get('entity_type', ''),
+            'entity_id': request.args.get('entity_id', ''),
+            'actor_user_id': request.args.get('actor_user_id', ''),
+            'actor_email': request.args.get('actor_email', ''),
+            'source': request.args.get('source', ''),
+        },
+    )
 
 
 @app.route('/api/v1/admin/auth-security/blocks', methods=['GET'])
@@ -10473,6 +10913,14 @@ def api_admin_verify_carrier_company_compliance_document(carrier_company_id, doc
         app.logger.exception('Failed admin company compliance verify for company %s doc %s.', company.id, document.id)
         return jsonify({'error': 'Failed to update company compliance document'}), 500
 
+    record_audit_event(
+        action='compliance.company_document_review',
+        entity_type='company_compliance_document',
+        entity_id=document.id,
+        summary='Carrier company #{} document {} -> {}'.format(company.id, document.document_type, document.status),
+        changes={'status': [previous_status, document.status]},
+        status_code=200,
+    )
     documents = _company_compliance_documents_for_company(company.id)
     return jsonify(
         {
@@ -10561,6 +11009,14 @@ def api_admin_verify_driver_compliance_document(driver_user_id, document_id):
         app.logger.exception('Failed admin driver compliance verify for user %s doc %s.', driver.id, document.id)
         return jsonify({'error': 'Failed to update driver compliance document'}), 500
 
+    record_audit_event(
+        action='compliance.driver_document_review',
+        entity_type='driver_compliance_document',
+        entity_id=document.id,
+        summary='Driver #{} document {} -> {}'.format(driver.id, document.document_type, document.status),
+        changes={'status': [previous_status, document.status]},
+        status_code=200,
+    )
     documents = _driver_compliance_documents_for_driver(driver.id)
     return jsonify(
         {
@@ -11484,6 +11940,14 @@ def api_admin_dispatch_override(request_id):
         'admin_user_id': _current_jwt_user_id(),
         'reason': reason,
     }
+    record_audit_event(
+        action='dispatch.override',
+        entity_type='waste_request',
+        entity_id=booking.id,
+        summary='Admin reassigned dispatch driver' + (' ({})'.format(reason) if reason else ''),
+        changes={'assigned_driver_user_id': [previous_driver_user_id, booking.assigned_driver_user_id]},
+        status_code=200,
+    )
     _publish_waste_request_event(
         booking.id,
         'admin_dispatch_override',
@@ -12481,6 +12945,14 @@ def api_admin_verify_waste_request_compliance_document(request_id, document_id):
         )
         return jsonify({'error': 'Failed to update compliance document'}), 500
 
+    record_audit_event(
+        action='compliance.waste_document_review',
+        entity_type='waste_compliance_document',
+        entity_id=document.id,
+        summary='Request #{} document {} -> {}'.format(booking.id, document.document_type, document.status),
+        changes={'status': [previous_status, document.status]},
+        status_code=200,
+    )
     _publish_waste_request_event(
         booking.id,
         'compliance_document_reviewed',
@@ -12622,6 +13094,22 @@ def api_create_payment_charge(request_id):
         app.logger.exception('Failed to create payment charge for request %s.', booking.id)
         return jsonify({'error': 'Failed to create payment charge'}), 500
 
+    record_audit_event(
+        action='payment.charge_create',
+        entity_type='payment_charge',
+        entity_id=charge_row.id,
+        summary='Charge of {} {} for request #{} ({})'.format(
+            amount_minor, currency, booking.id, charge_row.status,
+        ),
+        changes={
+            'amount_minor': [None, amount_minor],
+            'currency': [None, currency],
+            'status': [None, charge_row.status],
+            'waste_removal_request_id': [None, booking.id],
+        },
+        status_code=201,
+    )
+
     if (charge_row.status or '').lower() == 'succeeded':
         _publish_waste_request_event(
             booking.id,
@@ -12742,6 +13230,21 @@ def api_create_payment_refund(request_id, charge_id):
         app.logger.exception('Failed to refund payment charge %s.', charge_row.id)
         return jsonify({'error': 'Failed to create refund'}), 500
 
+    record_audit_event(
+        action='payment.refund_create',
+        entity_type='payment_refund',
+        entity_id=refund_row.id,
+        summary='Refund {} on charge #{} for request #{} ({})'.format(
+            refund_row.amount_minor, charge_row.id, booking.id, refund_status,
+        ),
+        changes={
+            'amount_minor': [None, refund_row.amount_minor],
+            'refund_status': [None, refund_status],
+            'charge_status': [None, charge_row.status],
+            'payment_charge_id': [None, charge_row.id],
+        },
+        status_code=201,
+    )
     _publish_waste_request_event(
         booking.id,
         'refund_processed',
@@ -12870,6 +13373,19 @@ def api_create_driver_payout(request_id):
         app.logger.exception('Failed to create driver payout for request %s.', booking.id)
         return jsonify({'error': 'Failed to create driver payout'}), 500
 
+    record_audit_event(
+        action='payment.driver_payout',
+        entity_type='driver_payout',
+        entity_id=payout_row.id,
+        summary='Driver payout {} for request #{} ({})'.format(amount_minor, booking.id, payout_status),
+        changes={
+            'amount_minor': [None, amount_minor],
+            'status': [None, payout_status],
+            'payment_charge_id': [None, charge_row.id],
+            'driver_user_id': [None, booking.assigned_driver_user_id],
+        },
+        status_code=201,
+    )
     _publish_waste_request_event(
         booking.id,
         'payout_processed',
@@ -13411,6 +13927,14 @@ def api_update_waste_request_status(request_id):
     previous_status = booking.status
     booking.status = new_status
     db.session.commit()
+    record_audit_event(
+        action='waste_request.status_change',
+        entity_type='waste_request',
+        entity_id=booking.id,
+        summary='Status {} -> {}'.format(previous_status, new_status),
+        changes={'status': [previous_status, new_status]},
+        status_code=200,
+    )
     _publish_waste_request_event(
         booking.id,
         'status_updated',

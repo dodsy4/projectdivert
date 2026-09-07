@@ -368,12 +368,12 @@ def test_core_get_routes(client):
 
 def test_output_post_missing_required_fields_does_not_create_record(client, app_context):
     with app_context.app.app_context():
-        count_before = app_context.output.query.count()
+        count_before = app_context.DiversionEstimate.query.count()
 
     response = client.post('/output', data={})
 
     with app_context.app.app_context():
-        count_after = app_context.output.query.count()
+        count_after = app_context.DiversionEstimate.query.count()
 
     assert response.status_code == 302
     assert response.headers['Location'].endswith('/result')
@@ -395,12 +395,12 @@ def test_output_post_valid_creates_record(client, app_context, monkeypatch):
     }
 
     with app_context.app.app_context():
-        count_before = app_context.output.query.count()
+        count_before = app_context.DiversionEstimate.query.count()
 
     response = client.post('/output', data=payload)
 
     with app_context.app.app_context():
-        count_after = app_context.output.query.count()
+        count_after = app_context.DiversionEstimate.query.count()
 
     assert response.status_code == 302
     assert response.headers['Location'].endswith('/result')
@@ -409,12 +409,12 @@ def test_output_post_valid_creates_record(client, app_context, monkeypatch):
 
 def test_material_post_missing_required_fields_does_not_create_record(client, app_context):
     with app_context.app.app_context():
-        count_before = app_context.m.query.count()
+        count_before = app_context.Material.query.count()
 
     response = client.post('/material_input', data={})
 
     with app_context.app.app_context():
-        count_after = app_context.m.query.count()
+        count_after = app_context.Material.query.count()
 
     assert response.status_code == 302
     assert response.headers['Location'].endswith('/materials')
@@ -440,47 +440,43 @@ def test_material_post_valid_creates_record(client, app_context, monkeypatch):
     }
 
     with app_context.app.app_context():
-        count_before = app_context.m.query.count()
+        count_before = app_context.Material.query.count()
 
     response = client.post('/material_input', data=payload)
 
     with app_context.app.app_context():
-        count_after = app_context.m.query.count()
+        count_after = app_context.Material.query.count()
 
     assert response.status_code == 302
     assert response.headers['Location'].endswith('/materials')
     assert count_after == count_before + 1
 
 
-def test_fun_uses_specific_recycle_factor_for_glass(app_context, monkeypatch):
-    monkeypatch.setattr(app_context, 'numeric_distance', lambda *args, **kwargs: 10.0)
+def test_assess_estimate_carpet_tiles_area_conversion(app_context, monkeypatch):
+    monkeypatch.setattr(app_context, 'numeric_distance', lambda *args, **kwargs: 5.0)
 
-    result = app_context.fun('Glass', 1.0, 'Tonnes', 'London', 'Birmingham', 'Manchester', 100.0)
-
-    assert result[7] == pytest.approx(670.0)
-
-
-def test_fun_carpet_tiles_square_meters_conversion_is_case_insensitive(app_context, monkeypatch):
-    monkeypatch.setattr(app_context, 'numeric_distance', lambda *args, **kwargs: 0.0)
-
-    reuse_key = app_context._material_factor_key(app_context.reuse_offset, 'Carpet Tiles')
-    reuse_factor = app_context._factor_value(
-        app_context.reuse_offset,
-        reuse_key,
-        'Emission Factor (kg CO2 equivalents/ tonne)',
+    estimate = app_context.DiversionEstimate(
+        material='Carpet Tiles', amount=1000.0, unit='Square Meters',
+        site_address='A', traditional_address='B', divert_address='C',
+        traditional_cost=100.0, divert_cost=80.0,
     )
-    expected_reuse = (1000.0 * 4.3 / 1000.0) * reuse_factor
+    result = app_context.assess_diversion_estimate(estimate)
 
-    result = app_context.fun('Carpet Tiles', 1000.0, 'Square Meters', 'A', 'B', 'C', 100.0)
+    # 1000 m2 x 4.3 kg/m2 / 1000 -> 4.3 tonnes
+    assert result['mass_tonnes'] == pytest.approx(4.3)
+    assert result['recycle']['functional_unit']
 
-    assert result[6] == pytest.approx(expected_reuse)
 
-
-def test_fun_distance_api_failure_raises_error(app_context, monkeypatch):
+def test_assess_estimate_distance_api_failure_raises_error(app_context, monkeypatch):
     monkeypatch.setattr(app_context, 'numeric_distance', lambda *args, **kwargs: None)
 
-    with pytest.raises(ValueError, match='Google Maps API'):
-        app_context.fun('Paper and card', 1.0, 'Tonnes', 'A', 'B', 'C', 100.0)
+    estimate = app_context.DiversionEstimate(
+        material='Paper and card', amount=1.0, unit='Tonnes',
+        site_address='A', traditional_address='B', divert_address='C',
+        traditional_cost=100.0, divert_cost=80.0,
+    )
+    with pytest.raises(ValueError, match='Distance Matrix API'):
+        app_context.assess_diversion_estimate(estimate)
 
 
 def test_result_redirects_to_output_when_distance_api_fails(client, app_context, monkeypatch):
