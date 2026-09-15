@@ -231,7 +231,7 @@ cat > "${PLIST_PATH}" <<EOF
       <key>PATH</key>
       <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
       <key>FLASK_APP</key>
-      <string>app.py</string>
+      <string>wsgi.py</string>
       <key>PROJECTDIVERT_ENV_FILE</key>
       <string>${ENV_FILE}</string>
       <key>AUTH_TOKEN_CLEANUP_RETENTION_DAYS</key>

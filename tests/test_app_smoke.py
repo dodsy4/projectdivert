@@ -45,7 +45,7 @@ def _provider_frame():
 
 def test_provider_dispatch_prefers_closest_candidate(app_context, monkeypatch):
     monkeypatch.setattr(
-        app_context,
+        app_context.reference_data,
         'suppliers',
         pd.DataFrame(
             [
@@ -77,7 +77,7 @@ def test_provider_dispatch_prefers_closest_candidate(app_context, monkeypatch):
 
 def test_provider_dispatch_uses_quality_tiebreakers(app_context, monkeypatch):
     monkeypatch.setattr(
-        app_context,
+        app_context.reference_data,
         'suppliers',
         pd.DataFrame(
             [
@@ -117,7 +117,7 @@ def test_provider_dispatch_uses_quality_tiebreakers(app_context, monkeypatch):
 
 def test_provider_dispatch_parses_numeric_flags(app_context, monkeypatch):
     monkeypatch.setattr(
-        app_context,
+        app_context.reference_data,
         'suppliers',
         pd.DataFrame(
             [
@@ -157,7 +157,7 @@ def test_provider_dispatch_parses_numeric_flags(app_context, monkeypatch):
 
 def test_provider_dispatch_uses_stable_name_tiebreaker(app_context, monkeypatch):
     monkeypatch.setattr(
-        app_context,
+        app_context.reference_data,
         'suppliers',
         pd.DataFrame(
             [
@@ -198,7 +198,7 @@ def test_provider_dispatch_uses_stable_name_tiebreaker(app_context, monkeypatch)
 
 def test_provider_dispatch_exposes_quality_score_and_prefers_higher_score(app_context, monkeypatch):
     monkeypatch.setattr(
-        app_context,
+        app_context.reference_data,
         'suppliers',
         pd.DataFrame(
             [
@@ -381,7 +381,7 @@ def test_output_post_missing_required_fields_does_not_create_record(client, app_
 
 
 def test_output_post_valid_creates_record(client, app_context, monkeypatch):
-    monkeypatch.setattr(app_context, 'numeric_distance', lambda origin, destination: 10.0)
+    monkeypatch.setattr(app_context.geo, 'numeric_distance', lambda origin, destination: 10.0)
 
     payload = {
         'material': 'Paper and card',
@@ -453,7 +453,7 @@ def test_material_post_valid_creates_record(client, app_context, monkeypatch):
 
 
 def test_assess_estimate_carpet_tiles_area_conversion(app_context, monkeypatch):
-    monkeypatch.setattr(app_context, 'numeric_distance', lambda *args, **kwargs: 5.0)
+    monkeypatch.setattr(app_context.geo, 'numeric_distance', lambda *args, **kwargs: 5.0)
 
     estimate = app_context.DiversionEstimate(
         material='Carpet Tiles', amount=1000.0, unit='Square Meters',
@@ -468,7 +468,7 @@ def test_assess_estimate_carpet_tiles_area_conversion(app_context, monkeypatch):
 
 
 def test_assess_estimate_distance_api_failure_raises_error(app_context, monkeypatch):
-    monkeypatch.setattr(app_context, 'numeric_distance', lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_context.geo, 'numeric_distance', lambda *args, **kwargs: None)
 
     estimate = app_context.DiversionEstimate(
         material='Paper and card', amount=1.0, unit='Tonnes',
@@ -480,7 +480,7 @@ def test_assess_estimate_distance_api_failure_raises_error(app_context, monkeypa
 
 
 def test_result_redirects_to_output_when_distance_api_fails(client, app_context, monkeypatch):
-    monkeypatch.setattr(app_context, 'numeric_distance', lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_context.geo, 'numeric_distance', lambda *args, **kwargs: None)
 
     payload = {
         'material': 'Paper and card',
@@ -516,7 +516,7 @@ def test_waste_removal_request_missing_required_fields_does_not_create_record(cl
 
 def test_waste_removal_request_valid_creates_record(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
 
     scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
     payload = {
@@ -590,7 +590,7 @@ def test_waste_removal_request_past_time_is_rejected(client, app_context):
 def test_waste_removal_request_no_provider_in_radius_sets_pending(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
     monkeypatch.setattr(
-        app_context,
+        app_context.reference_data,
         'suppliers',
         pd.DataFrame(
             [
@@ -633,9 +633,9 @@ def test_waste_removal_request_no_provider_in_radius_sets_pending(client, app_co
 
 def test_waste_removal_request_sends_notification_email(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
     monkeypatch.setattr(
-        app_context,
+        app_context.geo,
         '_drive_time_between_points',
         lambda *args, **kwargs: {'minutes': 32.0, 'text': '32 mins'},
     )
@@ -664,7 +664,7 @@ def test_waste_removal_request_sends_notification_email(client, app_context, mon
         captured['text_body'] = text_body
         return True
 
-    monkeypatch.setattr(app_context, '_send_material_request_email', _fake_send)
+    monkeypatch.setattr(app_context.notifications, '_send_material_request_email', _fake_send)
 
     response = client.post('/waste-removal/request', data=payload)
 
@@ -686,9 +686,9 @@ def test_api_requires_bearer_token(client):
 
 def test_api_create_waste_request_returns_match_and_drive_time(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
     monkeypatch.setattr(
-        app_context,
+        app_context.geo,
         '_drive_time_between_points',
         lambda *args, **kwargs: {'minutes': 18.0, 'text': '18 mins'},
     )
@@ -724,9 +724,9 @@ def test_api_create_waste_request_returns_match_and_drive_time(client, app_conte
 
 def test_api_status_and_location_flow(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
     monkeypatch.setattr(
-        app_context,
+        app_context.geo,
         '_drive_time_between_points',
         lambda *args, **kwargs: {'minutes': 12.0, 'text': '12 mins'},
     )
@@ -803,7 +803,7 @@ def test_api_status_and_location_flow(client, app_context, monkeypatch):
 def test_api_dispatch_first_accept_wins(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
     monkeypatch.setattr(
-        app_context,
+        app_context.reference_data,
         'suppliers',
         pd.DataFrame(
             [
@@ -896,9 +896,9 @@ def test_api_dispatch_first_accept_wins(client, app_context, monkeypatch):
 
 def test_api_customer_cannot_update_status(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
     monkeypatch.setattr(
-        app_context,
+        app_context.geo,
         '_drive_time_between_points',
         lambda *args, **kwargs: {'minutes': 10.0, 'text': '10 mins'},
     )
@@ -930,9 +930,9 @@ def test_api_customer_cannot_update_status(client, app_context, monkeypatch):
 
 def test_api_customer_cannot_read_other_customer_request(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
     monkeypatch.setattr(
-        app_context,
+        app_context.geo,
         '_drive_time_between_points',
         lambda *args, **kwargs: {'minutes': 10.0, 'text': '10 mins'},
     )
@@ -965,8 +965,8 @@ def _reset_auth_security_runtime_state(app_context):
         app_context._auth_rate_limit_events.clear()
     with app_context._auth_login_lockout_lock:
         app_context._auth_login_lockouts.clear()
-    app_context._auth_rate_limit_redis_client = None
-    app_context._auth_rate_limit_redis_disabled = False
+    app_context.rate_limit._auth_rate_limit_redis_client = None
+    app_context.rate_limit._auth_rate_limit_redis_disabled = False
 
 
 def test_auth_login_lockout_triggers_and_blocks_until_expiry(client, app_context):
@@ -1313,9 +1313,9 @@ def test_admin_auth_security_telemetry_reports_failed_login_activity(client, app
 
 def test_admin_ops_health_endpoint_returns_summary(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
     monkeypatch.setattr(
-        app_context,
+        app_context.geo,
         '_drive_time_between_points',
         lambda *args, **kwargs: {'minutes': 10.0, 'text': '10 mins'},
     )
@@ -1418,9 +1418,9 @@ def test_waste_request_event_replay_respects_last_event_id(app_context):
 
 def test_admin_dispatch_incident_ack_resolve_flow(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
     monkeypatch.setattr(
-        app_context,
+        app_context.geo,
         '_drive_time_between_points',
         lambda *args, **kwargs: {'minutes': 15.0, 'text': '15 mins'},
     )
@@ -1495,9 +1495,9 @@ def test_admin_dispatch_incident_ack_resolve_flow(client, app_context, monkeypat
 
 def test_admin_dispatch_incident_ack_requires_active_incident(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
     monkeypatch.setattr(
-        app_context,
+        app_context.geo,
         '_drive_time_between_points',
         lambda *args, **kwargs: {'minutes': 10.0, 'text': '10 mins'},
     )
@@ -1542,9 +1542,9 @@ def test_admin_dispatch_incident_ack_requires_active_incident(client, app_contex
 
 def test_admin_dispatch_incident_owner_reassignment_flow(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
     monkeypatch.setattr(
-        app_context,
+        app_context.geo,
         '_drive_time_between_points',
         lambda *args, **kwargs: {'minutes': 12.0, 'text': '12 mins'},
     )
@@ -1633,9 +1633,9 @@ def test_admin_dispatch_incident_owner_reassignment_flow(client, app_context, mo
 
 def test_admin_dispatch_incident_maintenance_dry_run_and_apply(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
     monkeypatch.setattr(
-        app_context,
+        app_context.geo,
         '_drive_time_between_points',
         lambda *args, **kwargs: {'minutes': 9.0, 'text': '9 mins'},
     )
@@ -1745,9 +1745,9 @@ def test_dispatch_incident_maintenance_cli_dry_run_outputs_summary(app_context):
 
 def test_admin_dispatch_request_timeline_includes_dispatch_and_auth_events(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
     monkeypatch.setattr(
-        app_context,
+        app_context.geo,
         '_drive_time_between_points',
         lambda *args, **kwargs: {'minutes': 11.0, 'text': '11 mins'},
     )
@@ -1837,7 +1837,7 @@ def test_admin_dispatch_request_timeline_includes_dispatch_and_auth_events(clien
 
 def test_waste_request_compliance_document_flow_and_permissions(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
 
     _create_user(app_context, 'complianceadmin@example.com', 'Password123!', role='admin', name='Compliance Admin')
     _create_user(app_context, 'compliancecustomer@example.com', 'Password123!', role='customer', name='Compliance Customer')
@@ -1946,7 +1946,7 @@ def test_waste_request_compliance_document_flow_and_permissions(client, app_cont
 
 def test_admin_compliance_review_queue_lists_pending_documents(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
 
     _create_user(app_context, 'reviewadmin@example.com', 'Password123!', role='admin', name='Review Admin')
     _create_user(app_context, 'reviewcustomer@example.com', 'Password123!', role='customer', name='Review Customer')
@@ -2019,7 +2019,7 @@ def test_admin_compliance_review_queue_lists_pending_documents(client, app_conte
 
 def test_driver_can_upload_compliance_file_and_receive_served_url(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
 
     _create_user(app_context, 'uploadadmin@example.com', 'Password123!', role='admin', name='Upload Admin')
     _create_user(app_context, 'uploadcustomer@example.com', 'Password123!', role='customer', name='Upload Customer')
@@ -2075,7 +2075,7 @@ def test_driver_can_upload_compliance_file_and_receive_served_url(client, app_co
 
 def test_driver_compliance_upload_can_use_s3_storage_backend(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
 
     _create_user(app_context, 's3customer@example.com', 'Password123!', role='customer', name='S3 Customer')
     _create_user(app_context, 's3driver@example.com', 'Password123!', role='driver', name='S3 Driver')
@@ -2116,7 +2116,7 @@ def test_driver_compliance_upload_can_use_s3_storage_backend(client, app_context
             self.calls.append(kwargs)
 
     fake_s3 = FakeS3Client()
-    monkeypatch.setattr(app_context, '_compliance_s3_client', lambda: fake_s3)
+    monkeypatch.setattr(app_context.uploads, '_compliance_s3_client', lambda: fake_s3)
 
     monkeypatch.setitem(app_context.app.config, 'COMPLIANCE_STORAGE_BACKEND', 's3')
     monkeypatch.setitem(app_context.app.config, 'COMPLIANCE_S3_BUCKET', 'projectdivert-compliance')
@@ -2153,7 +2153,7 @@ def test_driver_compliance_upload_can_use_s3_storage_backend(client, app_context
 
 def test_driver_can_request_signed_compliance_upload(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
 
     _create_user(app_context, 'signcustomer@example.com', 'Password123!', role='customer', name='Sign Customer')
     _create_user(app_context, 'signdriver@example.com', 'Password123!', role='driver', name='Sign Driver')
@@ -2202,7 +2202,7 @@ def test_driver_can_request_signed_compliance_upload(client, app_context, monkey
             return 'https://signed-upload.example.com/put-object'
 
     fake_s3 = FakeS3Client()
-    monkeypatch.setattr(app_context, '_compliance_s3_client', lambda: fake_s3)
+    monkeypatch.setattr(app_context.uploads, '_compliance_s3_client', lambda: fake_s3)
     monkeypatch.setitem(app_context.app.config, 'COMPLIANCE_STORAGE_BACKEND', 's3')
     monkeypatch.setitem(app_context.app.config, 'COMPLIANCE_S3_BUCKET', 'projectdivert-compliance')
     monkeypatch.setitem(
@@ -2241,7 +2241,7 @@ def test_driver_can_request_signed_compliance_upload(client, app_context, monkey
 
 def test_driver_compliance_documents_control_dispatch_eligibility_and_admin_override(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
 
     _create_user(app_context, 'drivercompadmin@example.com', 'Password123!', role='admin', name='Driver Comp Admin')
     _create_user(app_context, 'drivercompcustomer@example.com', 'Password123!', role='customer', name='Driver Comp Customer')
@@ -2413,7 +2413,7 @@ def test_driver_compliance_documents_control_dispatch_eligibility_and_admin_over
 
 def test_driver_dispatch_accept_requires_verified_driver_compliance_documents(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
 
     _create_user(app_context, 'eligibilityadmin@example.com', 'Password123!', role='admin', name='Eligibility Admin')
     _create_user(app_context, 'eligibilitycustomer@example.com', 'Password123!', role='customer', name='Eligibility Customer')
@@ -2474,7 +2474,7 @@ def test_driver_dispatch_accept_requires_verified_driver_compliance_documents(cl
 
 def test_waste_request_completion_requires_verified_collection_documents(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
 
     _create_user(app_context, 'completeadmin@example.com', 'Password123!', role='admin', name='Complete Admin')
     _create_user(app_context, 'completecustomer@example.com', 'Password123!', role='customer', name='Complete Customer')
@@ -2571,7 +2571,7 @@ def test_waste_request_completion_requires_verified_collection_documents(client,
 
 def test_waste_request_financials_report_offline_billing_launch_mode(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
 
     _create_user(app_context, 'billingcustomer@example.com', 'Password123!', role='customer', name='Billing Customer')
     customer_headers = _auth_header(client, 'billingcustomer@example.com', 'Password123!')
@@ -2615,7 +2615,7 @@ def test_waste_request_financials_report_offline_billing_launch_mode(client, app
 
 def test_admin_can_update_offline_billing_workflow_for_request(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
 
     _create_user(app_context, 'billingadmin2@example.com', 'Password123!', role='admin', name='Billing Admin 2')
     _create_user(app_context, 'billingcustomer2@example.com', 'Password123!', role='customer', name='Billing Customer 2')
@@ -2670,7 +2670,7 @@ def test_admin_can_update_offline_billing_workflow_for_request(client, app_conte
 
 def test_admin_billing_requests_list_filters_and_export(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
 
     _create_user(app_context, 'billingadmin3@example.com', 'Password123!', role='admin', name='Billing Admin 3')
     _create_user(app_context, 'billingcustomer3@example.com', 'Password123!', role='customer', name='Billing Customer 3')
@@ -2750,7 +2750,7 @@ def test_admin_billing_requests_list_filters_and_export(client, app_context, mon
 
 def test_admin_can_log_request_communications_and_customer_sees_visible_entries_only(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
 
     _create_user(app_context, 'billingadmin4@example.com', 'Password123!', role='admin', name='Billing Admin 4')
     _create_user(app_context, 'billingcustomer4@example.com', 'Password123!', role='customer', name='Billing Customer 4')
@@ -2836,7 +2836,7 @@ def test_admin_can_log_request_communications_and_customer_sees_visible_entries_
 
 def test_admin_communication_templates_and_report_export(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
 
     _create_user(app_context, 'billingadmin5@example.com', 'Password123!', role='admin', name='Billing Admin 5')
     _create_user(app_context, 'billingcustomer5@example.com', 'Password123!', role='customer', name='Billing Customer 5')
@@ -2917,7 +2917,7 @@ def test_admin_communication_templates_and_report_export(client, app_context, mo
 
 def test_admin_billing_followups_report_and_maintenance(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
 
     _create_user(app_context, 'billingadmin6@example.com', 'Password123!', role='admin', name='Billing Admin 6')
     _create_user(app_context, 'billingcustomer6@example.com', 'Password123!', role='customer', name='Billing Customer 6')
@@ -2996,7 +2996,7 @@ def test_admin_billing_followups_report_and_maintenance(client, app_context, mon
 
 def test_admin_ops_health_reports_billing_followups_due(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
     monkeypatch.setitem(app_context.app.config, 'OPS_HEALTH_BILLING_FOLLOWUPS_WARN', 1)
     monkeypatch.setitem(app_context.app.config, 'OPS_HEALTH_BILLING_FOLLOWUPS_CRITICAL', 5)
     monkeypatch.setitem(app_context.app.config, 'OFFLINE_BILLING_FOLLOWUP_AFTER_HOURS', 24)
@@ -3052,7 +3052,7 @@ def test_admin_ops_health_reports_billing_followups_due(client, app_context, mon
 
 def test_admin_billing_followup_maintenance_accepts_zero_hour_threshold(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
 
     _create_user(app_context, 'billingadmin8@example.com', 'Password123!', role='admin', name='Billing Admin 8')
     _create_user(app_context, 'billingcustomer8@example.com', 'Password123!', role='customer', name='Billing Customer 8')
@@ -3105,7 +3105,7 @@ def test_admin_billing_followup_maintenance_accepts_zero_hour_threshold(client, 
 
 def test_admin_can_acknowledge_and_close_billing_followups(client, app_context, monkeypatch):
     monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
-    monkeypatch.setattr(app_context, 'suppliers', _provider_frame())
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
 
     _create_user(app_context, 'billingadmin9@example.com', 'Password123!', role='admin', name='Billing Admin 9')
     _create_user(app_context, 'billingcustomer9@example.com', 'Password123!', role='customer', name='Billing Customer 9')

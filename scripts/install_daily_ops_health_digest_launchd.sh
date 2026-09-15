@@ -93,8 +93,8 @@ if [[ -z "${PROJECT_DIR}" || ! -d "${PROJECT_DIR}" ]]; then
   echo "--project-dir must point to an existing directory" >&2
   exit 1
 fi
-if [[ ! -f "${PROJECT_DIR}/app.py" ]]; then
-  echo "app.py not found under project dir: ${PROJECT_DIR}" >&2
+if [[ ! -f "${PROJECT_DIR}/wsgi.py" ]]; then
+  echo "wsgi.py not found under project dir: ${PROJECT_DIR}" >&2
   exit 1
 fi
 if [[ ! -f "${ENV_FILE}" ]]; then
@@ -161,7 +161,7 @@ else
   exit 1
 fi
 
-export FLASK_APP="${FLASK_APP:-${PROJECT_DIR}/app.py}"
+export FLASK_APP="${FLASK_APP:-${PROJECT_DIR}/wsgi.py}"
 export PYTHONPATH="${PROJECT_DIR}:${PYTHONPATH:-}"
 
 if [[ ! -d "${PROJECT_DIR}" ]]; then
@@ -263,7 +263,7 @@ cat > "${PLIST_PATH}" <<EOF
       <key>PATH</key>
       <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
       <key>FLASK_APP</key>
-      <string>app.py</string>
+      <string>wsgi.py</string>
       <key>PROJECTDIVERT_ENV_FILE</key>
       <string>${ENV_FILE}</string>
       <key>PROJECTDIVERT_PROJECT_DIR</key>

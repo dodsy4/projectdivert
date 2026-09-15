@@ -13,7 +13,7 @@ Run this before each production deploy or release candidate cut. It catches the 
 ```bash
 cd /Users/louisdods/Documents/GitHub/projectdivert
 source .venv/bin/activate
-export FLASK_APP=app.py
+export FLASK_APP=wsgi.py
 bash ./scripts/production_preflight.sh
 ```
 

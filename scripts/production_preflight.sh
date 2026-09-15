@@ -131,10 +131,10 @@ else
   pass "project virtualenv found"
 fi
 
-if [[ "${FLASK_APP:-}" != "app.py" ]]; then
-  warn "FLASK_APP is not set to app.py in this shell"
+if [[ "${FLASK_APP:-}" != "wsgi.py" ]]; then
+  warn "FLASK_APP is not set to wsgi.py in this shell"
 else
-  pass "FLASK_APP is set to app.py"
+  pass "FLASK_APP is set to wsgi.py"
 fi
 
 require_env SECRET_KEY

@@ -166,7 +166,7 @@ def build_story(styles):
 
     architecture = [
         "<b>Frontend/UI:</b> Flask templates under <font face='Courier'>templates/</font> for home, materials, maps, auth, admin dispatch, and request forms; React Native/Expo client in <font face='Courier'>mobile-app/</font>.",
-        "<b>Backend:</b> Single Flask app in <font face='Courier'>app.py</font> with HTML routes and <font face='Courier'>/api/v1/*</font> endpoints.",
+        "<b>Backend:</b> Flask application package <font face='Courier'>projectdivert/</font> - an app factory with blueprints for HTML routes and <font face='Courier'>/api/v1/*</font> endpoints, over a services layer.",
         "<b>Data layer:</b> SQLAlchemy models with Alembic migrations; Postgres configured via <font face='Courier'>SQLALCHEMY_DATABASE_URI</font> / <font face='Courier'>DATABASE_URL</font>.",
         "<b>Reference data:</b> Pandas-backed supplier, site, and carbon-offset data loaded from repo CSV/XLSX files and seedable via <font face='Courier'>flask seed-reference-data</font>.",
         "<b>Services/integrations:</b> Google Maps geocoding/drive-time, SendGrid-compatible email, optional Redis rate limiting, optional S3 compliance storage, Stripe payments, Expo push.",
@@ -177,7 +177,7 @@ def build_story(styles):
         "<b>Backend:</b> <font face='Courier'>pip install -r requirements.txt</font>",
         "<b>Config:</b> set env from <font face='Courier'>.env.example</font>; minimum repo-documented values are <font face='Courier'>SECRET_KEY</font>, <font face='Courier'>DATABASE_URL</font>, and <font face='Courier'>GOOGLE_MAPS_API_KEY</font>.",
         "<b>Database:</b> <font face='Courier'>flask db upgrade</font> then <font face='Courier'>flask seed-reference-data</font>",
-        "<b>Run web/API:</b> <font face='Courier'>python app.py</font> locally, or <font face='Courier'>gunicorn app:app</font> for deploys",
+        "<b>Run web/API:</b> <font face='Courier'>flask run</font> locally, or <font face='Courier'>gunicorn wsgi:app</font> for deploys",
         "<b>Mobile (optional):</b> in <font face='Courier'>mobile-app/</font>, copy <font face='Courier'>.env.example</font>, set <font face='Courier'>EXPO_PUBLIC_API_BASE_URL</font>, then run <font face='Courier'>npm install</font> and <font face='Courier'>npm run start</font>.",
     ]
 
@@ -197,7 +197,7 @@ def build_story(styles):
         section("How To Run", bullet_list(run_steps, styles["AppBullet"]), styles),
         Spacer(1, 8),
         Paragraph(
-            "Evidence sources inspected: app.py, config.py, forms.py, tests/test_app_smoke.py, "
+            "Evidence sources inspected: projectdivert/, config.py, forms.py, tests/, "
             "mobile-app/README.md, mobile-app/App.tsx, render.yaml, DEPLOY.md, and repo file structure.",
             styles["Footer"],
         ),

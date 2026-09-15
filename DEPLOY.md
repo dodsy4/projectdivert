@@ -24,7 +24,7 @@ For auth + request-notification emails:
 Option A: use `render.yaml` Blueprint deploy.
 Option B: create a Web Service manually with:
 - Build command: `pip install -r requirements.txt`
-- Start command: `gunicorn app:app`
+- Start command: `gunicorn wsgi:app`
 
 ## 4. Database Migration
 After first deploy, run:
