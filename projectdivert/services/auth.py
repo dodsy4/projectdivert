@@ -1,11 +1,12 @@
 """JWT issuing and verification, lifecycle tokens, request authorisation."""
 
+import logging
 import uuid
 from datetime import datetime, timedelta
 from functools import wraps
 import jwt
 from flask import current_app, g, jsonify, request
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from flask_login import current_user
 from projectdivert.extensions import db, login_manager
 from projectdivert.models.auth import AuthLifecycleToken
@@ -13,6 +14,8 @@ from projectdivert.models.user import User
 from projectdivert.services.audit import _audit_auth_event
 from projectdivert.services.rate_limit import _auth_rate_limit_admin_enabled, _auth_rate_limit_enabled, _check_auth_rate_limit
 from projectdivert.services.utils import _current_jwt_email, _current_jwt_role, _current_jwt_user_id, _is_truthy, _normalize_email, _request_client_ip, _to_int_or_none, _token_expired
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -669,3 +672,72 @@ def _current_user_is_admin():
         current_user.is_authenticated
         and str(getattr(current_user, 'role', '') or '').strip().lower() == 'admin'
     )
+
+
+def run_auth_token_cleanup(retention_days=None, batch_size=500, dry_run=False):
+    """Delete auth lifecycle tokens that expired or were revoked before the cutoff.
+
+    Shared by the ``auth-token-cleanup`` CLI command and the background job, so
+    a scheduled run and a manual run cannot drift apart. Returns a summary dict.
+    """
+    if retention_days is None:
+        retention_days = _auth_token_cleanup_retention_days()
+    retention_days = int(retention_days)
+    batch_size = int(batch_size)
+    if retention_days < 0:
+        raise ValueError('retention_days must be >= 0')
+    if batch_size < 1:
+        raise ValueError('batch_size must be >= 1')
+
+    cutoff = datetime.utcnow() - timedelta(days=retention_days)
+    candidates = _auth_token_cleanup_query(cutoff).count()
+    type_counts = dict(
+        db.session.query(
+            AuthLifecycleToken.token_type,
+            func.count(AuthLifecycleToken.id),
+        )
+        .filter(
+            or_(
+                AuthLifecycleToken.expires_at <= cutoff,
+                and_(
+                    AuthLifecycleToken.revoked_at.isnot(None),
+                    AuthLifecycleToken.revoked_at <= cutoff,
+                ),
+            )
+        )
+        .group_by(AuthLifecycleToken.token_type)
+        .all()
+    )
+
+    summary = {
+        'cutoff': cutoff.isoformat() + 'Z',
+        'retention_days': retention_days,
+        'candidates': candidates,
+        'by_token_type': {str(k): int(v) for k, v in type_counts.items()},
+        'deleted': 0,
+        'dry_run': bool(dry_run),
+    }
+    if dry_run or candidates == 0:
+        return summary
+
+    deleted = 0
+    while True:
+        ids = [
+            row.id for row in _auth_token_cleanup_query(cutoff)
+            .order_by(AuthLifecycleToken.id.asc())
+            .limit(batch_size)
+            .all()
+        ]
+        if not ids:
+            break
+        deleted += (
+            AuthLifecycleToken.query
+            .filter(AuthLifecycleToken.id.in_(ids))
+            .delete(synchronize_session=False)
+            or 0
+        )
+        db.session.commit()
+
+    summary['deleted'] = deleted
+    logger.info('Auth token cleanup deleted %s rows before %s', deleted, summary['cutoff'])
+    return summary

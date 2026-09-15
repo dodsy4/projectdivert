@@ -83,6 +83,30 @@ Still open:
 - Background jobs run through RQ (`rq worker`), but the scheduler is still
   driven by Render cron rather than a persistent scheduler process.
 
+## 7a. Background Jobs
+
+Scheduled work runs through RQ. Scheduling and execution are separate on
+purpose: a Render cron service enqueues a job, and a single worker service
+executes it, so retries and failures are visible in one place instead of cron
+shelling into the web instance.
+
+- Worker: `python -m projectdivert.tasks.worker`
+- Enqueue by hand: `flask enqueue <job>` (add `--sync` to run it inline,
+  `--dry-run` to compute without persisting)
+- Jobs: `ops-health-digest`, `dispatch-incident-maintenance`,
+  `offline-billing-followups`, `auth-token-cleanup`
+
+Each job calls the same service function as the equivalent CLI command, so a
+scheduled run and a manual run cannot diverge.
+
+If `RQ_REDIS_URL` (or `REDIS_URL`) is unset, or Redis is unreachable, `flask
+enqueue` runs the job inline and logs that it did. Work still happens without a
+queue; it just happens in the calling process.
+
+The `scripts/install_daily_*_launchd.sh` helpers remain for running these on a
+local macOS machine. On Render, the cron services in `render.yaml` are the
+scheduler.
+
 ## 8. Operations
 - Ops health digest: `./scripts/ops_health_digest.sh`
 - Full staging smoke: `BASE_URL=http://127.0.0.1:5052 ./scripts/full_staging_smoke.sh`

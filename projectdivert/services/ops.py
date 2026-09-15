@@ -1,11 +1,17 @@
 """Operational health snapshots and digests."""
 
+import logging
 from datetime import datetime, timedelta
+import requests
 from flask import current_app
 from projectdivert.models.audit import AuthAuditEvent
 from projectdivert.models.waste import WasteRemovalRequest, WasteRemovalVehicleLocation
 from projectdivert.services.billing import _collect_admin_billing_followups, _offline_billing_followup_limit
 from projectdivert.services.dispatch import _serialize_dispatch_queue_item
+from projectdivert.services.notifications import _send_account_email
+from projectdivert.services.utils import _is_truthy
+
+logger = logging.getLogger(__name__)
 
 
 def _ops_health_auth_window_minutes(value=None):
@@ -383,3 +389,72 @@ def _format_ops_health_digest_text(snapshot):
     else:
         lines.extend(['', 'Active alerts: none'])
     return '\n'.join(lines)
+
+
+def run_ops_health_digest(auth_window_minutes=None, dispatch_limit=None, include_ok=False,
+                          webhook_url=None, email_to=None, dry_run=False):
+    """Collect the ops health snapshot and deliver it to the configured channels.
+
+    Shared by the ``ops-health-digest`` CLI command and the background job.
+    Returns the snapshot plus what was delivered, and never raises for a failed
+    delivery: a digest that cannot be sent must not mask the health status.
+    """
+    if auth_window_minutes is not None and int(auth_window_minutes) < 5:
+        raise ValueError('auth_window_minutes must be >= 5')
+    if dispatch_limit is not None and int(dispatch_limit) < 1:
+        raise ValueError('dispatch_limit must be >= 1')
+
+    snapshot = _collect_ops_health_snapshot(
+        auth_window_minutes=auth_window_minutes,
+        dispatch_limit=dispatch_limit,
+    )
+    digest_text = _format_ops_health_digest_text(snapshot)
+    status = snapshot.get('status')
+
+    should_include_ok = bool(
+        include_ok or _is_truthy(current_app.config.get('OPS_HEALTH_DIGEST_INCLUDE_OK', False)))
+    result = {
+        'status': status,
+        'snapshot': snapshot,
+        'digest_text': digest_text,
+        'notified': False,
+        'webhook': 'skipped',
+        'email': 'skipped',
+        'dry_run': bool(dry_run),
+    }
+    if not (should_include_ok or status != 'ok'):
+        return result
+    result['notified'] = True
+    if dry_run:
+        return result
+
+    final_webhook_url = str(
+        webhook_url or current_app.config.get('OPS_HEALTH_DIGEST_WEBHOOK_URL') or '').strip()
+    final_email_to = str(
+        email_to or current_app.config.get('OPS_HEALTH_DIGEST_EMAIL_TO') or '').strip()
+
+    if final_webhook_url:
+        timeout = current_app.config.get('OPS_HEALTH_DIGEST_WEBHOOK_TIMEOUT_SECONDS', 8)
+        try:
+            timeout = max(2, int(timeout))
+        except (TypeError, ValueError):
+            timeout = 8
+        try:
+            response = requests.post(
+                final_webhook_url,
+                json={'text': digest_text, 'ops_health': snapshot},
+                timeout=timeout,
+            )
+            result['webhook'] = 'sent' if response.status_code < 400 else 'failed'
+            if response.status_code >= 400:
+                logger.warning('Ops health webhook failed status=%s body=%s',
+                               response.status_code, response.text[:500])
+        except Exception:
+            logger.exception('Ops health digest webhook send failed.')
+            result['webhook'] = 'failed'
+
+    if final_email_to:
+        subject = '[Project Divert] Ops Health {}'.format(str(status or 'unknown').upper())
+        result['email'] = 'sent' if _send_account_email(final_email_to, subject, digest_text) else 'failed'
+
+    return result

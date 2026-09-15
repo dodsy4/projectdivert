@@ -35,6 +35,10 @@ It began as a materials marketplace with a Scope 3 carbon accounting engine, and
 - `AuditEvent` — application-wide trail: every state-changing request is captured (actor, IP, action, entity, status) by an `after_request` hook, with explicit before/after diffs recorded at critical sites (dispatch, payments, compliance, status changes)
 - Admin views: `GET /admin/audit` (HTML) and `GET /api/v1/admin/audit-events` (JSON)
 
+**API documentation**
+- OpenAPI 3.1 document generated from the application itself and served at `/api/v1/openapi.json`, with a rendered reference at `/api/docs`
+- A contract test fails the build if a route is added, removed or renamed without regenerating the spec, so the documentation cannot drift from the code
+
 **Authentication & security**
 - JWT-based auth with refresh tokens, email verification, and password reset flows
 - Rate limiting and an auth-security blocklist for abuse prevention
@@ -52,7 +56,7 @@ It began as a materials marketplace with a Scope 3 carbon accounting engine, and
 
 **Backend:** Python, Flask, SQLAlchemy, Alembic, PostgreSQL, Redis, PyJWT, Stripe API, boto3 (S3-compatible storage), SendGrid, Pandas
 **Mobile:** Expo, React Native, TypeScript
-**Ops:** Gunicorn, Render (deployment), pytest, GitHub Actions (tests, mobile typecheck, gitleaks secret scanning)
+**Ops:** Gunicorn, RQ (background jobs), Render (deployment), pytest, GitHub Actions (tests, mobile typecheck, gitleaks secret scanning)
 
 ## Architecture
 
@@ -118,13 +122,25 @@ docker run --env-file .env -p 5000:5000 project-divert
 
 ## Operations
 
-This repo includes runbooks for release/rollback, database backups, restore drills, and incident response under [`docs/runbooks/`](./docs/runbooks/), plus operational scripts under [`scripts/`](./scripts/) for daily health digests, backup automation, and staging smoke tests.
+This repo includes runbooks for release/rollback, database backups, restore drills, and incident response under [`docs/runbooks/`](./docs/runbooks/), plus operational scripts under [`scripts/`](./scripts/) for backup automation and staging smoke tests.
+
+Scheduled work — ops health digests, dispatch incident maintenance, billing
+follow-ups and auth token cleanup — runs as RQ jobs. A cron service enqueues,
+a worker executes: `flask enqueue <job>` and `python -m projectdivert.tasks.worker`.
+Each job calls the same service function as its CLI equivalent, and falls back
+to running inline when no queue is configured.
 
 ## Testing
 
 ```bash
+pip install -r requirements-dev.txt
 pytest
 ```
+
+The suite is split by surface: `tests/unit` for service-layer logic and app
+assembly, `tests/web` for the server-rendered routes, and `tests/api` for the
+JSON API — including a contract test that fails if `docs/openapi.json` drifts
+from the routes the application actually serves.
 
 ## Author
 

@@ -40,7 +40,7 @@ jobs:
         run: python -m pip install --upgrade pip
 
       - name: Install backend dependencies
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -r requirements-dev.txt
 
       - name: Byte-compile backend
         run: python -m compileall -q projectdivert config.py wsgi.py forms.py project_divert_lca.py

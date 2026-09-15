@@ -1,19 +1,15 @@
 """Flask CLI commands for seeding, cleanup and scheduled maintenance."""
 
 import json
-from datetime import datetime, timedelta
-import requests
 import click
 from flask import current_app
-from sqlalchemy import and_, func, or_
 from flask.cli import with_appcontext
-from projectdivert.extensions import db
-from projectdivert.models.auth import AuthLifecycleToken
-from projectdivert.services.auth import _auth_token_cleanup_query, _auth_token_cleanup_retention_days
+from projectdivert.services.auth import run_auth_token_cleanup
 from projectdivert.services.billing import _run_offline_billing_followup_maintenance
 from projectdivert.services.dispatch import _dispatch_incident_auto_assign_enabled, _dispatch_incident_auto_resolve_test_enabled, _run_dispatch_incident_maintenance
-from projectdivert.services.notifications import _send_account_email
-from projectdivert.services.ops import _collect_ops_health_snapshot, _format_ops_health_digest_text
+from projectdivert.services.ops import run_ops_health_digest
+from projectdivert.tasks import enqueue
+from projectdivert.tasks.jobs import REGISTRY
 from projectdivert.services.reference_data import _refresh_reference_dataframes_from_db, _seed_reference_data_from_files
 from projectdivert.services.utils import _is_truthy
 
@@ -53,57 +49,25 @@ def seed_reference_data(force):
 @with_appcontext
 def auth_token_cleanup(retention_days, batch_size, dry_run):
     """Delete stale auth lifecycle token rows."""
-    if retention_days is None:
-        retention_days = _auth_token_cleanup_retention_days()
-    if retention_days < 0:
-        raise click.BadParameter('retention-days must be >= 0')
-    if batch_size < 1:
-        raise click.BadParameter('batch-size must be >= 1')
-
-    cutoff = datetime.utcnow() - timedelta(days=retention_days)
-    query = _auth_token_cleanup_query(cutoff)
-    total = query.count()
-    type_counts = dict(
-        db.session.query(
-            AuthLifecycleToken.token_type,
-            func.count(AuthLifecycleToken.id),
+    try:
+        summary = run_auth_token_cleanup(
+            retention_days=retention_days,
+            batch_size=batch_size,
+            dry_run=dry_run,
         )
-        .filter(
-            or_(
-                AuthLifecycleToken.expires_at <= cutoff,
-                and_(
-                    AuthLifecycleToken.revoked_at.isnot(None),
-                    AuthLifecycleToken.revoked_at <= cutoff,
-                ),
-            )
-        )
-        .group_by(AuthLifecycleToken.token_type)
-        .all()
-    )
+    except ValueError as exc:
+        raise click.BadParameter(str(exc))
 
-    click.echo('Auth token cleanup cutoff: {}'.format(cutoff.isoformat() + 'Z'))
-    click.echo('Candidates: {}'.format(total))
-    if type_counts:
-        for token_type in sorted(type_counts.keys()):
-            click.echo('  {} -> {}'.format(token_type, type_counts[token_type]))
-
-    if dry_run or total == 0:
-        click.echo('Dry run: no rows deleted.' if dry_run else 'No rows to delete.')
-        return
-
-    deleted = 0
-    while True:
-        ids = [row.id for row in _auth_token_cleanup_query(cutoff).order_by(AuthLifecycleToken.id.asc()).limit(batch_size).all()]
-        if not ids:
-            break
-        deleted += (
-            AuthLifecycleToken.query.filter(AuthLifecycleToken.id.in_(ids)).delete(synchronize_session=False)
-            or 0
-        )
-        db.session.commit()
-
-    click.echo('Deleted rows: {}'.format(deleted))
-
+    click.echo('Auth token cleanup cutoff: {}'.format(summary['cutoff']))
+    click.echo('Candidates: {}'.format(summary['candidates']))
+    for token_type in sorted(summary['by_token_type']):
+        click.echo('  {} -> {}'.format(token_type, summary['by_token_type'][token_type]))
+    if summary['dry_run']:
+        click.echo('Dry run: no rows deleted.')
+    elif summary['candidates'] == 0:
+        click.echo('No rows to delete.')
+    else:
+        click.echo('Deleted rows: {}'.format(summary['deleted']))
 
 
 @click.command('ops-health-digest')
@@ -125,63 +89,30 @@ def ops_health_digest(
     fail_on_critical,
 ):
     """Generate and optionally send an ops health digest."""
-    if auth_window_minutes is not None and auth_window_minutes < 5:
-        raise click.BadParameter('auth-window-minutes must be >= 5')
-    if dispatch_limit is not None and dispatch_limit < 1:
-        raise click.BadParameter('dispatch-limit must be >= 1')
+    try:
+        result = run_ops_health_digest(
+            auth_window_minutes=auth_window_minutes,
+            dispatch_limit=dispatch_limit,
+            include_ok=include_ok,
+            webhook_url=webhook_url,
+            email_to=email_to,
+            dry_run=dry_run,
+        )
+    except ValueError as exc:
+        raise click.BadParameter(str(exc))
 
-    snapshot = _collect_ops_health_snapshot(
-        auth_window_minutes=auth_window_minutes,
-        dispatch_limit=dispatch_limit,
-    )
-    digest_text = _format_ops_health_digest_text(snapshot)
-    click.echo(json.dumps(snapshot, indent=2, sort_keys=True))
-
-    should_include_ok = bool(include_ok or _is_truthy(current_app.config.get('OPS_HEALTH_DIGEST_INCLUDE_OK', False)))
-    should_notify = should_include_ok or snapshot.get('status') != 'ok'
-    if not should_notify:
+    click.echo(json.dumps(result['snapshot'], indent=2, sort_keys=True))
+    if not result['notified']:
         click.echo('Status is ok and include-ok is disabled; no notifications sent.')
-        return
-
-    if dry_run:
+    elif result['dry_run']:
         click.echo('Dry run: notifications not sent.')
-        click.echo(digest_text)
-        if fail_on_critical and snapshot.get('status') == 'critical':
-            raise click.ClickException('Ops health is critical.')
-        return
+        click.echo(result['digest_text'])
+    else:
+        click.echo('Webhook digest {}.'.format(result['webhook']))
+        click.echo('Email digest {}.'.format(result['email']))
 
-    final_webhook_url = str(webhook_url or current_app.config.get('OPS_HEALTH_DIGEST_WEBHOOK_URL') or '').strip()
-    final_email_to = str(email_to or current_app.config.get('OPS_HEALTH_DIGEST_EMAIL_TO') or '').strip()
-
-    if final_webhook_url:
-        timeout = current_app.config.get('OPS_HEALTH_DIGEST_WEBHOOK_TIMEOUT_SECONDS', 8)
-        try:
-            timeout = max(2, int(timeout))
-        except (TypeError, ValueError):
-            timeout = 8
-
-        try:
-            response = requests.post(
-                final_webhook_url,
-                json={'text': digest_text, 'ops_health': snapshot},
-                timeout=timeout,
-            )
-            if response.status_code >= 400:
-                click.echo('Webhook send failed status={} body={}'.format(response.status_code, response.text[:500]))
-            else:
-                click.echo('Webhook digest sent.')
-        except Exception:
-            current_app.logger.exception('Ops health digest webhook send failed.')
-            click.echo('Webhook digest send failed.')
-
-    if final_email_to:
-        email_subject = '[Project Divert] Ops Health {}'.format(str(snapshot.get('status') or 'unknown').upper())
-        email_sent = _send_account_email(final_email_to, email_subject, digest_text)
-        click.echo('Email digest {}.'.format('sent' if email_sent else 'failed'))
-
-    if fail_on_critical and snapshot.get('status') == 'critical':
+    if fail_on_critical and result['status'] == 'critical':
         raise click.ClickException('Ops health is critical.')
-
 
 
 @click.command('dispatch-incident-maintenance')
@@ -284,12 +215,37 @@ def offline_billing_followups(limit, search, reminder_after_hours, repeat_hours,
     click.echo(json.dumps(result, indent=2, sort_keys=True))
 
 
+@click.command('enqueue')
+@click.argument('job_name', type=click.Choice(sorted(REGISTRY)))
+@click.option('--sync', is_flag=True, help='Run the job inline instead of queueing it.')
+@click.option('--dry-run', is_flag=True, help='Pass dry-run through to the job.')
+@with_appcontext
+def enqueue_job(job_name, sync, dry_run):
+    """Queue a background job by name.
+
+    Intended for a platform scheduler: cron enqueues, the worker executes.
+    Falls back to running inline when no queue is configured.
+    """
+    job = REGISTRY[job_name]
+    kwargs = {'dry_run': True} if dry_run else {}
+    if sync:
+        click.echo(json.dumps(job(**kwargs), indent=2, sort_keys=True, default=str))
+        return
+    job_id, result = enqueue(job, **kwargs)
+    if job_id:
+        click.echo('Queued {} as job {}'.format(job_name, job_id))
+    else:
+        click.echo('No queue configured; ran {} inline.'.format(job_name))
+        click.echo(json.dumps(result, indent=2, sort_keys=True, default=str))
+
+
 COMMANDS = (
     seed_reference_data,
     auth_token_cleanup,
     ops_health_digest,
     dispatch_incident_maintenance,
     offline_billing_followups,
+    enqueue_job,
 )
 
 
