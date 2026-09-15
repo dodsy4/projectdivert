@@ -67,10 +67,21 @@ Use the restore drill checklist monthly and before launch:
 - Install local or host-level backup automation (`scripts/db_backup.sh`)
 - Run a restore drill before launch and monthly after launch
 
-## 7. Next Improvements
-- Add password reset and email verification
-- Add rate limiting / anti-spam on request forms
-- Move image storage to S3/Cloudinary for durability
+## 7. Roadmap
+
+Shipped since this guide was first written, and no longer outstanding:
+password reset and email verification (`/api/v1/auth/password-reset/*`,
+`/api/v1/auth/verify/*`), auth rate limiting with escalating login lockout and
+a security blocklist, and S3-backed storage for compliance documents.
+
+Still open:
+- Rate limiting / anti-spam on the public web request forms. Only the auth API
+  is rate limited today.
+- Material images still write to local disk (`static/uploads/`); only
+  compliance uploads use object storage. On a single Render instance this is
+  ephemeral, so material photos do not survive a redeploy.
+- Background jobs run through RQ (`rq worker`), but the scheduler is still
+  driven by Render cron rather than a persistent scheduler process.
 
 ## 8. Operations
 - Ops health digest: `./scripts/ops_health_digest.sh`

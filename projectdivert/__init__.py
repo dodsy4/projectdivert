@@ -26,7 +26,7 @@ def _register_blueprints(app):
     from projectdivert.blueprints import admin, web
     from projectdivert.blueprints.api import (
         admin_billing, admin_compliance, admin_dispatch, admin_ops,
-        admin_security, auth, compliance, drivers, payments, push,
+        admin_security, auth, compliance, docs, drivers, payments, push,
         waste_requests,
     )
 
@@ -34,6 +34,7 @@ def _register_blueprints(app):
         web, admin,
         auth, admin_security, admin_ops, admin_billing, admin_dispatch,
         admin_compliance, drivers, compliance, payments, push, waste_requests,
+        docs,
     ):
         app.register_blueprint(module.bp)
 
@@ -64,8 +65,12 @@ def _configure_logging(app):
 
 def create_app(config_object='config'):
     """Build and configure a Project Divert application instance."""
+    # root_path is pinned to the repository root, not the package directory:
+    # config, templates, static assets and seed data all live alongside the
+    # package, and code reads them via app.root_path / app.static_folder.
     app = Flask(
         __name__,
+        root_path=BASE_DIR,
         template_folder=os.path.join(BASE_DIR, 'templates'),
         static_folder=os.path.join(BASE_DIR, 'static'),
     )

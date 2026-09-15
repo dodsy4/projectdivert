@@ -1,0 +1,311 @@
+"""Tests for the server-rendered web and admin routes."""
+
+from datetime import datetime, timedelta
+from datetime import datetime, timedelta
+import pandas as pd
+import pytest
+
+from tests.helpers import _fake_postcode_lookup, _provider_frame
+
+
+def test_core_get_routes(client):
+    expected = {
+        '/': 302,
+        '/home': 200,
+        '/login': 200,
+        '/register': 200,
+        '/materials': 200,
+        '/first': 200,
+        '/output': 200,
+        '/map': 200,
+        '/waste-removal/request': 200,
+    }
+
+    for route, status_code in expected.items():
+        response = client.get(route)
+        assert response.status_code == status_code
+
+
+def test_output_post_missing_required_fields_does_not_create_record(client, app_context):
+    with app_context.app.app_context():
+        count_before = app_context.DiversionEstimate.query.count()
+
+    response = client.post('/output', data={})
+
+    with app_context.app.app_context():
+        count_after = app_context.DiversionEstimate.query.count()
+
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/result')
+    assert count_after == count_before
+
+
+def test_output_post_valid_creates_record(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.geo, 'numeric_distance', lambda origin, destination: 10.0)
+
+    payload = {
+        'material': 'Paper and card',
+        'amount': '1',
+        'unit': 'Tonnes',
+        'site_address': 'London',
+        'traditional_address': 'Birmingham',
+        'divert_address': 'Manchester',
+        'traditional_cost': '100',
+        'divert_cost': '80',
+    }
+
+    with app_context.app.app_context():
+        count_before = app_context.DiversionEstimate.query.count()
+
+    response = client.post('/output', data=payload)
+
+    with app_context.app.app_context():
+        count_after = app_context.DiversionEstimate.query.count()
+
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/result')
+    assert count_after == count_before + 1
+
+
+def test_material_post_missing_required_fields_does_not_create_record(client, app_context):
+    with app_context.app.app_context():
+        count_before = app_context.Material.query.count()
+
+    response = client.post('/material_input', data={})
+
+    with app_context.app.app_context():
+        count_after = app_context.Material.query.count()
+
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/materials')
+    assert count_after == count_before
+
+
+def test_material_post_valid_creates_record(client, app_context, monkeypatch):
+    monkeypatch.setattr(
+        app_context.requests,
+        'get',
+        _fake_postcode_lookup,
+    )
+
+    payload = {
+        'waste_stream': 'Desk',
+        'amount': '3',
+        'address': '1 Test Street',
+        'city': 'London',
+        'county': 'Greater London',
+        'postcode': 'SW1A1AA',
+        'dimensions': '120x60x75',
+        'condition': 'Good',
+    }
+
+    with app_context.app.app_context():
+        count_before = app_context.Material.query.count()
+
+    response = client.post('/material_input', data=payload)
+
+    with app_context.app.app_context():
+        count_after = app_context.Material.query.count()
+
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/materials')
+    assert count_after == count_before + 1
+
+
+def test_result_redirects_to_output_when_distance_api_fails(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.geo, 'numeric_distance', lambda *args, **kwargs: None)
+
+    payload = {
+        'material': 'Paper and card',
+        'amount': '1',
+        'unit': 'Tonnes',
+        'site_address': 'London',
+        'traditional_address': 'Birmingham',
+        'divert_address': 'Manchester',
+        'traditional_cost': '100',
+        'divert_cost': '80',
+    }
+    client.post('/output', data=payload)
+
+    response = client.get('/result', follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/output')
+
+
+def test_waste_removal_request_missing_required_fields_does_not_create_record(client, app_context):
+    with app_context.app.app_context():
+        count_before = app_context.WasteRemovalRequest.query.count()
+
+    response = client.post('/waste-removal/request', data={})
+
+    with app_context.app.app_context():
+        count_after = app_context.WasteRemovalRequest.query.count()
+
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/waste-removal/request')
+    assert count_after == count_before
+
+
+def test_waste_removal_request_valid_creates_record(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
+
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+    payload = {
+        'requester_name': 'Test User',
+        'requester_email': 'test@example.com',
+        'material_type': 'Glass',
+        'waste_amount': '2.5',
+        'waste_unit': 'Tonnes',
+        'match_radius_miles': '25',
+        'pickup_address': '1 Example Road',
+        'pickup_city': 'London',
+        'pickup_county': 'Greater London',
+        'pickup_postcode': 'SW1A1AA',
+        'scheduled_pickup_at': scheduled_time,
+        'notes': 'Gate code 1234',
+    }
+
+    with app_context.app.app_context():
+        count_before = app_context.WasteRemovalRequest.query.count()
+
+    response = client.post('/waste-removal/request', data=payload)
+
+    with app_context.app.app_context():
+        count_after = app_context.WasteRemovalRequest.query.count()
+        latest = app_context.WasteRemovalRequest.query.order_by(app_context.WasteRemovalRequest.id.desc()).first()
+        match_count = app_context.WasteRemovalMatch.query.filter_by(waste_removal_request_id=latest.id).count()
+        offer_rows = (
+            app_context.WasteRemovalDispatchOffer.query.filter_by(waste_removal_request_id=latest.id)
+            .order_by(app_context.WasteRemovalDispatchOffer.offer_rank.asc())
+            .all()
+        )
+
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/waste-removal/request')
+    assert count_after == count_before + 1
+    assert latest.material_type == 'Glass'
+    assert latest.waste_amount == pytest.approx(2.5)
+    assert latest.status == 'pending_match'
+    assert match_count == 0
+    assert len(offer_rows) == 1
+    assert offer_rows[0].provider_name == 'Provider Alpha'
+
+
+def test_waste_removal_request_past_time_is_rejected(client, app_context):
+    past_time = (datetime.now() - timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M')
+    payload = {
+        'requester_name': 'Test User',
+        'requester_email': 'test@example.com',
+        'material_type': 'Glass',
+        'waste_amount': '1',
+        'waste_unit': 'Tonnes',
+        'match_radius_miles': '25',
+        'pickup_address': '1 Example Road',
+        'pickup_postcode': 'SW1A1AA',
+        'scheduled_pickup_at': past_time,
+    }
+
+    with app_context.app.app_context():
+        count_before = app_context.WasteRemovalRequest.query.count()
+
+    response = client.post('/waste-removal/request', data=payload)
+
+    with app_context.app.app_context():
+        count_after = app_context.WasteRemovalRequest.query.count()
+
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/waste-removal/request')
+    assert count_after == count_before
+
+
+def test_waste_removal_request_no_provider_in_radius_sets_pending(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(
+        app_context.reference_data,
+        'suppliers',
+        pd.DataFrame(
+            [
+                {
+                    'name': 'Provider Far',
+                    'sup_type': 'Waste Carrier',
+                    'city': 'Leeds',
+                    'postcode': 'LS11AA',
+                    'lat': 53.8008,
+                    'long': -1.5491,
+                }
+            ]
+        ),
+    )
+
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+    payload = {
+        'requester_name': 'Test User',
+        'requester_email': 'test@example.com',
+        'material_type': 'Glass',
+        'waste_amount': '2.5',
+        'waste_unit': 'Tonnes',
+        'match_radius_miles': '1',
+        'pickup_address': '1 Example Road',
+        'pickup_postcode': 'SW1A1AA',
+        'scheduled_pickup_at': scheduled_time,
+    }
+
+    response = client.post('/waste-removal/request', data=payload)
+
+    with app_context.app.app_context():
+        latest = app_context.WasteRemovalRequest.query.order_by(app_context.WasteRemovalRequest.id.desc()).first()
+        match_count = app_context.WasteRemovalMatch.query.filter_by(waste_removal_request_id=latest.id).count()
+
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/waste-removal/request')
+    assert latest.status == 'pending_match'
+    assert match_count == 0
+
+
+def test_waste_removal_request_sends_notification_email(client, app_context, monkeypatch):
+    monkeypatch.setattr(app_context.requests, 'get', _fake_postcode_lookup)
+    monkeypatch.setattr(app_context.reference_data, 'suppliers', _provider_frame())
+    monkeypatch.setattr(
+        app_context.geo,
+        '_drive_time_between_points',
+        lambda *args, **kwargs: {'minutes': 32.0, 'text': '32 mins'},
+    )
+
+    scheduled_time = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+    payload = {
+        'requester_name': 'Test User',
+        'requester_email': 'test@example.com',
+        'material_type': 'Glass',
+        'waste_amount': '2.5',
+        'waste_unit': 'Tonnes',
+        'match_radius_miles': '25',
+        'pickup_address': '1 Example Road',
+        'pickup_city': 'London',
+        'pickup_county': 'Greater London',
+        'pickup_postcode': 'SW1A1AA',
+        'scheduled_pickup_at': scheduled_time,
+    }
+
+    app_context.app.config['WASTE_REMOVAL_NOTIFICATION_EMAIL'] = 'ops@example.com'
+    captured = {}
+
+    def _fake_send(to_email, subject, text_body, html_body=None):
+        captured['to_email'] = to_email
+        captured['subject'] = subject
+        captured['text_body'] = text_body
+        return True
+
+    monkeypatch.setattr(app_context.notifications, '_send_material_request_email', _fake_send)
+
+    response = client.post('/waste-removal/request', data=payload)
+
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/waste-removal/request')
+    assert captured['to_email'] == 'ops@example.com'
+    assert 'New waste removal request' in captured['subject']
+    assert 'Waste Amount: 2.5 Tonnes' in captured['text_body']
+    assert 'Dispatch Offers Created: 1' in captured['text_body']
+    assert 'Closest Provider Candidate: Provider Alpha' in captured['text_body']
+    assert 'Estimated Drive Time: 32 mins' in captured['text_body']
