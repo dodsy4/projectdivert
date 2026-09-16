@@ -87,6 +87,10 @@ def test_protected_endpoints_declare_bearer_auth():
         ('/api/v1/auth/password-reset/request', 'post'),
         ('/api/v1/auth/password-reset/confirm', 'post'),
         ('/api/v1/payments/stripe/webhook', 'post'),
+        # Provider webhooks authenticate by HMAC signature over the request,
+        # not a bearer token. Verification is enforced in the handler and is
+        # covered by tests/api/test_whatsapp_and_certificate.py.
+        ('/api/v1/whatsapp/inbound', 'post'),
         ('/api/v1/openapi.json', 'get'),
     }
     undeclared = [

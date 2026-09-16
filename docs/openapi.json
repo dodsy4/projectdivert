@@ -5728,6 +5728,42 @@
           "Waste requests"
         ]
       }
+    },
+    "/api/v1/whatsapp/inbound": {
+      "post": {
+        "description": "Public endpoint: no bearer token required.",
+        "operationId": "api_whatsapp_inbound",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "Body": {},
+                  "From": {}
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "Whatsapp inbound",
+        "tags": [
+          "WhatsApp"
+        ]
+      }
     }
   },
   "servers": [
@@ -5780,6 +5816,10 @@
     {
       "description": "Request lifecycle, dispatch acceptance, status and live location.",
       "name": "Waste requests"
+    },
+    {
+      "description": "Inbound WhatsApp webhook for the conversational assistant.",
+      "name": "WhatsApp"
     },
     {
       "description": "",

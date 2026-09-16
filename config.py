@@ -235,3 +235,21 @@ PLATFORM_CURRENCY = (os.getenv('PLATFORM_CURRENCY', 'gbp') or 'gbp').strip().low
 EXPO_PUSH_ENABLED = _bool_env('EXPO_PUSH_ENABLED', True)
 EXPO_PUSH_API_URL = os.getenv('EXPO_PUSH_API_URL', 'https://exp.host/--/api/v2/push/send')
 EXPO_PUSH_ACCESS_TOKEN = os.getenv('EXPO_PUSH_ACCESS_TOKEN', '')
+
+# WhatsApp assistant (Twilio transport + Claude reasoning).
+# Off by default: with WHATSAPP_ENABLED unset the webhook 404s and nothing is sent.
+WHATSAPP_ENABLED = _bool_env('WHATSAPP_ENABLED', False)
+TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID', '')
+TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN', '')
+TWILIO_WHATSAPP_FROM = os.getenv('TWILIO_WHATSAPP_FROM', '')
+WHATSAPP_DEFAULT_MATCH_RADIUS_MILES = _int_env('WHATSAPP_DEFAULT_MATCH_RADIUS_MILES', 25)
+
+CHATBOT_ENABLED = _bool_env('CHATBOT_ENABLED', False)
+ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY', '')
+ANTHROPIC_MODEL = os.getenv('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001')
+CHATBOT_HISTORY_TTL_SECONDS = _int_env('CHATBOT_HISTORY_TTL_SECONDS', 3600)
+CHATBOT_REDIS_URL = os.getenv('CHATBOT_REDIS_URL', '')
+CHATBOT_REDIS_PREFIX = os.getenv('CHATBOT_REDIS_PREFIX', 'projectdivert:chat')
+
+# Diversion certificate: the landfill haul the diversion is measured against.
+CERTIFICATE_LANDFILL_DISTANCE_KM = _int_env('CERTIFICATE_LANDFILL_DISTANCE_KM', 25)
