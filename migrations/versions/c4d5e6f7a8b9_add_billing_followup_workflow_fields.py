@@ -52,13 +52,13 @@ def upgrade():
     inspector = sa.inspect(bind)
     fk_name = 'fk_wrr_billing_followup_updated_by_uid_users'
     if not _has_fk_name(inspector, table_name, fk_name):
-        op.create_foreign_key(
-            fk_name,
-            table_name,
-            'users',
-            ['billing_followup_updated_by_user_id'],
-            ['id'],
-        )
+        with op.batch_alter_table(table_name) as batch_op:
+            batch_op.create_foreign_key(
+                fk_name,
+                'users',
+                ['billing_followup_updated_by_user_id'],
+                ['id'],
+            )
 
     inspector = sa.inspect(bind)
     for index_name, column_name in [
@@ -89,11 +89,8 @@ def downgrade():
 
     fk_name = 'fk_wrr_billing_followup_updated_by_uid_users'
     if _has_fk_name(inspector, table_name, fk_name):
-        op.drop_constraint(
-            fk_name,
-            table_name,
-            type_='foreignkey',
-        )
+        with op.batch_alter_table(table_name) as batch_op:
+            batch_op.drop_constraint(fk_name, type_='foreignkey')
         inspector = sa.inspect(bind)
 
     for column_name in [
