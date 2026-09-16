@@ -23,6 +23,11 @@ It began as a materials marketplace with a Scope 3 carbon accounting engine, and
 - Methodology, system boundary and limitations documented in [`docs/lca-methodology.md`](./docs/lca-methodology.md)
 - [`docs/lca-demo.html`](./docs/lca-demo.html) is a standalone, self-contained page that runs the whole model in the browser on the same cited dataset — no database, API keys or backend. Built by `scripts/build_lca_demo.py`; `scripts/verify_lca_demo.py` checks the JavaScript port against the Python engine across every material, both pathways and a spread of masses and distances (544 cases) and fails on any disagreement
 
+**Web dashboard**
+- A React dashboard in [`web/`](./web/) over the same `/api/v1` surface the mobile app uses: customers book collections and track them, drivers claim and progress jobs, completed collections link to their diversion certificate
+- Token refresh is handled in one place, with concurrent 401s sharing a single in-flight refresh so rotated refresh tokens are not burned by a burst of parallel requests
+- Navigation follows the signed-in role, but every list is scoped server-side, so the UI cannot widen what it is permitted to see
+
 **WhatsApp assistant**
 - Site managers and drivers can book collections, list material for reuse, search and claim open jobs, and check status by messaging in plain English
 - Claude drives an agentic loop over eight tools, each a thin wrapper over the same service functions the JSON API uses, so the conversational path cannot drift from the API path
@@ -64,6 +69,7 @@ It began as a materials marketplace with a Scope 3 carbon accounting engine, and
 ## Tech stack
 
 **Backend:** Python, Flask, SQLAlchemy, Alembic, PostgreSQL, Redis, PyJWT, Stripe API, boto3 (S3-compatible storage), SendGrid, Pandas
+**Web:** React 19, Vite, React Router
 **Mobile:** Expo, React Native, TypeScript
 **Ops:** Gunicorn, RQ (background jobs), Render (deployment), pytest, GitHub Actions (tests, mobile typecheck, gitleaks secret scanning)
 
