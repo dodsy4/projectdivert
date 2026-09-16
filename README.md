@@ -19,8 +19,16 @@ It began as a materials marketplace with a Scope 3 carbon accounting engine, and
 - ISO 14040/14044-aligned life-cycle model (`project_divert_lca.py`) calculating net avoided kg CO2e per diversion: landfill baseline vs. reuse/recycle scenarios, with an avoided-virgin-production credit
 - Cited emission factors in a versioned dataset (`data/lca/emission_factors.csv`) drawn from UK DESNZ conversion factors, the ICE embodied-carbon database, and WRAP
 - Per-stage breakdown (disposal, transport, reprocessing, avoided virgin production) with source provenance; real road distances via the Google Maps Distance Matrix API
+- A shareable diversion certificate at `/certificate/<request_id>` for each completed collection, with the avoided emissions computed by the engine at render time from the real collection distance rather than a stored figure
 - Methodology, system boundary and limitations documented in [`docs/lca-methodology.md`](./docs/lca-methodology.md)
 - [`docs/lca-demo.html`](./docs/lca-demo.html) is a standalone, self-contained page that runs the whole model in the browser on the same cited dataset — no database, API keys or backend. Built by `scripts/build_lca_demo.py`; `scripts/verify_lca_demo.py` checks the JavaScript port against the Python engine across every material, both pathways and a spread of masses and distances (544 cases) and fails on any disagreement
+
+**WhatsApp assistant**
+- Site managers and drivers can book collections, list material for reuse, search and claim open jobs, and check status by messaging in plain English
+- Claude drives an agentic loop over eight tools, each a thin wrapper over the same service functions the JSON API uses, so the conversational path cannot drift from the API path
+- Every state change it makes is written to the audit trail with `source='whatsapp_bot'`
+- Inbound webhooks are verified against Twilio's request signature and fail closed; conversation history is held in Redis where configured, so it survives across workers
+- Off by default behind `WHATSAPP_ENABLED` and `CHATBOT_ENABLED`; with the assistant unavailable the webhook falls back to keyword replies rather than going silent
 
 **Waste removal & dispatch**
 - Customers submit waste-removal requests; drivers receive and accept dispatch offers

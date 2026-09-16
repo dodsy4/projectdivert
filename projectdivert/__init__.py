@@ -24,18 +24,18 @@ __all__ = ['create_app', 'BASE_DIR']
 
 
 def _register_blueprints(app):
-    from projectdivert.blueprints import admin, web
+    from projectdivert.blueprints import admin, certificates, web
     from projectdivert.blueprints.api import (
         admin_billing, admin_compliance, admin_dispatch, admin_ops,
         admin_security, auth, compliance, docs, drivers, payments, push,
-        waste_requests,
+        waste_requests, whatsapp,
     )
 
     for module in (
         web, admin,
         auth, admin_security, admin_ops, admin_billing, admin_dispatch,
         admin_compliance, drivers, compliance, payments, push, waste_requests,
-        docs,
+        docs, whatsapp, certificates,
     ):
         app.register_blueprint(module.bp)
 

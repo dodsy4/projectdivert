@@ -18,3 +18,5 @@ gunicorn==22.0.0
 PyJWT==2.9.0
 redis==5.0.8
 rq==1.16.2
+anthropic>=0.40,<1
+twilio>=9.0,<10

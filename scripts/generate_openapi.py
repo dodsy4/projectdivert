@@ -37,6 +37,7 @@ TAGS = {
     'api_compliance': ('Compliance', 'Waste transfer notes and compliance uploads for a request.'),
     'api_payments': ('Payments', 'Stripe charges, refunds, driver payouts and webhooks.'),
     'api_push': ('Push', 'Expo push subscription registration.'),
+    'api_whatsapp': ('WhatsApp', 'Inbound WhatsApp webhook for the conversational assistant.'),
     'api_waste_requests': ('Waste requests', 'Request lifecycle, dispatch acceptance, status and live location.'),
 }
 

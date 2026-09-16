@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diversion certificate {{ reference }} — Project Divert</title>
+<meta name="description" content="Record of material diverted from landfill, with the avoided emissions calculated under ISO 14040/44.">
+<style>
+  :root {
+    --ground: #f5f6f5;
+    --panel: #ffffff;
+    --ink: #17201f;
+    --ink-2: #4a5553;
+    --ink-3: #74807d;
+    --rule: #dde0dd;
+    --accent: #0077a3;
+    --accent-soft: #e6f1f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #14181a; --panel: #1b2124; --ink: #eef2f2; --ink-2: #b3bdbd;
+      --ink-3: #8a9695; --rule: #2e383b; --accent: #2596b6; --accent-soft: #16323c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.5; padding: 24px 16px 56px;
+  }
+  .cert { max-width: 620px; margin: 0 auto; background: var(--panel); border: 1px solid var(--rule); }
+  .head { padding: 26px 26px 22px; border-bottom: 2px solid var(--ink); }
+  .eyebrow { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 8px; }
+  h1 { margin: 0; font-size: 24px; line-height: 1.15; letter-spacing: -0.01em; }
+  .ref { margin: 8px 0 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--ink-2); }
+  .figure { padding: 26px; background: var(--accent-soft); border-bottom: 1px solid var(--rule); }
+  .figure .num { font-size: clamp(34px, 9vw, 50px); font-weight: 800; line-height: 1; letter-spacing: -0.03em; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .figure .unit { margin-top: 6px; font-size: 14px; color: var(--ink-2); }
+  .rows { padding: 8px 26px 20px; }
+  .row { display: flex; justify-content: space-between; gap: 18px; padding: 11px 0; border-bottom: 1px solid var(--rule); }
+  .row:last-child { border-bottom: 0; }
+  .k { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-3); }
+  .v { font-size: 14px; font-weight: 600; text-align: right; }
+  .stages { padding: 0 26px 22px; }
+  .stages h2 { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 10px; font-weight: 600; }
+  .stage { display: flex; justify-content: space-between; gap: 14px; font-size: 13px; padding: 5px 0; color: var(--ink-2); }
+  .stage .amt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { padding: 18px 26px 24px; border-top: 1px solid var(--rule); font-size: 12.5px; color: var(--ink-3); }
+  .note p { margin: 0 0 9px; }
+  .note p:last-child { margin-bottom: 0; }
+  .note a { color: var(--accent); }
+  .unavailable { padding: 26px; font-size: 15px; color: var(--ink-2); }
+  @media print {
+    body { background: #fff; padding: 0; }
+    .cert { border: 0; max-width: none; }
+  }
+</style>
+</head>
+<body>
+<main class="cert">
+  <header class="head">
+    <p class="eyebrow">Project Divert &middot; Diversion record</p>
+    <h1>{{ booking.material_type }} diverted from landfill</h1>
+    <p class="ref">{{ reference }}</p>
+  </header>
+
+  {% if result %}
+  <section class="figure">
+    <div class="num">
+      {%- if result.net_avoided_kg >= 1000 -%}
+        {{ '%.2f'|format(result.net_avoided_kg / 1000) }}
+      {%- else -%}
+        {{ '%.0f'|format(result.net_avoided_kg) }}
+      {%- endif -%}
+    </div>
+    <div class="unit">
+      {% if result.net_avoided_kg >= 1000 %}tonnes{% else %}kg{% endif %} CO<sub>2</sub>e avoided,
+      against sending the same material to landfill
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="rows">
+    <div class="row"><span class="k">Material</span><span class="v">{{ booking.material_type }}</span></div>
+    <div class="row"><span class="k">Quantity</span><span class="v">{{ booking.waste_amount }} {{ booking.waste_unit }}</span></div>
+    <div class="row"><span class="k">Collected from</span><span class="v">{{ booking.pickup_address }}, {{ booking.pickup_postcode }}</span></div>
+    {% if booking.scheduled_pickup_at %}
+    <div class="row"><span class="k">Collection date</span><span class="v">{{ booking.scheduled_pickup_at.strftime('%d %B %Y') }}</span></div>
+    {% endif %}
+    {% if context and context.provider %}
+    <div class="row"><span class="k">Carrier</span><span class="v">{{ context.provider }}</span></div>
+    {% endif %}
+    {% if context %}
+    <div class="row"><span class="k">Route modelled</span><span class="v">{{ context.pathway|capitalize }}</span></div>
+    {% endif %}
+  </section>
+
+  {% if result %}
+  <section class="stages">
+    <h2>How the figure is made up</h2>
+    {% for stage in result.stages %}
+    <div class="stage">
+      <span>{{ stage.stage.replace('_', ' ')|capitalize }}</span>
+      <span class="amt">{{ '%+.1f'|format(stage.kg_co2e) }} kg</span>
+    </div>
+    {% endfor %}
+    <div class="stage" style="border-top:1px solid var(--rule); margin-top:6px; padding-top:9px; font-weight:600; color:var(--ink);">
+      <span>Net avoided</span>
+      <span class="amt">{{ '%+.1f'|format(result.net_avoided_kg) }} kg</span>
+    </div>
+  </section>
+  {% else %}
+  <section class="unavailable">
+    <p>A carbon figure is not available for this collection. {{ unavailable_reason }}</p>
+  </section>
+  {% endif %}
+
+  <footer class="note">
+    {% if context %}
+    <p>
+      Calculated under ISO 14040 and ISO 14044 from published UK emission factors,
+      for {{ '%.3f'|format(context.tonnes) }} tonnes.
+      {% if context.measured_collection %}
+        Collection transport uses the {{ '%.0f'|format(context.collection_km) }} km actually
+        travelled to the carrier.
+      {% else %}
+        No collection distance was recorded, so transport is modelled at
+        {{ '%.0f'|format(context.collection_km) }} km.
+      {% endif %}
+      The avoided landfill haul is assumed to be {{ '%.0f'|format(context.landfill_km) }} km.
+    </p>
+    {% endif %}
+    <p>
+      This is an internal Project Divert record of a completed collection. It is
+      not a waste transfer note, and not a Digital Waste Tracking record; those
+      are held separately against this collection.
+    </p>
+    <p>
+      The underlying model, its system boundary and its limitations are documented in the
+      <a href="https://github.com/dodsy4/projectdivert/blob/main/docs/lca-methodology.md">methodology</a>.
+      It has not had the independent critical review that ISO 14044 requires for a
+      comparative assertion disclosed to the public.
+    </p>
+  </footer>
+</main>
+</body>
+</html>

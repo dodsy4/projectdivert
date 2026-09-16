@@ -13,6 +13,10 @@ class User(UserMixin, db.Model):
     name = db.Column(db.String(120))
     role = db.Column(db.String(32), nullable=False, default='customer')
     is_active_user = db.Column(db.Boolean, nullable=False, default=True)
+    # WhatsApp linkage: the assistant resolves an inbound message to an account
+    # by this number, so it is unique and indexed.
+    phone = db.Column(db.String(32), unique=True, index=True)
+    whatsapp_linked_at = db.Column(db.DateTime, index=True)
     email_verified_at = db.Column(db.DateTime, index=True)
     access_token_revoked_at = db.Column(db.DateTime, index=True)
     carrier_company_id = db.Column(
