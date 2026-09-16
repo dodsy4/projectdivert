@@ -1,0 +1,653 @@
+<title>Diversion Carbon Model</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+  :root {
+    --ground: #f6f6f4;
+    --panel: #ffffff;
+    --panel-2: #f0f0ed;
+    --ink: #17201f;
+    --ink-2: #47524f;
+    --ink-3: #6f7a77;
+    --rule: #dcdedb;
+    --rule-2: #c7cac6;
+    --emit: #cf7a0a;
+    --avoid: #0077a3;
+    --emit-soft: #f3e3cc;
+    --avoid-soft: #d5e8f0;
+    --warn-bg: #fbf2df;
+    --warn-ink: #7a5310;
+    --focus: #0077a3;
+    --sans: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+    --serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+    --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #14181a;
+      --panel: #1b2124;
+      --panel-2: #222a2d;
+      --ink: #eef2f2;
+      --ink-2: #b3bdbd;
+      --ink-3: #8a9695;
+      --rule: #2e383b;
+      --rule-2: #3d494c;
+      --emit: #bb8420;
+      --avoid: #2596b6;
+      --emit-soft: #3a2f1a;
+      --avoid-soft: #16323c;
+      --warn-bg: #33291339;
+      --warn-ink: #d7b165;
+      --focus: #2596b6;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #14181a;
+    --panel: #1b2124;
+    --panel-2: #222a2d;
+    --ink: #eef2f2;
+    --ink-2: #b3bdbd;
+    --ink-3: #8a9695;
+    --rule: #2e383b;
+    --rule-2: #3d494c;
+    --emit: #bb8420;
+    --avoid: #2596b6;
+    --emit-soft: #3a2f1a;
+    --avoid-soft: #16323c;
+    --warn-bg: #33291339;
+    --warn-ink: #d7b165;
+    --focus: #2596b6;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding-inline: 20px; padding-block: 36px 64px; }
+  h1, h2, h3 { margin: 0; text-wrap: balance; font-weight: 600; letter-spacing: -0.01em; }
+  h1 { font-size: clamp(26px, 4.2vw, 38px); line-height: 1.12; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--ink-3); font-weight: 600; }
+  p { margin: 0; }
+  a { color: var(--avoid); text-underline-offset: 2px; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+
+  .masthead { display: flex; flex-direction: column; gap: 12px; padding-bottom: 22px; border-bottom: 2px solid var(--ink); }
+  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
+  .standfirst { font-family: var(--serif); font-size: 17px; line-height: 1.55; color: var(--ink-2); max-width: 62ch; }
+
+  .panel { background: var(--panel); border: 1px solid var(--rule); }
+  .stack { display: flex; flex-direction: column; gap: 28px; margin-top: 28px; }
+
+  form { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0; border: 1px solid var(--rule); background: var(--panel); }
+  .field { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border-right: 1px solid var(--rule); }
+  .field:last-child { border-right: 0; }
+  .field label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
+  .field input, .field select {
+    font-family: var(--sans); font-size: 15px; font-weight: 500; color: var(--ink);
+    background: transparent; border: 0; border-bottom: 1px solid var(--rule-2);
+    padding: 3px 0; width: 100%; border-radius: 0;
+  }
+  .field input { font-variant-numeric: tabular-nums; }
+  .split { display: flex; gap: 8px; align-items: baseline; }
+  .split input { flex: 1 1 auto; min-width: 0; }
+  .split select { flex: 0 0 auto; width: auto; font-size: 13px; color: var(--ink-2); }
+  .toggle { display: flex; border: 1px solid var(--rule-2); }
+  .toggle button {
+    flex: 1; font-family: var(--sans); font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
+    padding: 6px 4px; border: 0; background: transparent; color: var(--ink-3); cursor: pointer;
+  }
+  .toggle button[aria-pressed="true"] { background: var(--ink); color: var(--ground); }
+</style>
+<style>
+  .result { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 0; border: 1px solid var(--rule); background: var(--panel); }
+  .headline { padding: 26px 24px; border-right: 1px solid var(--rule); display: flex; flex-direction: column; gap: 4px; }
+  .hero-num { font-family: var(--sans); font-size: clamp(38px, 7vw, 58px); font-weight: 700; line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+  .hero-num.pos { color: var(--avoid); }
+  .hero-num.neg { color: var(--emit); }
+  .hero-unit { font-family: var(--mono); font-size: 12px; color: var(--ink-3); letter-spacing: 0.04em; }
+  .hero-note { margin-top: 10px; font-family: var(--serif); font-size: 15px; color: var(--ink-2); }
+  .balance { padding: 26px 24px; display: flex; flex-direction: column; justify-content: center; gap: 10px; }
+  .balance-row { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; font-variant-numeric: tabular-nums; }
+  .balance-row .k { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+  .balance-row .v { font-weight: 600; font-size: 16px; }
+  .balance-row.total { border-top: 1px solid var(--rule-2); padding-top: 10px; }
+  .balance-row.total .v { font-size: 19px; }
+
+  .chartwrap { padding: 20px 24px 24px; }
+  .chart { display: flex; flex-direction: column; gap: 2px; margin-top: 14px; }
+  .bar-row { display: grid; grid-template-columns: minmax(120px, 190px) minmax(0, 1fr) minmax(96px, auto); gap: 14px; align-items: center; }
+  .bar-label { font-size: 13px; color: var(--ink-2); line-height: 1.25; }
+  .bar-label .scen { display: block; font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
+  .track { position: relative; height: 26px; background: var(--panel-2); }
+  .zero { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--rule-2); }
+  .bar { position: absolute; top: 3px; bottom: 3px; background: var(--emit); border-radius: 0 3px 3px 0; }
+  .bar.credit { background: var(--avoid); border-radius: 3px 0 0 3px; }
+  .bar-val { font-family: var(--mono); font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+  .axis { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); margin-top: 8px; padding-left: 204px; }
+  @media (max-width: 720px) { .axis { padding-left: 0; } }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 4px; }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-2); }
+  .swatch { width: 11px; height: 11px; flex: 0 0 auto; }
+  .swatch.e { background: var(--emit); }
+  .swatch.a { background: var(--avoid); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; white-space: nowrap; }
+  td.num { font-family: var(--mono); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.src { font-family: var(--serif); color: var(--ink-2); line-height: 1.4; }
+  .scroller { overflow-x: auto; }
+  .scroller table { min-width: 560px; }
+
+  .notice { padding: 14px 16px; background: var(--warn-bg); color: var(--warn-ink); font-family: var(--serif); font-size: 14.5px; border-left: 3px solid currentColor; }
+  .prose { font-family: var(--serif); font-size: 15.5px; line-height: 1.6; color: var(--ink-2); max-width: 68ch; }
+  .prose + .prose { margin-top: 12px; }
+  .prose strong { color: var(--ink); font-weight: 600; }
+  .pad { padding: 20px 24px 24px; }
+  footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--rule); font-size: 13px; color: var(--ink-3); display: flex; flex-wrap: wrap; gap: 10px 22px; }
+  @media (max-width: 720px) {
+    .result { grid-template-columns: 1fr; }
+    .headline { border-right: 0; border-bottom: 1px solid var(--rule); }
+    .bar-row { grid-template-columns: 1fr; gap: 4px; }
+    .bar-val { text-align: left; }
+    .field { border-right: 0; border-bottom: 1px solid var(--rule); }
+  }
+  @media (prefers-reduced-motion: no-preference) { .bar { transition: left .18s ease, width .18s ease; } }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <span class="eyebrow">Project Divert &middot; ISO 14040 / 14044-aligned</span>
+    <h1>Diversion Carbon Model</h1>
+    <p class="standfirst">
+      What does it save, in kilograms of CO<sub>2</sub>e, to divert a tonne of material from
+      landfill? This is the carbon engine behind Project Divert, running in your browser on the
+      same cited factor dataset the production service uses.
+    </p>
+  </header>
+
+  <div class="stack">
+    <form id="controls" autocomplete="off">
+      <div class="field">
+        <label for="material">Material</label>
+        <select id="material" name="material"></select>
+      </div>
+      <div class="field">
+        <label for="mass">Diverted mass</label>
+        <div class="split">
+          <input id="mass" name="mass" type="number" min="0.001" step="0.25" value="2.5" inputmode="decimal">
+          <select id="massUnit" name="massUnit" aria-label="Mass unit">
+            <option value="t" selected>tonnes</option>
+            <option value="kg">kg</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="collection">To reprocessor</label>
+        <div class="split">
+          <input id="collection" name="collection" type="number" min="0" step="5" value="40" inputmode="decimal">
+          <select id="distUnit" name="distUnit" aria-label="Distance unit">
+            <option value="km" selected>km</option>
+            <option value="mi">miles</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="landfill">To landfill</label>
+        <div class="split">
+          <input id="landfill" name="landfill" type="number" min="0" step="5" value="15" inputmode="decimal">
+          <span class="bar-val" id="distUnitEcho">km</span>
+        </div>
+      </div>
+      <div class="field">
+        <label id="pathwayLabel">Pathway</label>
+        <div class="toggle" role="group" aria-labelledby="pathwayLabel">
+          <button type="button" id="pw-recycle" data-pathway="recycle" aria-pressed="true">Recycle</button>
+          <button type="button" id="pw-reuse" data-pathway="reuse" aria-pressed="false">Reuse</button>
+        </div>
+      </div>
+    </form>
+
+    <div id="warnings" hidden></div>
+
+    <section class="result" aria-live="polite">
+      <div class="headline">
+        <span class="eyebrow">Net avoided emissions</span>
+        <span class="hero-num pos" id="netValue">&mdash;</span>
+        <span class="hero-unit" id="netUnit">kg CO2e</span>
+        <p class="hero-note" id="netNote"></p>
+      </div>
+      <div class="balance">
+        <div class="balance-row">
+          <span class="k">Landfill baseline</span><span class="v" id="baselineValue">&mdash;</span>
+        </div>
+        <div class="balance-row">
+          <span class="k">Diversion scenario</span><span class="v" id="diversionValue">&mdash;</span>
+        </div>
+        <div class="balance-row total">
+          <span class="k">Baseline &minus; diversion</span><span class="v" id="netValue2">&mdash;</span>
+        </div>
+        <p class="hero-note" id="perTonne"></p>
+      </div>
+    </section>
+
+    <section class="panel chartwrap">
+      <h2>Where the number comes from</h2>
+      <div class="legend">
+        <span><i class="swatch e"></i> Emissions released</span>
+        <span><i class="swatch a"></i> Emissions avoided (credit)</span>
+      </div>
+      <div class="chart" id="chart"></div>
+      <div class="axis"><span id="axisMin"></span><span id="axisZero">0</span><span id="axisMax"></span></div>
+    </section>
+
+    <section class="panel">
+      <div class="pad"><h2>Factors and provenance</h2></div>
+      <div class="scroller">
+        <table>
+          <thead>
+            <tr><th scope="col">Stage</th><th scope="col">Factor</th><th scope="col">Unit</th><th scope="col">Source</th><th scope="col">Year</th></tr>
+          </thead>
+          <tbody id="provenance"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel pad">
+      <h2>Method, and what this is not</h2>
+      <p class="prose" style="margin-top:12px">
+        The model is attributional and cradle-to-grave. The <strong>baseline</strong> is what
+        diversion avoids: landfill disposal plus the haul to the landfill the material would
+        otherwise have used. The <strong>diversion scenario</strong> is what it costs: the haul to
+        the reprocessor or reuse destination, the reprocessing or reuse-preparation energy, and a
+        negative term crediting the virgin production the recovered material displaces. Net avoided
+        emissions are the baseline minus the diversion scenario, so a positive number is a benefit.
+      </p>
+      <p class="prose">
+        Every factor is secondary data from a published dataset &mdash; UK DESNZ conversion factors,
+        the ICE embodied-carbon database, and WRAP &mdash; and each is cited above with its year and
+        data quality. Transport is modelled one-way and laden, with no allocation of the return leg.
+        Capital goods, commuting, packaging and the use phase are outside the boundary.
+      </p>
+      <div class="notice" style="margin-top:16px">
+        This is an attributional LCA built on published secondary data. It has <strong>not</strong>
+        had the independent critical review that ISO 14044 &sect;6.3 requires for a comparative
+        assertion disclosed to the public. Treat the results as internal decision support, not as a
+        certified LCA.
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    <span>Functional unit: diversion of 1 tonne from landfill, UK.</span>
+    <span><a href="https://github.com/dodsy4/projectdivert/blob/main/docs/lca-methodology.md">Full methodology</a></span>
+    <span><a href="https://github.com/dodsy4/projectdivert">Source</a></span>
+  </footer>
+</div>
+
+<script>
+// Emission-factor dataset, injected at build time from
+// data/lca/emission_factors.csv by scripts/build_lca_demo.py.
+const FACTORS = /*__FACTORS__*/[];
+
+// A faithful port of project_divert_lca.py. Stage order, the wildcard lookup,
+// the optional-stage warnings and the arithmetic mirror the Python engine;
+// scripts/verify_lca_demo.py checks this port against it over every material,
+// pathway and a spread of masses and distances.
+const MILES_TO_KM = 1.609344;
+const WILDCARD = '*';
+const REQUIRED_STAGES = ['landfill_disposal', 'virgin_production_avoided'];
+const STAGE_LABELS = {
+  landfill_disposal: 'Landfill disposal',
+  landfill_transport: 'Haul to landfill',
+  collection_transport: 'Haul to reprocessor',
+  reprocessing: 'Reprocessing',
+  reuse_processing: 'Reuse preparation',
+  virgin_production_avoided: 'Virgin production avoided'
+};
+
+function norm(name) {
+  return String(name == null ? '' : name).replace(/ /g, ' ').trim().toLowerCase().split(/\s+/).join(' ');
+}
+
+const INDEX = new Map();
+for (const f of FACTORS) {
+  INDEX.set((f.material === WILDCARD ? WILDCARD : norm(f.material)) + '|' + f.stage, f);
+}
+
+function lookup(material, stage) {
+  return INDEX.get(norm(material) + '|' + stage) || INDEX.get(WILDCARD + '|' + stage) || null;
+}
+
+function availableMaterials() {
+  const seen = new Set();
+  for (const f of FACTORS) if (f.material !== WILDCARD) seen.add(f.material);
+  return Array.from(seen).sort(function (a, b) { return a.localeCompare(b); });
+}
+
+/** Format like Python's "%.{sig}g", which the stage detail strings use. */
+function g(x, sig) {
+  if (!isFinite(x)) return String(x);
+  if (x === 0) return '0';
+  const exp = Math.floor(Math.log10(Math.abs(x)));
+  if (exp < -4 || exp >= sig) {
+    const parts = x.toExponential(sig - 1).split('e');
+    let mantissa = parts[0];
+    if (mantissa.indexOf('.') >= 0) mantissa = mantissa.replace(/0+$/, '').replace(/\.$/, '');
+    const e = parseInt(parts[1], 10);
+    return mantissa + 'e' + (e < 0 ? '-' : '+') + String(Math.abs(e)).padStart(2, '0');
+  }
+  let s = x.toFixed(Math.max(0, sig - 1 - exp));
+  if (s.indexOf('.') >= 0) s = s.replace(/0+$/, '').replace(/\.$/, '');
+  return s;
+}
+
+function citation(ef) {
+  return {
+    stage: ef.stage, value: ef.value, unit: ef.unit, gwp_basis: ef.gwp_basis,
+    source: ef.source, source_year: ef.source_year, source_url: ef.source_url,
+    data_quality: ef.data_quality
+  };
+}
+
+function assessDiversion(material, massTonnes, collectionKm, landfillKm, pathway) {
+  pathway = String(pathway || 'recycle').trim().toLowerCase();
+  if (pathway !== 'recycle' && pathway !== 'reuse') throw new Error("pathway must be 'recycle' or 'reuse'");
+  if (!(massTonnes > 0)) throw new Error('Diverted mass must be greater than zero.');
+  collectionKm = Math.max(0, Number(collectionKm) || 0);
+  landfillKm = Math.max(0, Number(landfillKm) || 0);
+
+  for (const stage of REQUIRED_STAGES) {
+    if (!lookup(material, stage)) {
+      throw new Error('No "' + stage + '" factor is configured for material "' + material + '".');
+    }
+  }
+
+  const stages = [];
+  const warnings = [];
+
+  function addTransport(stage, distanceKm, scenario) {
+    const ef = lookup(material, stage);
+    if (!ef) { warnings.push("Missing transport factor '" + stage + "'; treated as 0."); return 0; }
+    const kg = ef.value * massTonnes * distanceKm;
+    stages.push({
+      stage: stage, kg_co2e: kg, scenario: scenario, factor: citation(ef),
+      detail: g(ef.value, 4) + ' kg CO2e/t·km × ' + g(massTonnes, 3) + ' t × ' + g(distanceKm, 3) + ' km'
+    });
+    return kg;
+  }
+
+  function addProcess(stage, scenario, sign, optional) {
+    const ef = lookup(material, stage);
+    if (!ef) {
+      if (optional) { warnings.push("No '" + stage + "' factor for '" + material + "'; treated as 0."); return 0; }
+      throw new Error("No '" + stage + "' factor for material '" + material + "'.");
+    }
+    const kg = sign * ef.value * massTonnes;
+    stages.push({
+      stage: stage, kg_co2e: kg, scenario: scenario, factor: citation(ef),
+      detail: (sign < 0 ? '−' : '') + g(ef.value, 4) + ' kg CO2e/t × ' + g(massTonnes, 3) + ' t'
+    });
+    return kg;
+  }
+
+  let baseline = 0;
+  baseline += addProcess('landfill_disposal', 'baseline', 1, false);
+  baseline += addTransport('landfill_transport', landfillKm, 'baseline');
+
+  let diversion = 0;
+  diversion += addTransport('collection_transport', collectionKm, 'diversion');
+  diversion += addProcess(pathway === 'recycle' ? 'reprocessing' : 'reuse_processing', 'diversion', 1, true);
+  diversion += addProcess('virgin_production_avoided', 'diversion', -1, false);
+
+  const provenance = [];
+  const seen = new Set();
+  for (const s of stages) {
+    const key = s.factor.source + '|' + s.factor.source_year;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    provenance.push(s.factor);
+  }
+
+  return {
+    material: material, mass_tonnes: massTonnes, pathway: pathway,
+    baseline_kg: baseline, diversion_kg: diversion,
+    net_avoided_kg: baseline - diversion,
+    net_avoided_per_tonne: massTonnes ? (baseline - diversion) / massTonnes : 0,
+    stages: stages, factor_provenance: provenance, warnings: warnings
+  };
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { assessDiversion: assessDiversion, availableMaterials: availableMaterials, g: g };
+}
+</script>
+
+<script>
+// ---------------------------------------------------------------------------
+// Presentation
+// ---------------------------------------------------------------------------
+(function () {
+  if (typeof document === 'undefined') return;
+
+  const $ = function (id) { return document.getElementById(id); };
+  const els = {
+    material: $('material'), mass: $('mass'), massUnit: $('massUnit'),
+    collection: $('collection'), landfill: $('landfill'), distUnit: $('distUnit'),
+    distUnitEcho: $('distUnitEcho'), warnings: $('warnings'),
+    netValue: $('netValue'), netValue2: $('netValue2'), netUnit: $('netUnit'),
+    netNote: $('netNote'), perTonne: $('perTonne'),
+    baselineValue: $('baselineValue'), diversionValue: $('diversionValue'),
+    chart: $('chart'), axisMin: $('axisMin'), axisMax: $('axisMax'),
+    provenance: $('provenance')
+  };
+  let pathway = 'recycle';
+
+  const materials = availableMaterials();
+  for (const m of materials) {
+    const opt = document.createElement('option');
+    opt.value = m; opt.textContent = m;
+    els.material.appendChild(opt);
+  }
+  els.material.value = materials.indexOf('Ferrous metals') >= 0 ? 'Ferrous metals' : materials[0];
+
+  function fmt(kg) {
+    const abs = Math.abs(kg);
+    const digits = abs >= 1000 ? 0 : abs >= 100 ? 1 : abs >= 1 ? 2 : 3;
+    return kg.toLocaleString('en-GB', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  }
+
+  function signed(kg) { return (kg > 0 ? '+' : kg < 0 ? '−' : '') + fmt(Math.abs(kg)); }
+
+  function readInputs() {
+    const massRaw = parseFloat(els.mass.value);
+    const massTonnes = els.massUnit.value === 'kg' ? massRaw / 1000 : massRaw;
+    const toKm = els.distUnit.value === 'mi' ? MILES_TO_KM : 1;
+    return {
+      material: els.material.value,
+      massTonnes: massTonnes,
+      collectionKm: (parseFloat(els.collection.value) || 0) * toKm,
+      landfillKm: (parseFloat(els.landfill.value) || 0) * toKm
+    };
+  }
+
+  function renderWarnings(messages) {
+    els.warnings.textContent = '';
+    if (!messages.length) { els.warnings.hidden = true; return; }
+    els.warnings.hidden = false;
+    for (const message of messages) {
+      const div = document.createElement('div');
+      div.className = 'notice';
+      div.textContent = message;
+      els.warnings.appendChild(div);
+    }
+  }
+
+  function renderChart(result) {
+    els.chart.textContent = '';
+    const values = result.stages.map(function (s) { return s.kg_co2e; });
+    const lo = Math.min(0, Math.min.apply(null, values));
+    const hi = Math.max(0, Math.max.apply(null, values));
+    const span = (hi - lo) || 1;
+    const zeroPct = ((0 - lo) / span) * 100;
+
+    for (const s of result.stages) {
+      const row = document.createElement('div');
+      row.className = 'bar-row';
+
+      const label = document.createElement('div');
+      label.className = 'bar-label';
+      const scen = document.createElement('span');
+      scen.className = 'scen';
+      scen.textContent = s.scenario === 'baseline' ? 'Baseline' : 'Diversion';
+      label.appendChild(scen);
+      label.appendChild(document.createTextNode(STAGE_LABELS[s.stage] || s.stage));
+      row.appendChild(label);
+
+      const track = document.createElement('div');
+      track.className = 'track';
+      const zero = document.createElement('i');
+      zero.className = 'zero';
+      zero.style.left = zeroPct + '%';
+      track.appendChild(zero);
+
+      const bar = document.createElement('i');
+      const widthPct = (Math.abs(s.kg_co2e) / span) * 100;
+      bar.className = 'bar' + (s.kg_co2e < 0 ? ' credit' : '');
+      bar.style.width = Math.max(widthPct, 0.4) + '%';
+      bar.style.left = (s.kg_co2e < 0 ? zeroPct - widthPct : zeroPct) + '%';
+      bar.title = s.detail + '  —  ' + s.factor.source;
+      track.appendChild(bar);
+      row.appendChild(track);
+
+      const val = document.createElement('div');
+      val.className = 'bar-val';
+      val.textContent = signed(s.kg_co2e);
+      val.title = s.detail;
+      row.appendChild(val);
+
+      els.chart.appendChild(row);
+    }
+    els.axisMin.textContent = fmt(lo) + ' kg';
+    els.axisMax.textContent = '+' + fmt(hi) + ' kg';
+  }
+
+  function renderProvenance(result) {
+    els.provenance.textContent = '';
+    for (const s of result.stages) {
+      const tr = document.createElement('tr');
+
+      const stage = document.createElement('td');
+      stage.textContent = STAGE_LABELS[s.stage] || s.stage;
+      tr.appendChild(stage);
+
+      const value = document.createElement('td');
+      value.className = 'num';
+      value.textContent = g(s.factor.value, 4);
+      tr.appendChild(value);
+
+      const unit = document.createElement('td');
+      unit.className = 'num';
+      unit.style.textAlign = 'left';
+      unit.textContent = s.factor.unit;
+      tr.appendChild(unit);
+
+      const source = document.createElement('td');
+      source.className = 'src';
+      if (s.factor.source_url) {
+        const a = document.createElement('a');
+        a.href = s.factor.source_url;
+        a.textContent = s.factor.source;
+        a.rel = 'noreferrer';
+        source.appendChild(a);
+      } else {
+        source.textContent = s.factor.source;
+      }
+      if (s.factor.data_quality) {
+        const q = document.createElement('div');
+        q.style.color = 'var(--ink-3)';
+        q.style.fontSize = '12px';
+        q.textContent = s.factor.data_quality + ' · ' + s.factor.gwp_basis;
+        source.appendChild(q);
+      }
+      tr.appendChild(source);
+
+      const year = document.createElement('td');
+      year.className = 'num';
+      year.textContent = s.factor.source_year || '—';
+      tr.appendChild(year);
+
+      els.provenance.appendChild(tr);
+    }
+  }
+
+  function otherPathwayNote(input) {
+    const other = pathway === 'recycle' ? 'reuse' : 'recycle';
+    try {
+      const r = assessDiversion(input.material, input.massTonnes, input.collectionKm, input.landfillKm, other);
+      if (r.warnings.length) {
+        return 'No ' + other + ' route is configured for this material, so only ' + pathway + ' is assessed.';
+      }
+      const delta = r.net_avoided_kg;
+      return other.charAt(0).toUpperCase() + other.slice(1) + ' instead would avoid ' + fmt(delta) + ' kg CO2e.';
+    } catch (err) {
+      return '';
+    }
+  }
+
+  function update() {
+    els.distUnitEcho.textContent = els.distUnit.value === 'mi' ? 'miles' : 'km';
+    const input = readInputs();
+    let result;
+    try {
+      result = assessDiversion(input.material, input.massTonnes, input.collectionKm, input.landfillKm, pathway);
+    } catch (err) {
+      renderWarnings([err.message]);
+      els.netValue.textContent = '—';
+      els.netValue2.textContent = '—';
+      els.baselineValue.textContent = '—';
+      els.diversionValue.textContent = '—';
+      els.chart.textContent = '';
+      els.provenance.textContent = '';
+      els.netNote.textContent = '';
+      els.perTonne.textContent = '';
+      return;
+    }
+
+    renderWarnings(result.warnings);
+    const net = result.net_avoided_kg;
+    els.netValue.textContent = fmt(net);
+    els.netValue.className = 'hero-num ' + (net >= 0 ? 'pos' : 'neg');
+    els.netUnit.textContent = 'kg CO2e ' + (net >= 0 ? 'avoided' : 'added') + ', ' + pathway;
+    els.netValue2.textContent = signed(net) + ' kg';
+    els.baselineValue.textContent = signed(result.baseline_kg) + ' kg';
+    els.diversionValue.textContent = signed(result.diversion_kg) + ' kg';
+    els.perTonne.textContent = fmt(result.net_avoided_per_tonne) + ' kg CO2e per tonne diverted.';
+    els.netNote.textContent = otherPathwayNote(input);
+
+    renderChart(result);
+    renderProvenance(result);
+  }
+
+  document.getElementById('controls').addEventListener('input', update);
+  document.getElementById('controls').addEventListener('change', update);
+  for (const btn of document.querySelectorAll('.toggle button')) {
+    btn.addEventListener('click', function () {
+      pathway = this.dataset.pathway;
+      for (const b of document.querySelectorAll('.toggle button')) {
+        b.setAttribute('aria-pressed', String(b === this));
+      }
+      update();
+    });
+  }
+  document.getElementById('controls').addEventListener('submit', function (e) { e.preventDefault(); });
+
+  update();
+})();
+</script>

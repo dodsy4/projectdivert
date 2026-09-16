@@ -20,6 +20,7 @@ It began as a materials marketplace with a Scope 3 carbon accounting engine, and
 - Cited emission factors in a versioned dataset (`data/lca/emission_factors.csv`) drawn from UK DESNZ conversion factors, the ICE embodied-carbon database, and WRAP
 - Per-stage breakdown (disposal, transport, reprocessing, avoided virgin production) with source provenance; real road distances via the Google Maps Distance Matrix API
 - Methodology, system boundary and limitations documented in [`docs/lca-methodology.md`](./docs/lca-methodology.md)
+- [`docs/lca-demo.html`](./docs/lca-demo.html) is a standalone, self-contained page that runs the whole model in the browser on the same cited dataset — no database, API keys or backend. Built by `scripts/build_lca_demo.py`; `scripts/verify_lca_demo.py` checks the JavaScript port against the Python engine across every material, both pathways and a spread of masses and distances (544 cases) and fails on any disagreement
 
 **Waste removal & dispatch**
 - Customers submit waste-removal requests; drivers receive and accept dispatch offers
