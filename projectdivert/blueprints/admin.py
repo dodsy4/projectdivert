@@ -200,7 +200,7 @@ def admin_dispatch_override_form():
 
     request_id = _to_int_or_none(request.form.get('request_id'))
     return_query = str(request.form.get('return_query') or '').strip()
-    redirect_target = url_for('admin_dispatch_board')
+    redirect_target = url_for('admin.admin_dispatch_board')
     if return_query:
         redirect_target = '{}?{}'.format(redirect_target, return_query.lstrip('?'))
 
@@ -307,7 +307,7 @@ def admin_dispatch_timeline(request_id):
     booking = db.session.get(WasteRemovalRequest, request_id)
     if not booking:
         flash('Waste request not found.')
-        return redirect(url_for('admin_dispatch_board'))
+        return redirect(url_for('admin.admin_dispatch_board'))
 
     try:
         include_actor_auth = _parse_optional_bool_query(
@@ -366,7 +366,7 @@ def admin_dispatch_incident_form():
     action = (str(request.form.get('action') or '').strip().lower() or '')
     notes = (str(request.form.get('notes') or '').strip()[:1000] or None)
     return_query = str(request.form.get('return_query') or '').strip()
-    redirect_target = url_for('admin_dispatch_board')
+    redirect_target = url_for('admin.admin_dispatch_board')
     if return_query:
         redirect_target = '{}?{}'.format(redirect_target, return_query.lstrip('?'))
 
@@ -472,7 +472,7 @@ def admin_dispatch_incident_owner_form():
     raw_owner_user_id = str(request.form.get('owner_admin_user_id') or '').strip()
     notes = (str(request.form.get('notes') or '').strip()[:1000] or None)
     return_query = str(request.form.get('return_query') or '').strip()
-    redirect_target = url_for('admin_dispatch_board')
+    redirect_target = url_for('admin.admin_dispatch_board')
     if return_query:
         redirect_target = '{}?{}'.format(redirect_target, return_query.lstrip('?'))
 

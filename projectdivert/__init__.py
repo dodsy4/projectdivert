@@ -11,7 +11,8 @@ Layering, strictly one-directional::
 
 import logging
 import os
-from logging import FileHandler, Formatter
+import sys
+from logging import FileHandler, Formatter, StreamHandler
 
 from flask import Flask
 
@@ -48,19 +49,36 @@ def _register_template_filters(app):
 
 
 def _configure_logging(app):
+    """Send application logs to error.log and to stdout.
+
+    Idempotent: create_app may run more than once in a process (tests, a worker
+    that also builds an app), and app.logger is the same logger object as this
+    package's logger, so handlers would otherwise be attached repeatedly and
+    every line would appear two or more times.
+    """
     if app.debug or app.config.get('TESTING'):
         return
-    file_handler = FileHandler('error.log')
-    file_handler.setFormatter(
-        Formatter('%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]')
-    )
-    file_handler.setLevel(logging.INFO)
-    app.logger.setLevel(logging.INFO)
-    app.logger.addHandler(file_handler)
-    # The service layer logs through module loggers under the package name.
+
     package_logger = logging.getLogger(__name__)
-    package_logger.setLevel(logging.INFO)
-    package_logger.addHandler(file_handler)
+    targets = [app.logger]
+    if package_logger is not app.logger:
+        targets.append(package_logger)
+
+    formatter = Formatter(
+        '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+    )
+    for logger in targets:
+        if any(getattr(h, '_projectdivert', False) for h in logger.handlers):
+            continue
+        # stdout as well as the file: on a container platform the file handler
+        # writes to a disk nobody reads and that vanishes on redeploy, so a
+        # production traceback would be invisible in the platform's log stream.
+        for handler in (FileHandler('error.log'), StreamHandler(sys.stdout)):
+            handler.setFormatter(formatter)
+            handler.setLevel(logging.INFO)
+            handler._projectdivert = True
+            logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
 
 
 def create_app(config_object='config'):
