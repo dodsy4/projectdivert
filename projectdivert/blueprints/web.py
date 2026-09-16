@@ -681,7 +681,7 @@ def request_material_form(mat_id):
         company_email = (current_app.config.get('REQUEST_NOTIFICATION_EMAIL') or '').strip()
         if company_email:
             base_url = (current_app.config.get('APP_BASE_URL') or request.url_root.rstrip('/')).rstrip('/')
-            listing_url = '{}{}'.format(base_url, url_for('show_material', material_id=mat_id))
+            listing_url = '{}{}'.format(base_url, url_for('web.show_material', material_id=mat_id))
             subject = 'New material request: {}'.format(material.waste_stream or 'Material')
             body = (
                 'You received a new material request.\n\n'
