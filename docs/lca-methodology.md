@@ -29,7 +29,7 @@ assertions are not disclosed to the public without prior critical review.
 **Diversion of 1 tonne of a given material from landfill, in the UK.**
 
 User inputs are converted to tonnes before assessment (`_diversion_mass_tonnes`
-in `app.py`): tonnes and kilograms directly; carpet tiles by area at
+in `projectdivert/services/lca_glue.py`): tonnes and kilograms directly; carpet tiles by area at
 ~4.3 kg/m²; per-item quantities via an approximate unit-mass table.
 
 ### 1.3 System boundary

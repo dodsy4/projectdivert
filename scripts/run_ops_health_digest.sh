@@ -16,7 +16,7 @@ if [[ -f "${VENV_ACTIVATE}" ]]; then
   source "${VENV_ACTIVATE}"
 fi
 
-export FLASK_APP="${FLASK_APP:-app.py}"
+export FLASK_APP="${FLASK_APP:-wsgi.py}"
 
 if [[ -z "${SQLALCHEMY_DATABASE_URI:-}" && -z "${DATABASE_URL:-}" && -z "${PGHOST:-}" ]]; then
   echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] ops-health-digest skipped: database env not configured"

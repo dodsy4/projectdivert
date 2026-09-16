@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-from tests.test_app_smoke import _auth_header, _create_user
+from tests.helpers import _auth_header, _create_user
 
 
 def _audit_rows(app_context, **filters):

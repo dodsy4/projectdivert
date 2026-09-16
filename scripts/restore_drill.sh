@@ -353,13 +353,20 @@ if [[ ${SKIP_APP_CHECK} -eq 0 ]]; then
 import os
 from sqlalchemy.engine import make_url
 import config
+import importlib
 
 url = make_url(config.SQLALCHEMY_DATABASE_URI)
 restored_url = url.set(database=os.environ["SCRATCH_DB"])
 os.environ["SQLALCHEMY_DATABASE_URI"] = str(restored_url)
 os.environ["DATABASE_URL"] = str(restored_url)
 
-from app import app
+# config reads the environment at import time, so it must be reloaded after the
+# scratch URL is set - otherwise the drill boots against the live database.
+importlib.reload(config)
+
+from projectdivert import create_app
+
+app = create_app()
 
 client = app.test_client()
 response = client.get("/")

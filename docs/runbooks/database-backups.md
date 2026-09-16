@@ -81,7 +81,7 @@ Or run the scripted drill:
 ```bash
 cd /Users/louisdods/Documents/GitHub/projectdivert
 source .venv/bin/activate
-export FLASK_APP=app.py
+export FLASK_APP=wsgi.py
 PG_BIN_DIR=/opt/homebrew/opt/postgresql@18/bin \
   bash ./scripts/restore_drill.sh --backup-file "$HOME/Backups/projectdivert/projectdivert-db_neondb_YYYYMMDDTHHMMSSZ.dump"
 ```

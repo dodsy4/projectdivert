@@ -1,5 +1,9 @@
 # Project Divert
 
+[![CI](https://github.com/dodsy4/projectdivert/actions/workflows/ci.yml/badge.svg)](https://github.com/dodsy4/projectdivert/actions/workflows/ci.yml)
+[![Secret Scan](https://github.com/dodsy4/projectdivert/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/dodsy4/projectdivert/actions/workflows/secret-scan.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+
 Project Divert is a full-stack platform for diverting surplus construction and office materials away from landfill — matching materials with reuse/recycling destinations, coordinating waste-removal logistics with real-time driver dispatch, and quantifying the carbon impact of every diversion.
 
 It began as a materials marketplace with a Scope 3 carbon accounting engine, and has grown into a two-sided operational platform: a Flask backend handling everything from JWT-authenticated APIs to Stripe payments and driver compliance, and a companion Expo/React Native mobile app for customers and drivers.
@@ -16,6 +20,7 @@ It began as a materials marketplace with a Scope 3 carbon accounting engine, and
 - Cited emission factors in a versioned dataset (`data/lca/emission_factors.csv`) drawn from UK DESNZ conversion factors, the ICE embodied-carbon database, and WRAP
 - Per-stage breakdown (disposal, transport, reprocessing, avoided virgin production) with source provenance; real road distances via the Google Maps Distance Matrix API
 - Methodology, system boundary and limitations documented in [`docs/lca-methodology.md`](./docs/lca-methodology.md)
+- [`docs/lca-demo.html`](./docs/lca-demo.html) is a standalone, self-contained page that runs the whole model in the browser on the same cited dataset — no database, API keys or backend. Built by `scripts/build_lca_demo.py`; `scripts/verify_lca_demo.py` checks the JavaScript port against the Python engine across every material, both pathways and a spread of masses and distances (544 cases) and fails on any disagreement
 
 **Waste removal & dispatch**
 - Customers submit waste-removal requests; drivers receive and accept dispatch offers
@@ -30,6 +35,10 @@ It began as a materials marketplace with a Scope 3 carbon accounting engine, and
 - `AuthAuditEvent` — dedicated trail for authentication events
 - `AuditEvent` — application-wide trail: every state-changing request is captured (actor, IP, action, entity, status) by an `after_request` hook, with explicit before/after diffs recorded at critical sites (dispatch, payments, compliance, status changes)
 - Admin views: `GET /admin/audit` (HTML) and `GET /api/v1/admin/audit-events` (JSON)
+
+**API documentation**
+- OpenAPI 3.1 document generated from the application itself and served at `/api/v1/openapi.json`, with a rendered reference at `/api/docs`
+- A contract test fails the build if a route is added, removed or renamed without regenerating the spec, so the documentation cannot drift from the code
 
 **Authentication & security**
 - JWT-based auth with refresh tokens, email verification, and password reset flows
@@ -48,7 +57,51 @@ It began as a materials marketplace with a Scope 3 carbon accounting engine, and
 
 **Backend:** Python, Flask, SQLAlchemy, Alembic, PostgreSQL, Redis, PyJWT, Stripe API, boto3 (S3-compatible storage), SendGrid, Pandas
 **Mobile:** Expo, React Native, TypeScript
-**Ops:** Gunicorn, Render (deployment), pytest, GitHub Actions (secret scanning)
+**Ops:** Gunicorn, RQ (background jobs), Render (deployment), pytest, GitHub Actions (tests, mobile typecheck, gitleaks secret scanning)
+
+## Architecture
+
+The backend is a Flask application package assembled by an app factory
+(`create_app`). Modules are layered and the import graph is a strict DAG,
+verified before the split — nothing imports sideways or back up a layer:
+
+```
+projectdivert/
+  __init__.py       create_app(): config, extensions, blueprints, hooks, CLI, logging
+  extensions.py     db / migrate / login_manager / moment, created unbound
+  models/           29 SQLAlchemy models grouped by domain
+  services/         business logic: auth, dispatch, billing, compliance,
+                    payments, audit, events, notifications, LCA adapters
+  blueprints/       HTTP layer only — parse, authorise, delegate, serialise
+    api/            the versioned JSON API under /api/v1
+  hooks.py          request id, table bootstrap, audit capture, error pages
+  cli.py            seeding, token cleanup, ops digest, billing follow-ups
+
+services/utils → extensions → models → services → blueprints → app
+```
+
+Because the services layer never imports the application, it is callable from a
+request, a CLI command, an RQ worker or a unit test without change, and it logs
+through module loggers rather than `app.logger`.
+
+A request takes one of two paths. Browser traffic reaches the `web` and `admin`
+blueprints, which render Jinja templates against a Flask-Login session. Mobile
+and integration traffic reaches the `/api/v1` blueprints, which verify a JWT via
+the `jwt_required` decorator and return JSON. Both paths converge on the same
+services, and every successful state-changing request — on either path — is
+captured by the `after_request` audit hook, keyed by URL rule rather than
+endpoint name.
+
+Three modules deliberately sit outside the package. `project_divert_lca.py` is
+the ISO 14040/44 engine: pure Python with no Flask import, so it can be read,
+tested and cited on its own (`docs/lca-methodology.md` does exactly that).
+`project_divert_functions.py` holds the legacy CSV/XLSX reference loaders, and
+`forms.py` the WTForms definitions.
+
+The server-rendered front end is intentionally plain — Bootstrap 3 and jQuery,
+inherited from the project's first version. The engineering effort here is in
+the backend, the carbon model and the operational tooling rather than the
+browser layer; the mobile app is where the modern client work lives.
 
 ## Getting started
 
@@ -57,6 +110,7 @@ See [`DEPLOY.md`](./DEPLOY.md) for full backend deployment instructions (environ
 Quick local backend setup:
 ```bash
 pip install -r requirements.txt
+export FLASK_APP=wsgi.py
 flask db upgrade
 flask run
 ```
@@ -69,13 +123,25 @@ docker run --env-file .env -p 5000:5000 project-divert
 
 ## Operations
 
-This repo includes runbooks for release/rollback, database backups, restore drills, and incident response under [`docs/runbooks/`](./docs/runbooks/), plus operational scripts under [`scripts/`](./scripts/) for daily health digests, backup automation, and staging smoke tests.
+This repo includes runbooks for release/rollback, database backups, restore drills, and incident response under [`docs/runbooks/`](./docs/runbooks/), plus operational scripts under [`scripts/`](./scripts/) for backup automation and staging smoke tests.
+
+Scheduled work — ops health digests, dispatch incident maintenance, billing
+follow-ups and auth token cleanup — runs as RQ jobs. A cron service enqueues,
+a worker executes: `flask enqueue <job>` and `python -m projectdivert.tasks.worker`.
+Each job calls the same service function as its CLI equivalent, and falls back
+to running inline when no queue is configured.
 
 ## Testing
 
 ```bash
+pip install -r requirements-dev.txt
 pytest
 ```
+
+The suite is split by surface: `tests/unit` for service-layer logic and app
+assembly, `tests/web` for the server-rendered routes, and `tests/api` for the
+JSON API — including a contract test that fails if `docs/openapi.json` drifts
+from the routes the application actually serves.
 
 ## Author
 

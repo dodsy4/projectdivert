@@ -4,13 +4,15 @@ services:
     env: python
     plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    startCommand: gunicorn wsgi:app
     autoDeploy: true
-    envVars:
+    envVars: &backend_env
       - key: FLASK_ENV
         value: production
       - key: FLASK_DEBUG
         value: "0"
+      - key: FLASK_APP
+        value: wsgi.py
       - key: SECRET_KEY
         generateValue: true
       - key: SESSION_COOKIE_SECURE
@@ -23,6 +25,11 @@ services:
         fromDatabase:
           name: project-divert-db
           property: connectionString
+      - key: RQ_REDIS_URL
+        fromService:
+          type: redis
+          name: project-divert-redis
+          property: connectionString
       - key: GOOGLE_MAPS_API_KEY
         sync: false
       - key: MAIL_PROVIDER
@@ -33,6 +40,55 @@ services:
         sync: false
       - key: REQUEST_NOTIFICATION_EMAIL
         sync: false
+
+  # Executes queued jobs. Scheduling lives in the cron services below: they
+  # enqueue, this worker runs the work.
+  - type: worker
+    name: project-divert-worker
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m projectdivert.tasks.worker
+    autoDeploy: true
+    envVars: *backend_env
+
+  - type: cron
+    name: project-divert-ops-health
+    env: python
+    schedule: "0 * * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: flask enqueue ops-health-digest
+    envVars: *backend_env
+
+  - type: cron
+    name: project-divert-dispatch-incidents
+    env: python
+    schedule: "*/15 * * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: flask enqueue dispatch-incident-maintenance
+    envVars: *backend_env
+
+  - type: cron
+    name: project-divert-billing-followups
+    env: python
+    schedule: "30 8 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: flask enqueue offline-billing-followups
+    envVars: *backend_env
+
+  - type: cron
+    name: project-divert-auth-token-cleanup
+    env: python
+    schedule: "15 3 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: flask enqueue auth-token-cleanup
+    envVars: *backend_env
+
+  - type: redis
+    name: project-divert-redis
+    plan: starter
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
 
 databases:
   - name: project-divert-db

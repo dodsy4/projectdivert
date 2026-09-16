@@ -25,7 +25,7 @@ Run these in order:
 ```bash
 cd /Users/louisdods/Documents/GitHub/projectdivert
 source .venv/bin/activate
-export FLASK_APP=app.py
+export FLASK_APP=wsgi.py
 bash ./scripts/production_preflight.sh
 python -m flask db heads
 python -m flask db current

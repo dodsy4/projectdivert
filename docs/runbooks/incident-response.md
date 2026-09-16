@@ -68,7 +68,7 @@ Run manually:
 ```bash
 cd /Users/louisdods/Documents/GitHub/projectdivert
 source .venv/bin/activate
-export FLASK_APP=app.py
+export FLASK_APP=wsgi.py
 ./scripts/ops_health_digest.sh --dry-run --include-ok
 ```
 
