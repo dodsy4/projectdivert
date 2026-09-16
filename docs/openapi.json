@@ -3596,6 +3596,46 @@
         ]
       }
     },
+    "/api/v1/auth/me": {
+      "get": {
+        "description": "Requires a bearer token with role: `admin`, `customer`, `driver`. Error messages returned by this endpoint: \"Account not found\".",
+        "operationId": "api_auth_me",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "user": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Auth me",
+        "tags": [
+          "Authentication"
+        ]
+      }
+    },
     "/api/v1/auth/password-reset/confirm": {
       "post": {
         "description": "Public endpoint: no bearer token required. Error messages returned by this endpoint: \"Failed to reset password\".",
@@ -4294,6 +4334,93 @@
       }
     },
     "/api/v1/waste-requests": {
+      "get": {
+        "description": "Requires a bearer token with role: `admin`, `customer`, `driver`. Error messages returned by this endpoint: \"Invalid scope\"; \"Token missing email claim\"; \"limit and offset must be integers\".",
+        "operationId": "api_list_waste_requests",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "count": {},
+                    "limit": {},
+                    "offset": {},
+                    "requests": {},
+                    "scope": {},
+                    "total": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List waste requests",
+        "tags": [
+          "Waste requests"
+        ]
+      },
       "post": {
         "description": "Requires a bearer token with role: `admin`, `customer`. Error messages returned by this endpoint: \"Failed to create waste request\"; \"Missing required field(s)\"; \"Token missing email claim\"; \"custom_material_type is required when material_type is Other\"; \"match_radius_miles must be a positive number\"; \"scheduled_pickup_at must be in the future\"; \"waste_amount must be a positive number\".",
         "operationId": "api_create_waste_request",

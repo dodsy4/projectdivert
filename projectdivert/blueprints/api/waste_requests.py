@@ -369,3 +369,82 @@ def api_get_latest_vehicle_location(request_id):
             'latest_location': _serialize_vehicle_location(location_row),
         }
     )
+
+
+#: How the list endpoint scopes rows, per role. A customer can only ever see
+#: their own requests regardless of what they ask for.
+_LIST_SCOPES = ('mine', 'assigned', 'available', 'all')
+
+
+@bp.route('/api/v1/waste-requests', methods=['GET'])
+@jwt_required(roles={'customer', 'driver', 'admin'})
+def api_list_waste_requests():
+    """List waste requests visible to the caller.
+
+    One endpoint rather than three, scoped by role so the caller cannot widen
+    its own view:
+
+      customer  always their own requests, whatever scope is asked for
+      driver    'assigned' (default) or 'available' open jobs to claim
+      admin     any scope, 'all' by default
+    """
+    role = _current_jwt_role()
+    email = (_current_jwt_email() or '').lower()
+    user_id = _current_jwt_user_id()
+
+    scope = (request.args.get('scope') or '').strip().lower()
+    if scope and scope not in _LIST_SCOPES:
+        return jsonify({'error': 'Invalid scope', 'allowed_scopes': sorted(_LIST_SCOPES)}), 400
+
+    query = WasteRemovalRequest.query
+    if role == 'customer':
+        if not email:
+            return jsonify({'error': 'Token missing email claim'}), 403
+        query = query.filter(WasteRemovalRequest.requester_email == email)
+        scope = 'mine'
+    elif role == 'driver':
+        scope = scope if scope in ('assigned', 'available') else 'assigned'
+        if scope == 'assigned':
+            query = query.filter(WasteRemovalRequest.assigned_driver_user_id == user_id)
+        else:
+            query = query.filter(
+                WasteRemovalRequest.status == 'pending',
+                WasteRemovalRequest.assigned_driver_user_id.is_(None),
+            )
+    else:
+        scope = scope or 'all'
+        if scope == 'mine':
+            query = query.filter(WasteRemovalRequest.requester_email == email)
+        elif scope == 'assigned':
+            query = query.filter(WasteRemovalRequest.assigned_driver_user_id == user_id)
+        elif scope == 'available':
+            query = query.filter(
+                WasteRemovalRequest.status == 'pending',
+                WasteRemovalRequest.assigned_driver_user_id.is_(None),
+            )
+
+    status = (request.args.get('status') or '').strip()
+    if status:
+        query = query.filter(WasteRemovalRequest.status == status)
+
+    try:
+        limit = max(1, min(int(request.args.get('limit') or 50), 200))
+        offset = max(0, int(request.args.get('offset') or 0))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'limit and offset must be integers'}), 400
+
+    total = query.count()
+    rows = (
+        query.order_by(WasteRemovalRequest.scheduled_pickup_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return jsonify({
+        'scope': scope,
+        'count': len(rows),
+        'total': total,
+        'limit': limit,
+        'offset': offset,
+        'requests': [_serialize_waste_request(row) for row in rows],
+    })

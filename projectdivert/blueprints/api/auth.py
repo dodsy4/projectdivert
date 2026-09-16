@@ -9,7 +9,9 @@ from projectdivert.extensions import db
 from projectdivert.models.user import User
 from projectdivert.services.audit import _audit_auth_event
 from projectdivert.services.auth import _auth_password_reset_request_cooldown_seconds, _auth_require_email_verification, _auth_return_tokens_in_response, _auth_suspicious_activity_revoke_min_lockout_level, _auth_suspicious_activity_revoke_sessions_enabled, _auth_verify_request_cooldown_seconds, _consume_one_time_lifecycle_token, _decode_access_token, _encode_lifecycle_token_from_row, _extract_bearer_token, _issue_auth_payload, _issue_email_verification_token, _issue_password_reset_token, _parse_lifecycle_token, _password_reset_url_for_token, _recent_valid_one_time_token, _refresh_row_from_claims, _revoke_access_token_jti, _revoke_all_access_tokens_for_user, _revoke_all_refresh_tokens_for_user, _revoke_sessions_for_suspicious_activity, _rotate_refresh_token, _serialize_auth_user, _validate_password_strength, _verification_url_for_token
+from projectdivert.services.auth import jwt_required
 from projectdivert.services.notifications import _send_account_email
+from projectdivert.services.utils import _current_jwt_user_id
 from projectdivert.services.rate_limit import _auth_blocklist_response, _auth_login_lockout_identifiers, _auth_login_lockout_level, _auth_login_lockout_response, _auth_rate_limit_response, _clear_auth_login_failure, _record_auth_login_failure
 from projectdivert.services.utils import _is_valid_email, _normalize_email, _to_int_or_none
 
@@ -746,3 +748,19 @@ def api_auth_password_reset_confirm():
             details={'reason': 'server_error'},
         )
         return jsonify({'error': 'Failed to reset password'}), 500
+
+
+@bp.route('/api/v1/auth/me', methods=['GET'])
+@jwt_required(roles={'customer', 'driver', 'admin'})
+def api_auth_me():
+    """The account behind the presented access token.
+
+    Clients hold a token across a page reload but not the user record that came
+    back with it, so this exists to re-hydrate the session without decoding the
+    token client-side and trusting its claims.
+    """
+    user_id = _current_jwt_user_id()
+    user = db.session.get(User, user_id) if user_id else None
+    if not user or not user.is_active_user:
+        return jsonify({'error': 'Account not found'}), 404
+    return jsonify({'user': _serialize_auth_user(user)})
