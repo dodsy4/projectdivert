@@ -2,7 +2,6 @@
 
 import io
 import csv
-from datetime import datetime
 from flask import Blueprint, Response, current_app, jsonify, request
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
@@ -14,7 +13,7 @@ from projectdivert.services.billing_core import BILLING_FOLLOWUP_STATES, _billin
 from projectdivert.services.dispatch import _serialize_admin_billing_queue_item, _serialize_request_billing_workflow, _serialize_waste_request, _serialize_waste_request_snapshot
 from projectdivert.services.events import _publish_waste_request_event
 from projectdivert.services.payments import _financial_summary_for_request
-from projectdivert.services.utils import _current_jwt_email, _current_jwt_role, _current_jwt_user_id, _parse_datetime_or_error, _parse_optional_bool_query, _parse_optional_int_query
+from projectdivert.services.utils import _current_jwt_email, _current_jwt_role, _current_jwt_user_id, _parse_datetime_or_error, _parse_optional_bool_query, _parse_optional_int_query, utcnow
 
 bp = Blueprint('api_admin_billing', __name__)
 
@@ -179,7 +178,7 @@ def api_admin_export_billing_requests():
             ]
         )
 
-    filename = 'offline_billing_requests_{}.csv'.format(datetime.utcnow().strftime('%Y%m%d_%H%M%S'))
+    filename = 'offline_billing_requests_{}.csv'.format(utcnow().strftime('%Y%m%d_%H%M%S'))
     response = Response(buffer.getvalue(), mimetype='text/csv')
     response.headers['Content-Disposition'] = 'attachment; filename={}'.format(filename)
     return response
@@ -311,7 +310,7 @@ def api_admin_update_waste_request_billing(request_id):
         updated = True
 
     if updated:
-        booking.billing_updated_at = datetime.utcnow()
+        booking.billing_updated_at = utcnow()
         booking.billing_updated_by_user_id = _current_jwt_user_id()
         if billing_state == 'invoice_sent':
             current_followup_state = _normalize_billing_followup_state(booking.billing_followup_state)
@@ -405,7 +404,7 @@ def api_admin_update_waste_request_billing_followup(request_id):
         updated = True
 
     if updated:
-        booking.billing_followup_updated_at = datetime.utcnow()
+        booking.billing_followup_updated_at = utcnow()
         booking.billing_followup_updated_by_user_id = _current_jwt_user_id()
 
     if not updated:
@@ -562,7 +561,7 @@ def api_admin_create_waste_request_communication(request_id):
         except ValueError as exc:
             return jsonify({'error': str(exc)}), 400
     else:
-        occurred_at = datetime.utcnow()
+        occurred_at = utcnow()
 
     entry = _create_request_communication_log(
         booking,
@@ -797,7 +796,7 @@ def api_admin_communications_export():
             ]
         )
 
-    filename = 'communications_report_{}.csv'.format(datetime.utcnow().strftime('%Y%m%d_%H%M%S'))
+    filename = 'communications_report_{}.csv'.format(utcnow().strftime('%Y%m%d_%H%M%S'))
     response = Response(buffer.getvalue(), mimetype='text/csv')
     response.headers['Content-Disposition'] = 'attachment; filename={}'.format(filename)
     return response

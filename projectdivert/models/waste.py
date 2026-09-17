@@ -1,7 +1,7 @@
 """Waste models."""
 
-from datetime import datetime
 from projectdivert.extensions import db
+from projectdivert.services.utils import utcnow
 
 
 class WasteRemovalRequest(db.Model):
@@ -55,7 +55,7 @@ class WasteRemovalRequest(db.Model):
         db.ForeignKey('users.id'),
         index=True,
     )
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     def __repr__(self):
         return '<WasteRemovalRequest {} {}>'.format(self.id, self.material_type)
@@ -85,8 +85,8 @@ class WasteRequestCommunicationLog(db.Model):
     contact_email = db.Column(db.String(255))
     contact_phone = db.Column(db.String(120))
     customer_visible = db.Column(db.Boolean, nullable=False, default=False, index=True)
-    occurred_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    occurred_at = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     def __repr__(self):
         return '<WasteRequestCommunicationLog request={} direction={} channel={}>'.format(
@@ -125,7 +125,7 @@ class WasteRemovalMatch(db.Model):
     provider_longitude = db.Column(db.Float, nullable=False)
     distance_miles = db.Column(db.Float, nullable=False)
     match_radius_miles = db.Column(db.Float, nullable=False)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     def __repr__(self):
         return '<WasteRemovalMatch request={} provider={}>'.format(
@@ -157,9 +157,9 @@ class WasteRemovalDispatchOffer(db.Model):
     offer_rank = db.Column(db.Integer, nullable=False)
     offer_token = db.Column(db.String(64), nullable=False, unique=True, index=True)
     status = db.Column(db.String(32), nullable=False, default='offered', index=True)
-    notified_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    notified_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     responded_at = db.Column(db.DateTime)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     def __repr__(self):
         return '<WasteRemovalDispatchOffer request={} provider={} status={}>'.format(
@@ -183,9 +183,9 @@ class WasteRemovalVehicleLocation(db.Model):
     vehicle_id = db.Column(db.String(120))
     latitude = db.Column(db.Float, nullable=False)
     longitude = db.Column(db.Float, nullable=False)
-    recorded_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    recorded_at = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
     source = db.Column(db.String(32), nullable=False, default='mobile')
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     def __repr__(self):
         return '<WasteRemovalVehicleLocation request={} lat={} lon={}>'.format(
@@ -214,7 +214,7 @@ class DispatchIncidentEvent(db.Model):
     actor_email = db.Column(db.String(255), index=True)
     source = db.Column(db.String(64), nullable=False, default='system')
     details_json = db.Column(db.JSON, nullable=False, default=dict)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
 
     def __repr__(self):
         return '<DispatchIncidentEvent request={} event={} actor={}>'.format(

@@ -76,6 +76,13 @@ Use the restore drill checklist monthly and before launch:
 - CSRF protection covers every cookie-authenticated form; the `/api/v1`
   blueprints are exempt because they authenticate by Bearer token or provider
   signature rather than by cookie
+- Security headers are sent on every response: CSP, `X-Frame-Options`,
+  `X-Content-Type-Options` and `Referrer-Policy`. Set `HSTS_MAX_AGE_SECONDS`
+  (e.g. `63072000`) once HTTPS is confirmed working on the custom domain —
+  a browser that sees it will refuse plain HTTP for that long
+- The CSP still needs `'unsafe-inline'` for scripts and styles, because the
+  server-rendered pages carry inline blocks inherited from the first version of
+  the project. Moving those into `/static` is what would allow tightening it
 - Enable HTTPS custom domain
 - Enable DB backups on your provider
 - Install local or host-level backup automation (`scripts/db_backup.sh`)

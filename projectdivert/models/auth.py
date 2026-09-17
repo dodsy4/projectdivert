@@ -1,7 +1,7 @@
 """Auth models."""
 
-from datetime import datetime
 from projectdivert.extensions import db
+from projectdivert.services.utils import utcnow
 
 
 class AuthLifecycleToken(db.Model):
@@ -20,12 +20,12 @@ class AuthLifecycleToken(db.Model):
     used_at = db.Column(db.DateTime, index=True)
     revoked_at = db.Column(db.DateTime, index=True)
     metadata_json = db.Column(db.JSON, nullable=False, default=dict)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     updated_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
     )
 
     def __repr__(self):
@@ -47,12 +47,12 @@ class AuthSecurityBlocklist(db.Model):
     expires_at = db.Column(db.DateTime, index=True)
     revoked_at = db.Column(db.DateTime, index=True)
     metadata_json = db.Column(db.JSON, nullable=False, default=dict)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
     updated_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
     )
 
     def __repr__(self):

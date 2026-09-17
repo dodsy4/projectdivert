@@ -1,6 +1,5 @@
 """Auth routes."""
 
-from datetime import datetime
 import jwt
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy import func
@@ -11,7 +10,7 @@ from projectdivert.services.audit import _audit_auth_event
 from projectdivert.services.auth import _auth_password_reset_request_cooldown_seconds, _auth_require_email_verification, _auth_return_tokens_in_response, _auth_suspicious_activity_revoke_min_lockout_level, _auth_suspicious_activity_revoke_sessions_enabled, _auth_verify_request_cooldown_seconds, _consume_one_time_lifecycle_token, _decode_access_token, _encode_lifecycle_token_from_row, _extract_bearer_token, _issue_auth_payload, _issue_email_verification_token, _issue_password_reset_token, _parse_lifecycle_token, _password_reset_url_for_token, _recent_valid_one_time_token, _refresh_row_from_claims, _revoke_access_token_jti, _revoke_all_access_tokens_for_user, _revoke_all_refresh_tokens_for_user, _revoke_sessions_for_suspicious_activity, _rotate_refresh_token, _serialize_auth_user, _validate_password_strength, _verification_url_for_token
 from projectdivert.services.auth import jwt_required
 from projectdivert.services.notifications import _send_account_email
-from projectdivert.services.utils import _current_jwt_user_id
+from projectdivert.services.utils import _current_jwt_user_id, utcnow
 from projectdivert.services.rate_limit import _auth_blocklist_response, _auth_login_lockout_identifiers, _auth_login_lockout_level, _auth_login_lockout_response, _auth_rate_limit_response, _clear_auth_login_failure, _record_auth_login_failure
 from projectdivert.services.utils import _is_valid_email, _normalize_email, _to_int_or_none
 
@@ -226,7 +225,7 @@ def api_auth_signup():
             password_hash=generate_password_hash(password, method='pbkdf2:sha256'),
             role=role,
             is_active_user=True,
-            email_verified_at=None if _auth_require_email_verification() else datetime.utcnow(),
+            email_verified_at=None if _auth_require_email_verification() else utcnow(),
         )
         db.session.add(user)
         db.session.flush()
@@ -383,7 +382,7 @@ def api_auth_logout():
     try:
         claims, user_id = _parse_lifecycle_token(refresh_token, 'refresh')
         token_row = _refresh_row_from_claims(claims)
-        now = datetime.utcnow()
+        now = utcnow()
         if token_row and token_row.user_id == user_id:
             if not token_row.revoked_at:
                 token_row.revoked_at = now
@@ -553,7 +552,7 @@ def api_auth_verify_confirm():
 
     try:
         user, _token_row = _consume_one_time_lifecycle_token(raw_token, 'email_verify')
-        user.email_verified_at = user.email_verified_at or datetime.utcnow()
+        user.email_verified_at = user.email_verified_at or utcnow()
         auth_payload = _issue_auth_payload(user)
         db.session.commit()
         auth_payload['email_verified'] = True

@@ -13,7 +13,7 @@ from projectdivert.models.auth import AuthLifecycleToken
 from projectdivert.models.user import User
 from projectdivert.services.audit import _audit_auth_event
 from projectdivert.services.rate_limit import _auth_rate_limit_admin_enabled, _auth_rate_limit_enabled, _check_auth_rate_limit
-from projectdivert.services.utils import _current_jwt_email, _current_jwt_role, _current_jwt_user_id, _is_truthy, _normalize_email, _request_client_ip, _to_int_or_none, _token_expired
+from projectdivert.services.utils import _current_jwt_email, _current_jwt_role, _current_jwt_user_id, _is_truthy, _normalize_email, _request_client_ip, _to_int_or_none, _token_expired, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +154,7 @@ def _serialize_auth_user(user):
 
 
 def _issue_jwt_token(user, token_type, expires_delta, token_id=None, extra_claims=None):
-    now = datetime.utcnow()
+    now = utcnow()
     if token_type == 'access' and user.access_token_revoked_at and now <= user.access_token_revoked_at:
         # Ensure newly-issued tokens are considered newer than the revocation cutoff.
         now = user.access_token_revoked_at + timedelta(milliseconds=1)
@@ -188,7 +188,7 @@ def _create_auth_lifecycle_token(user_id, token_type, token_id, expires_at, meta
 
 
 def _revoke_active_tokens_for_user(user_id, token_type):
-    now = datetime.utcnow()
+    now = utcnow()
     tokens = AuthLifecycleToken.query.filter(
         AuthLifecycleToken.user_id == user_id,
         AuthLifecycleToken.token_type == token_type,
@@ -205,7 +205,7 @@ def _encode_lifecycle_token_from_row(user, token_row):
     if not expires_at:
         expires_delta = timedelta(minutes=1)
     else:
-        expires_delta = max(timedelta(seconds=1), expires_at - datetime.utcnow())
+        expires_delta = max(timedelta(seconds=1), expires_at - utcnow())
     return _issue_jwt_token(
         user,
         token_type=token_row.token_type,
@@ -215,7 +215,7 @@ def _encode_lifecycle_token_from_row(user, token_row):
 
 
 def _latest_valid_one_time_token(user_id, token_type):
-    now = datetime.utcnow()
+    now = utcnow()
     return (
         AuthLifecycleToken.query.filter(
             AuthLifecycleToken.user_id == user_id,
@@ -238,7 +238,7 @@ def _recent_valid_one_time_token(user_id, token_type, cooldown_seconds):
     if not token_row:
         return None, 0
 
-    now = datetime.utcnow()
+    now = utcnow()
     created_at = token_row.created_at or now
     elapsed_seconds = max(0, int((now - created_at).total_seconds()))
     retry_after = max(0, cooldown - elapsed_seconds)
@@ -249,7 +249,7 @@ def _recent_valid_one_time_token(user_id, token_type, cooldown_seconds):
 
 def _enforce_refresh_token_limit(user_id):
     max_active = _auth_max_active_refresh_tokens()
-    now = datetime.utcnow()
+    now = utcnow()
     active_rows = (
         AuthLifecycleToken.query.filter(
             AuthLifecycleToken.user_id == user_id,
@@ -277,7 +277,7 @@ def _issue_access_token(user):
 
 def _issue_refresh_token(user):
     token_id = uuid.uuid4().hex
-    expires_at = datetime.utcnow() + timedelta(days=_jwt_refresh_exp_days())
+    expires_at = utcnow() + timedelta(days=_jwt_refresh_exp_days())
     _create_auth_lifecycle_token(
         user_id=user.id,
         token_type='refresh',
@@ -297,7 +297,7 @@ def _issue_refresh_token(user):
 def _issue_one_time_token(user, token_type, expires_delta):
     _revoke_active_tokens_for_user(user.id, token_type)
     token_id = uuid.uuid4().hex
-    expires_at = datetime.utcnow() + expires_delta
+    expires_at = utcnow() + expires_delta
     _create_auth_lifecycle_token(
         user_id=user.id,
         token_type=token_type,
@@ -411,7 +411,7 @@ def _consume_one_time_lifecycle_token(raw_token, expected_type):
     if not user:
         raise ValueError('User not found')
 
-    token_row.used_at = datetime.utcnow()
+    token_row.used_at = utcnow()
     return user, token_row
 
 
@@ -433,13 +433,13 @@ def _rotate_refresh_token(raw_refresh_token):
     if _auth_require_email_verification() and not user.email_verified_at:
         raise ValueError('Email verification required')
 
-    token_row.revoked_at = datetime.utcnow()
-    token_row.used_at = token_row.used_at or datetime.utcnow()
+    token_row.revoked_at = utcnow()
+    token_row.used_at = token_row.used_at or utcnow()
     return user
 
 
 def _revoke_all_refresh_tokens_for_user(user_id):
-    now = datetime.utcnow()
+    now = utcnow()
     tokens = AuthLifecycleToken.query.filter_by(user_id=user_id, token_type='refresh').all()
     for token_row in tokens:
         if not token_row.revoked_at:
@@ -458,11 +458,11 @@ def _access_revoke_token_key(token_id):
 def _claims_exp_datetime(claims):
     exp_unix = _to_int_or_none((claims or {}).get('exp'))
     if exp_unix is None:
-        return datetime.utcnow() + timedelta(hours=_jwt_exp_hours())
+        return utcnow() + timedelta(hours=_jwt_exp_hours())
     try:
         return datetime.utcfromtimestamp(exp_unix)
     except (TypeError, ValueError, OSError):
-        return datetime.utcnow() + timedelta(hours=_jwt_exp_hours())
+        return utcnow() + timedelta(hours=_jwt_exp_hours())
 
 
 def _claims_iat_ms(claims):
@@ -481,7 +481,7 @@ def _revoke_access_token_jti(claims, reason='revoked'):
     if user_id is None or not token_id:
         return False
 
-    now = datetime.utcnow()
+    now = utcnow()
     expires_at = _claims_exp_datetime(claims)
     token_row = AuthLifecycleToken.query.filter_by(
         token_id=token_id,
@@ -512,7 +512,7 @@ def _revoke_all_access_tokens_for_user(user_id, reason='revoked'):
     user = db.session.get(User, user_id)
     if not user:
         return False
-    now = datetime.utcnow()
+    now = utcnow()
     if not user.access_token_revoked_at or user.access_token_revoked_at < now:
         user.access_token_revoked_at = now
     return True
@@ -689,7 +689,7 @@ def run_auth_token_cleanup(retention_days=None, batch_size=500, dry_run=False):
     if batch_size < 1:
         raise ValueError('batch_size must be >= 1')
 
-    cutoff = datetime.utcnow() - timedelta(days=retention_days)
+    cutoff = utcnow() - timedelta(days=retention_days)
     candidates = _auth_token_cleanup_query(cutoff).count()
     type_counts = dict(
         db.session.query(

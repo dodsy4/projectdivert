@@ -1,9 +1,9 @@
 """Tests for /api/v1/auth: login, signup, refresh, verification, password reset."""
 
 from datetime import datetime, timedelta
-from datetime import datetime, timedelta
 
 from tests.helpers import _auth_header, _create_user, _fake_postcode_lookup, _provider_frame, _reset_auth_security_runtime_state
+from projectdivert.services.utils import utcnow
 
 
 def test_auth_login_lockout_triggers_and_blocks_until_expiry(client, app_context):
@@ -142,7 +142,7 @@ def test_auth_login_lockout_escalates_duration_on_repeated_lockouts(client, app_
             for key, state in list(app_context._auth_login_lockouts.items()):
                 if not key.startswith('ip:') and not key.endswith('escalate@example.com'):
                     continue
-                state['locked_until'] = datetime.utcnow() - timedelta(seconds=1)
+                state['locked_until'] = utcnow() - timedelta(seconds=1)
                 state['count'] = 0
                 state['first_failed_at'] = None
                 app_context._auth_login_lockouts[key] = state
@@ -360,7 +360,7 @@ def test_admin_ops_health_endpoint_returns_summary(client, app_context, monkeypa
         request_id = create_response.get_json()['request']['id']
         with app_context.app.app_context():
             booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
-            booking.created_at = datetime.utcnow() - timedelta(minutes=4)
+            booking.created_at = utcnow() - timedelta(minutes=4)
             app_context.db.session.commit()
 
         response = client.get(

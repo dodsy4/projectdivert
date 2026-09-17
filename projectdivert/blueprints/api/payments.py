@@ -1,7 +1,6 @@
 """Payments routes."""
 
 import uuid
-from datetime import datetime
 from flask import Blueprint, current_app, jsonify, request
 from projectdivert.extensions import db
 from projectdivert.models.payments import WasteDriverPayout, WastePaymentCharge, WastePaymentRefund
@@ -14,7 +13,7 @@ from projectdivert.services.dispatch import _serialize_waste_request_snapshot
 from projectdivert.services.events import _publish_waste_request_event
 from projectdivert.services.notifications import _notify_mobile_push_for_waste_event
 from projectdivert.services.payments import _compute_fee_split, _financial_summary_for_request, _payments_enabled, _payout_status_from_stripe, _platform_currency, _platform_fee_bps, _refund_status_from_stripe, _remaining_driver_payout_minor, _remaining_refundable_minor, _serialize_payment_charge, _serialize_payment_refund, _stripe_is_configured, _stripe_request, _stripe_webhook_secret, _sync_charge_from_payment_intent, _verify_stripe_webhook_signature
-from projectdivert.services.utils import _current_jwt_user_id, _is_truthy, _to_float_or_none, _to_int_or_none
+from projectdivert.services.utils import _current_jwt_user_id, _is_truthy, _to_float_or_none, _to_int_or_none, utcnow
 
 bp = Blueprint('api_payments', __name__)
 
@@ -263,7 +262,7 @@ def api_create_payment_refund(request_id, charge_id):
 
         remaining_after_refund = _remaining_refundable_minor(charge_row)
         if refund_status == 'succeeded':
-            charge_row.refunded_at = datetime.utcnow()
+            charge_row.refunded_at = utcnow()
             charge_row.status = 'refunded' if remaining_after_refund <= 0 else 'partially_refunded'
             charge_row.last_error = None
         elif refund_status == 'failed':
@@ -408,7 +407,7 @@ def api_create_driver_payout(request_id):
             amount_minor=amount_minor,
             currency=(stripe_transfer_payload.get('currency') or charge_row.currency or _platform_currency()).strip().lower(),
             status=payout_status,
-            paid_out_at=datetime.utcnow() if payout_status == 'paid' else None,
+            paid_out_at=utcnow() if payout_status == 'paid' else None,
             processor_response=stripe_transfer_payload,
         )
         db.session.add(payout_row)
@@ -563,7 +562,7 @@ def api_stripe_webhook():
                     remaining_refundable_minor = _remaining_refundable_minor(charge_row)
                     if remaining_refundable_minor <= 0:
                         charge_row.status = 'refunded'
-                        charge_row.refunded_at = datetime.utcnow()
+                        charge_row.refunded_at = utcnow()
                     else:
                         charge_row.status = 'partially_refunded'
 
@@ -608,7 +607,7 @@ def api_stripe_webhook():
                         if amount_reversed > 0:
                             payout_row.status = 'reversed'
                     if payout_row.status == 'paid':
-                        payout_row.paid_out_at = payout_row.paid_out_at or datetime.utcnow()
+                        payout_row.paid_out_at = payout_row.paid_out_at or utcnow()
                     payout_row.processor_response = stripe_object
                     db.session.commit()
                     handled = True

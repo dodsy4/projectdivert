@@ -3,7 +3,7 @@
 import json
 import io
 import csv
-from datetime import datetime, timedelta
+from datetime import timedelta
 from flask import Blueprint, Response, current_app, jsonify, request
 from sqlalchemy import or_
 from sqlalchemy.exc import SQLAlchemyError
@@ -14,7 +14,7 @@ from projectdivert.models.user import User
 from projectdivert.services.audit import _audit_auth_event, _build_admin_auth_audit_query, _build_audit_events_query, _parse_admin_auth_audit_filters, _serialize_audit_event, _serialize_auth_audit_event, _serialize_auth_blocklist_entry, _serialize_auth_lifecycle_token
 from projectdivert.services.auth import _revoke_all_access_tokens_for_user, _revoke_all_refresh_tokens_for_user, _serialize_auth_user, jwt_required
 from projectdivert.services.rate_limit import _auth_blocklist_default_duration_seconds, _normalize_auth_block_identifier
-from projectdivert.services.utils import _current_jwt_user_id, _parse_optional_bool_query, _parse_optional_int_query, _parse_query_datetime_utc
+from projectdivert.services.utils import _current_jwt_user_id, _parse_optional_bool_query, _parse_optional_int_query, _parse_query_datetime_utc, utcnow
 
 bp = Blueprint('api_admin_security', __name__)
 
@@ -125,7 +125,7 @@ def api_admin_auth_audit_export():
         )
 
     csv_bytes = buffer.getvalue()
-    filename = 'auth_audit_export_{}.csv'.format(datetime.utcnow().strftime('%Y%m%d_%H%M%S'))
+    filename = 'auth_audit_export_{}.csv'.format(utcnow().strftime('%Y%m%d_%H%M%S'))
     response = Response(csv_bytes, mimetype='text/csv')
     response.headers['Content-Disposition'] = 'attachment; filename={}'.format(filename)
     return response
@@ -199,13 +199,13 @@ def api_admin_auth_security_blocks():
         if identifier_value:
             query = query.filter(AuthSecurityBlocklist.identifier_value == identifier_value)
         if active is True:
-            now = datetime.utcnow()
+            now = utcnow()
             query = query.filter(
                 AuthSecurityBlocklist.revoked_at.is_(None),
                 or_(AuthSecurityBlocklist.expires_at.is_(None), AuthSecurityBlocklist.expires_at > now),
             )
         elif active is False:
-            now = datetime.utcnow()
+            now = utcnow()
             query = query.filter(
                 or_(
                     AuthSecurityBlocklist.revoked_at.isnot(None),
@@ -276,13 +276,13 @@ def api_admin_auth_security_block_create():
             except ValueError as exc:
                 return jsonify({'error': str(exc)}), 400
         elif expires_in_seconds is not None:
-            expires_at = datetime.utcnow() + timedelta(seconds=expires_in_seconds)
+            expires_at = utcnow() + timedelta(seconds=expires_in_seconds)
         else:
-            expires_at = datetime.utcnow() + timedelta(seconds=_auth_blocklist_default_duration_seconds())
+            expires_at = utcnow() + timedelta(seconds=_auth_blocklist_default_duration_seconds())
 
     reason = (str(payload.get('reason') or '').strip()[:255] or None)
     admin_user_id = _current_jwt_user_id()
-    now = datetime.utcnow()
+    now = utcnow()
 
     try:
         existing = (
@@ -345,7 +345,7 @@ def api_admin_auth_security_block_unblock(block_id):
         return jsonify({'error': 'Block not found'}), 404
 
     if row.revoked_at is None:
-        row.revoked_at = datetime.utcnow()
+        row.revoked_at = utcnow()
     reason = (str((request.get_json(silent=True) or {}).get('reason') or '').strip()[:255] or None)
     if reason:
         metadata = row.metadata_json or {}
@@ -381,7 +381,7 @@ def api_admin_auth_security_telemetry():
 
     minutes = minutes or 60
     limit = limit or 25
-    since = datetime.utcnow() - timedelta(minutes=minutes)
+    since = utcnow() - timedelta(minutes=minutes)
     sample_cap = 5000
 
     try:
@@ -492,7 +492,7 @@ def api_admin_auth_tokens():
         elif used is False:
             query = query.filter(AuthLifecycleToken.used_at.is_(None))
         if expired is not None:
-            now = datetime.utcnow()
+            now = utcnow()
             if expired:
                 query = query.filter(AuthLifecycleToken.expires_at <= now)
             else:
@@ -538,7 +538,7 @@ def api_admin_revoke_auth_token(token_row_id):
     if not token_row:
         return jsonify({'error': 'Auth token not found'}), 404
 
-    now = datetime.utcnow()
+    now = utcnow()
     token_row.revoked_at = token_row.revoked_at or now
     token_row.used_at = token_row.used_at or now
     try:

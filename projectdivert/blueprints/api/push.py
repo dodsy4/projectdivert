@@ -1,12 +1,11 @@
 """Push routes."""
 
-from datetime import datetime
 from flask import Blueprint, jsonify, request
 from projectdivert.extensions import db
 from projectdivert.models.mobile import MobilePushSubscription
 from projectdivert.services.auth import jwt_required
 from projectdivert.services.notifications import _serialize_push_subscription
-from projectdivert.services.utils import _current_jwt_user_id
+from projectdivert.services.utils import _current_jwt_user_id, utcnow
 
 bp = Blueprint('api_push', __name__)
 
@@ -39,7 +38,7 @@ def api_upsert_push_subscription():
             token=token,
             platform=platform,
             is_active=True,
-            last_seen_at=datetime.utcnow(),
+            last_seen_at=utcnow(),
         )
         db.session.add(subscription)
     else:
@@ -47,7 +46,7 @@ def api_upsert_push_subscription():
         subscription.provider = provider
         subscription.platform = platform
         subscription.is_active = True
-        subscription.last_seen_at = datetime.utcnow()
+        subscription.last_seen_at = utcnow()
 
     db.session.commit()
     return jsonify({'subscription': _serialize_push_subscription(subscription)})
@@ -74,6 +73,6 @@ def api_deactivate_push_subscription():
         return jsonify({'deactivated': False}), 200
 
     subscription.is_active = False
-    subscription.last_seen_at = datetime.utcnow()
+    subscription.last_seen_at = utcnow()
     db.session.commit()
     return jsonify({'deactivated': True})

@@ -38,8 +38,8 @@ from projectdivert.services.dispatch import (
     _create_dispatch_offers_for_request,
     _get_latest_match_for_request,
 )
-from projectdivert.services.geo import _postcode_coordinates
-from projectdivert.services.utils import _is_truthy, _to_float_or_none, _to_int_or_none
+from projectdivert.services.geo import PostcodeLookupUnavailable, _postcode_coordinates
+from projectdivert.services.utils import _is_truthy, _to_float_or_none, _to_int_or_none, to_utc_naive, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -394,18 +394,21 @@ def _tool_create_request(user, **fields):
 
     raw_when = str(fields.get('scheduled_pickup_at') or '').strip()
     try:
-        scheduled = datetime.fromisoformat(raw_when.replace('Z', '+00:00'))
-        if scheduled.tzinfo is not None:
-            scheduled = scheduled.replace(tzinfo=None)
+        # replace(tzinfo=None) discarded the offset rather than converting, so
+        # a client sending 14:00+01:00 was stored as 14:00 UTC -- an hour late.
+        scheduled = to_utc_naive(datetime.fromisoformat(raw_when.replace('Z', '+00:00')))
     except ValueError:
         return {'error': 'I could not read that collection date. Ask for a date and time.'}
-    if scheduled <= datetime.utcnow():
+    if scheduled <= utcnow():
         return {'error': 'The collection date needs to be in the future.'}
 
     postcode = str(fields.get('pickup_postcode') or '').strip()
     try:
         latitude, longitude = _postcode_coordinates(postcode)
-    except Exception:
+    except PostcodeLookupUnavailable:
+        return {'error': 'The postcode service is down, so I cannot book that '
+                         'right now. Tell the user to try again shortly.'}
+    except ValueError:
         return {'error': 'That postcode did not look valid. Ask the user to check it.'}
 
     booking = WasteRemovalRequest(

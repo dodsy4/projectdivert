@@ -10,12 +10,13 @@ anyone who learned the URL act as a linked user, so the rejection path is
 pinned here.
 """
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 
 import project_divert_lca
 from projectdivert.services import chatbot, whatsapp
+from projectdivert.services.utils import utcnow
 
 WEBHOOK = '/api/v1/whatsapp/inbound'
 PHONE = '+447700900123'
@@ -43,7 +44,7 @@ def _make_request(app_context, email='sam@example.com', status='pending',
             requester_name='Sam', requester_email=email,
             material_type=material, waste_amount=amount, waste_unit=unit,
             pickup_address='1 Site Road', pickup_postcode='SW1A1AA',
-            scheduled_pickup_at=datetime.utcnow() + timedelta(days=2),
+            scheduled_pickup_at=utcnow() + timedelta(days=2),
             status=status,
         )
         app_context.db.session.add(booking)

@@ -2,14 +2,13 @@
 
 import hmac
 import hashlib
-from datetime import datetime
 import requests
 from flask import current_app
 from sqlalchemy import func
 from projectdivert.extensions import db
 from projectdivert.models.payments import WasteDriverPayout, WastePaymentCharge, WastePaymentRefund
 from projectdivert.services.compliance import _serialize_driver_payout
-from projectdivert.services.utils import _is_truthy
+from projectdivert.services.utils import _is_truthy, utcnow
 
 
 def _serialize_payment_charge(charge):
@@ -215,7 +214,7 @@ def _sync_charge_from_payment_intent(charge_row, payment_intent_payload):
     charge_row.charge_id = _stripe_charge_id_from_payment_intent(payment_intent_payload)
     charge_row.processor_response = payment_intent_payload
     if mapped_status == 'succeeded':
-        charge_row.paid_at = datetime.utcnow()
+        charge_row.paid_at = utcnow()
         charge_row.last_error = None
     return charge_row
 

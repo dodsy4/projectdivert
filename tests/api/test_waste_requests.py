@@ -1,7 +1,6 @@
 """Tests for the waste-request lifecycle, status and live location."""
 
 from datetime import datetime, timedelta
-from datetime import datetime, timedelta
 
 from tests.helpers import _auth_header, _create_user, _fake_postcode_lookup, _provider_frame
 

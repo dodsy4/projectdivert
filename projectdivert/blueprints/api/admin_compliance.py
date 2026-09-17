@@ -1,6 +1,5 @@
 """Admin compliance routes."""
 
-from datetime import datetime
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy import func, or_
 from sqlalchemy.exc import SQLAlchemyError
@@ -12,7 +11,7 @@ from projectdivert.services.audit import record_audit_event
 from projectdivert.services.auth import jwt_required
 from projectdivert.services.compliance import COMPANY_COMPLIANCE_DOCUMENT_TYPES, COMPLIANCE_DOCUMENT_STATUSES, COMPLIANCE_DOCUMENT_TYPES, DRIVER_COMPLIANCE_DOCUMENT_TYPES, _build_company_compliance_document, _build_driver_compliance_document, _company_compliance_documents_for_company, _company_compliance_summary_for_documents, _compliance_documents_for_request, _compliance_summary_for_documents, _driver_compliance_documents_for_driver, _driver_compliance_summary_for_documents, _normalize_compliance_document_type, _serialize_carrier_company, _serialize_company_compliance_document, _serialize_compliance_document, _serialize_driver_compliance_document
 from projectdivert.services.dispatch import _serialize_dispatch_driver, _serialize_waste_request
-from projectdivert.services.utils import _current_jwt_user_id, _parse_datetime_or_error, _parse_optional_bool_query, _parse_optional_int_query, _to_int_or_none
+from projectdivert.services.utils import _current_jwt_user_id, _parse_datetime_or_error, _parse_optional_bool_query, _parse_optional_int_query, _to_int_or_none, utcnow
 
 bp = Blueprint('api_admin_compliance', __name__)
 
@@ -408,7 +407,7 @@ def api_admin_verify_carrier_company_compliance_document(carrier_company_id, doc
 
     if status in {'verified', 'rejected', 'expired'}:
         document.verified_by_user_id = _current_jwt_user_id()
-        document.verified_at = datetime.utcnow()
+        document.verified_at = utcnow()
         updated = True
 
     if not updated:
@@ -505,7 +504,7 @@ def api_admin_verify_driver_compliance_document(driver_user_id, document_id):
 
     if status in {'verified', 'rejected', 'expired'}:
         document.verified_by_user_id = _current_jwt_user_id()
-        document.verified_at = datetime.utcnow()
+        document.verified_at = utcnow()
         updated = True
 
     if not updated:

@@ -1,6 +1,5 @@
 """Admin dispatch routes."""
 
-from datetime import datetime
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import SQLAlchemyError
 from projectdivert.extensions import db
@@ -12,7 +11,7 @@ from projectdivert.services.compliance import _driver_dispatch_eligibility_error
 from projectdivert.services.dispatch import _accept_dispatch_offer, _build_dispatch_request_timeline, _dispatch_incident_auto_assign_enabled, _dispatch_incident_auto_resolve_test_enabled, _dispatch_incident_severity, _dispatch_location_stale_minutes, _dispatch_pending_match_sla_minutes, _dispatch_summary_for_request, _dispatch_unassigned_match_sla_minutes, _get_dispatch_incident_context, _record_dispatch_incident_event, _run_dispatch_incident_maintenance, _serialize_dispatch_driver, _serialize_dispatch_offer, _serialize_dispatch_queue_item, _serialize_waste_match, _serialize_waste_request, _serialize_waste_request_snapshot
 from projectdivert.services.events import _publish_waste_request_event
 from projectdivert.services.notifications import _notify_mobile_push_for_waste_event
-from projectdivert.services.utils import _current_jwt_email, _current_jwt_user_id, _is_truthy, _normalize_email, _parse_optional_bool_query, _parse_optional_int_query, _to_int_or_none
+from projectdivert.services.utils import _current_jwt_email, _current_jwt_user_id, _is_truthy, _normalize_email, _parse_optional_bool_query, _parse_optional_int_query, _to_int_or_none, utcnow
 
 bp = Blueprint('api_admin_dispatch', __name__)
 
@@ -91,7 +90,7 @@ def api_admin_dispatch_queue():
         current_app.logger.exception('Failed to query dispatch queue.')
         return jsonify({'error': 'Failed to query dispatch queue'}), 500
 
-    now = datetime.utcnow()
+    now = utcnow()
     items = []
     status_counts = {}
     incident_counts = {}
@@ -210,7 +209,7 @@ def api_admin_dispatch_incidents():
         current_app.logger.exception('Failed to query dispatch incidents.')
         return jsonify({'error': 'Failed to query dispatch incidents'}), 500
 
-    now = datetime.utcnow()
+    now = utcnow()
     items = []
     for booking in rows:
         queue_item = _get_dispatch_incident_context(booking, now=now)
@@ -331,7 +330,7 @@ def api_admin_dispatch_incident_ack(request_id):
 
     payload = request.get_json(silent=True) or {}
     notes = (str(payload.get('notes') or '').strip()[:1000] or None)
-    now = datetime.utcnow()
+    now = utcnow()
     queue_item = _get_dispatch_incident_context(booking, now=now)
     flags = queue_item.get('incident_flags') or []
     if not flags:
@@ -409,7 +408,7 @@ def api_admin_dispatch_incident_resolve(request_id):
 
     payload = request.get_json(silent=True) or {}
     notes = (str(payload.get('notes') or '').strip()[:1000] or None)
-    now = datetime.utcnow()
+    now = utcnow()
     queue_item = _get_dispatch_incident_context(booking, now=now)
     flags = queue_item.get('incident_flags') or []
 
@@ -521,7 +520,7 @@ def api_admin_dispatch_incident_owner(request_id):
             }
         )
 
-    now = datetime.utcnow()
+    now = utcnow()
     booking.incident_owner_admin_user_id = new_owner_user_id
     booking.incident_updated_at = now
     if notes:
@@ -636,7 +635,7 @@ def api_admin_dispatch_telemetry():
         current_app.logger.exception('Failed to query dispatch telemetry.')
         return jsonify({'error': 'Failed to query dispatch telemetry'}), 500
 
-    now = datetime.utcnow()
+    now = utcnow()
     items = []
     status_counts = {}
     incident_counts = {}
@@ -788,7 +787,7 @@ def api_admin_dispatch_override(request_id):
             }
         )
 
-    now = datetime.utcnow()
+    now = utcnow()
     booking.assigned_driver_user_id = new_driver_user_id
     _record_dispatch_incident_event(
         booking.id,

@@ -1,6 +1,5 @@
 """Offline billing workflow, follow-ups and customer communications."""
 
-from datetime import datetime
 from flask import current_app
 from sqlalchemy import func, or_
 from projectdivert.extensions import db
@@ -9,7 +8,7 @@ from projectdivert.services.billing_core import BILLING_FOLLOWUP_STATES, _effect
 from projectdivert.services.dispatch import _serialize_waste_request, _serialize_waste_request_snapshot
 from projectdivert.services.events import _publish_waste_request_event
 from projectdivert.services.notifications import _notify_mobile_push_for_waste_event
-from projectdivert.services.utils import _hours_since
+from projectdivert.services.utils import _hours_since, utcnow
 
 
 def _offline_billing_followup_limit(value=None):
@@ -151,7 +150,7 @@ def _create_request_communication_log(
         contact_email=(str(contact_email or '').strip()[:255] or None),
         contact_phone=(str(contact_phone or '').strip()[:120] or None),
         customer_visible=bool(customer_visible),
-        occurred_at=occurred_at or datetime.utcnow(),
+        occurred_at=occurred_at or utcnow(),
     )
 
 
@@ -248,7 +247,7 @@ def _serialize_billing_followup_item(booking, reminder_after_hours=None, repeat_
     if not booking:
         return None
 
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     reminder_after_hours = _offline_billing_followup_after_hours(reminder_after_hours)
     repeat_hours = _offline_billing_followup_repeat_hours(repeat_hours)
     workflow = _serialize_request_billing_followup_workflow(booking) or {
@@ -319,7 +318,7 @@ def _serialize_billing_followup_item(booking, reminder_after_hours=None, repeat_
 
 
 def _collect_admin_billing_followups(search=None, reminder_after_hours=None, repeat_hours=None, limit=None, due_only=True, now=None):
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     reminder_after_hours = _offline_billing_followup_after_hours(reminder_after_hours)
     repeat_hours = _offline_billing_followup_repeat_hours(repeat_hours)
     limit = _offline_billing_followup_limit(limit)
@@ -398,7 +397,7 @@ def _run_offline_billing_followup_maintenance(
     source='system_offline_billing_followup',
     now=None,
 ):
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     report = _collect_admin_billing_followups(
         search=search,
         reminder_after_hours=reminder_after_hours,

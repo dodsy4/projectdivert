@@ -10,7 +10,7 @@ except Exception:  # pragma: no cover - optional dependency
 from flask import current_app, jsonify
 from sqlalchemy import or_
 from projectdivert.models.auth import AuthSecurityBlocklist
-from projectdivert.services.utils import _is_truthy, _normalize_email, _request_client_ip, _to_int_or_none
+from projectdivert.services.utils import _is_truthy, _normalize_email, _request_client_ip, _to_int_or_none, utcnow
 import logging
 
 logger = logging.getLogger(__name__)
@@ -162,7 +162,7 @@ def _auth_login_lockout_retry_after(identifier):
     if not _auth_login_lockout_enabled():
         return 0
 
-    now = datetime.utcnow()
+    now = utcnow()
     window_seconds = _auth_login_lockout_window_seconds()
     bucket = str(identifier or '').strip()
     if not bucket:
@@ -209,7 +209,7 @@ def _record_auth_login_failure(identifier):
     if not _auth_login_lockout_enabled():
         return 0
 
-    now = datetime.utcnow()
+    now = utcnow()
     window_seconds = _auth_login_lockout_window_seconds()
     max_attempts = _auth_login_lockout_max_attempts()
     lockout_seconds = _auth_login_lockout_duration_seconds()
@@ -323,7 +323,7 @@ def _get_auth_rate_limit_redis_client():
 
 
 def _check_auth_rate_limit_memory(action, identifier):
-    now = datetime.utcnow()
+    now = utcnow()
     window_seconds = _auth_rate_limit_window_seconds(action=action)
     max_attempts = _auth_rate_limit_max_attempts(action)
     cutoff = now - timedelta(seconds=window_seconds)
@@ -353,7 +353,7 @@ def _check_auth_rate_limit_redis(action, identifier):
 
     window_seconds = _auth_rate_limit_window_seconds(action=action)
     max_attempts = _auth_rate_limit_max_attempts(action)
-    now_ms = int(datetime.utcnow().timestamp() * 1000)
+    now_ms = int(utcnow().timestamp() * 1000)
     oldest_allowed_ms = now_ms - (window_seconds * 1000)
     key = _auth_rate_limit_bucket_key(action, identifier)
     member = '{}:{}'.format(now_ms, uuid.uuid4().hex)
@@ -433,7 +433,7 @@ def _active_blocklist_entries(identifier_type, identifier_value):
     id_type, id_value = _normalize_auth_block_identifier(identifier_type, identifier_value)
     if not id_type or not id_value:
         return []
-    now = datetime.utcnow()
+    now = utcnow()
     return (
         AuthSecurityBlocklist.query.filter(
             AuthSecurityBlocklist.identifier_type == id_type,
@@ -462,7 +462,7 @@ def _current_blocklist_match(email=None):
         return None
 
     retry_after_seconds = 0
-    now = datetime.utcnow()
+    now = utcnow()
     for entry in matches:
         if entry.expires_at:
             retry_after_seconds = max(

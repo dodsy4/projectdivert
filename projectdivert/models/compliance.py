@@ -1,7 +1,7 @@
 """Compliance models."""
 
-from datetime import datetime
 from projectdivert.extensions import db
+from projectdivert.services.utils import utcnow
 
 
 class WasteComplianceDocument(db.Model):
@@ -33,12 +33,12 @@ class WasteComplianceDocument(db.Model):
     verified_at = db.Column(db.DateTime, index=True)
     notes = db.Column(db.Text)
     metadata_json = db.Column(db.JSON, nullable=False, default=dict)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     updated_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
     )
 
     def __repr__(self):
@@ -57,12 +57,12 @@ class CarrierCompany(db.Model):
     contact_email = db.Column(db.String(255), index=True)
     contact_phone = db.Column(db.String(120))
     is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     updated_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
     )
 
     def __repr__(self):
@@ -98,12 +98,12 @@ class DriverComplianceDocument(db.Model):
     verified_at = db.Column(db.DateTime, index=True)
     notes = db.Column(db.Text)
     metadata_json = db.Column(db.JSON, nullable=False, default=dict)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     updated_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
     )
 
     def __repr__(self):
@@ -143,12 +143,12 @@ class CompanyComplianceDocument(db.Model):
     verified_at = db.Column(db.DateTime, index=True)
     notes = db.Column(db.Text)
     metadata_json = db.Column(db.JSON, nullable=False, default=dict)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     updated_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
     )
 
     def __repr__(self):

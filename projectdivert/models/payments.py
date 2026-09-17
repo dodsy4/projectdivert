@@ -1,7 +1,7 @@
 """Payments models."""
 
-from datetime import datetime
 from projectdivert.extensions import db
+from projectdivert.services.utils import utcnow
 
 
 class WastePaymentCharge(db.Model):
@@ -33,12 +33,12 @@ class WastePaymentCharge(db.Model):
     refunded_at = db.Column(db.DateTime)
     metadata_json = db.Column(db.JSON, nullable=False, default=dict)
     processor_response = db.Column(db.JSON, nullable=False, default=dict)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     updated_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
     )
 
     def __repr__(self):
@@ -72,12 +72,12 @@ class WastePaymentRefund(db.Model):
     status = db.Column(db.String(32), nullable=False, default='pending', index=True)
     reason = db.Column(db.String(120))
     processor_response = db.Column(db.JSON, nullable=False, default=dict)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     updated_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
     )
 
     def __repr__(self):
@@ -118,12 +118,12 @@ class WasteDriverPayout(db.Model):
     status = db.Column(db.String(32), nullable=False, default='scheduled', index=True)
     paid_out_at = db.Column(db.DateTime)
     processor_response = db.Column(db.JSON, nullable=False, default=dict)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     updated_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
     )
 
     def __repr__(self):

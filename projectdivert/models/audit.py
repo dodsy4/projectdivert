@@ -1,7 +1,7 @@
 """Audit models."""
 
-from datetime import datetime
 from projectdivert.extensions import db
+from projectdivert.services.utils import utcnow
 
 
 class AuthAuditEvent(db.Model):
@@ -16,7 +16,7 @@ class AuthAuditEvent(db.Model):
     ip = db.Column(db.String(64), index=True)
     user_agent = db.Column(db.String(255))
     details_json = db.Column(db.JSON, nullable=False, default=dict)
-    occurred_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    occurred_at = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
 
     def __repr__(self):
         return '<AuthAuditEvent event={} success={} user_id={}>'.format(
@@ -38,7 +38,7 @@ class AuditEvent(db.Model):
     __tablename__ = 'audit_events'
 
     id = db.Column(db.Integer, primary_key=True)
-    occurred_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    occurred_at = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
     action = db.Column(db.String(80), nullable=False, index=True)
     entity_type = db.Column(db.String(64), index=True)
     entity_id = db.Column(db.String(64), index=True)

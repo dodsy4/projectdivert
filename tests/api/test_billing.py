@@ -1,9 +1,9 @@
 """Tests for the offline billing workflow and customer communications."""
 
 from datetime import datetime, timedelta
-from datetime import datetime, timedelta
 
 from tests.helpers import _auth_header, _create_user, _fake_postcode_lookup, _provider_frame
+from projectdivert.services.utils import utcnow
 
 
 def test_admin_can_update_offline_billing_workflow_for_request(client, app_context, monkeypatch):
@@ -346,7 +346,7 @@ def test_admin_billing_followups_report_and_maintenance(client, app_context, mon
 
     with app_context.app.app_context():
         booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
-        booking.billing_updated_at = datetime.utcnow() - timedelta(hours=96)
+        booking.billing_updated_at = utcnow() - timedelta(hours=96)
         app_context.db.session.commit()
 
     followup_response = client.get(
@@ -429,7 +429,7 @@ def test_admin_ops_health_reports_billing_followups_due(client, app_context, mon
 
     with app_context.app.app_context():
         booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
-        booking.billing_updated_at = datetime.utcnow() - timedelta(hours=120)
+        booking.billing_updated_at = utcnow() - timedelta(hours=120)
         app_context.db.session.commit()
 
     ops_response = client.get(
@@ -535,7 +535,7 @@ def test_admin_can_acknowledge_and_close_billing_followups(client, app_context, 
 
     with app_context.app.app_context():
         booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
-        booking.billing_updated_at = datetime.utcnow() - timedelta(hours=96)
+        booking.billing_updated_at = utcnow() - timedelta(hours=96)
         app_context.db.session.commit()
 
     acknowledge_response = client.post(
