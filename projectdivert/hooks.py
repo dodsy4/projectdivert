@@ -1,23 +1,15 @@
-"""Request lifecycle hooks and error handlers."""
+"""Request lifecycle hooks and error handlers.
+
+The schema is owned by Alembic alone. There used to be a before_request hook
+calling db.create_all(), which meant two sources of truth for the schema, made
+every web worker responsible for populating the database, and -- once more than
+one worker runs -- let them race each other on a cold start. Deploys run
+``flask db upgrade`` and ``flask seed-materials`` instead; see DEPLOY.md.
+"""
 
 import uuid
 from flask import current_app, g, render_template, request
-from projectdivert.extensions import db
 from projectdivert.services.audit import _AUDIT_ROUTE_REGISTRY, _audit_should_capture, record_audit_event
-from projectdivert.services.reference_data import _seed_materials_if_empty
-
-
-
-def ensure_core_tables():
-    # Create core tables on first request if missing.
-    if getattr(current_app, '_core_tables_checked', False):
-        return
-    try:
-        db.create_all()
-        _seed_materials_if_empty()
-        current_app._core_tables_checked = True
-    except Exception:
-        current_app.logger.exception('Failed creating core tables on startup.')
 
 
 
@@ -123,7 +115,6 @@ def server_error(error):
 
 def register_hooks(app):
     """Wire request hooks and error handlers onto an application instance."""
-    app.before_request(ensure_core_tables)
     app.before_request(_assign_request_id)
     app.after_request(_audit_state_changes)
     app.after_request(_set_security_headers)

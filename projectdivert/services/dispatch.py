@@ -4,7 +4,7 @@ import uuid
 from datetime import timedelta
 import requests
 from flask import current_app
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from projectdivert.extensions import db
 from projectdivert.models.audit import AuthAuditEvent
@@ -12,7 +12,7 @@ from projectdivert.models.user import User
 from projectdivert.models.waste import DispatchIncidentEvent, WasteRemovalDispatchOffer, WasteRemovalMatch, WasteRemovalRequest, WasteRemovalVehicleLocation
 from projectdivert.services.audit import _normalize_auth_audit_details, record_audit_event
 from projectdivert.services.billing_core import _billing_summary, _communication_logs_for_request, _serialize_request_billing_followup_workflow, _serialize_request_communication_log, _serialize_request_communication_summary
-from projectdivert.services.compliance import _compliance_documents_for_request, _compliance_summary_for_documents, _driver_dispatch_compliance_status, _serialize_compliance_document
+from projectdivert.services.compliance import _compliance_documents_for_request, _compliance_documents_for_requests, _compliance_summary_for_documents, _driver_dispatch_compliance_status, _serialize_compliance_document
 from projectdivert.services.events import _publish_waste_request_event
 from projectdivert.services.geo import _haversine_miles
 from projectdivert.services.notifications import _notify_mobile_push_for_waste_event
@@ -551,10 +551,11 @@ def _serialize_vehicle_location(location):
     }
 
 
-def _serialize_dispatch_driver(user):
+def _serialize_dispatch_driver(user, compliance=None):
     if not user:
         return None
-    compliance = _driver_dispatch_compliance_status(user.id)
+    if compliance is None:
+        compliance = _driver_dispatch_compliance_status(user.id)
     return {
         'id': user.id,
         'email': user.email,
@@ -752,7 +753,89 @@ def _dispatch_send_escalation_webhook(booking, queue_item, now=None, source=''):
     return True
 
 
-def _serialize_dispatch_queue_item(booking, driver=None, latest_location=None, now=None):
+def _drivers_by_id(user_ids):
+    """Assigned drivers for a page of requests, in one query."""
+    user_ids = [uid for uid in set(user_ids or ()) if uid is not None]
+    if not user_ids:
+        return {}
+    return {row.id: row for row in User.query.filter(User.id.in_(user_ids)).all()}
+
+
+def _latest_vehicle_locations_for_requests(request_ids):
+    """The newest vehicle location per request, in one query.
+
+    Ranked with a window function rather than MAX(id) so the ordering matches
+    the per-row lookup exactly: newest recorded_at wins, and the higher id
+    breaks a tie. A backdated row inserted later must not win.
+    """
+    request_ids = [rid for rid in set(request_ids or ()) if rid is not None]
+    if not request_ids:
+        return {}
+
+    ranked = (
+        select(
+            WasteRemovalVehicleLocation.id.label('id'),
+            func.row_number().over(
+                partition_by=WasteRemovalVehicleLocation.waste_removal_request_id,
+                order_by=(
+                    WasteRemovalVehicleLocation.recorded_at.desc(),
+                    WasteRemovalVehicleLocation.id.desc(),
+                ),
+            ).label('rank'),
+        )
+        .where(WasteRemovalVehicleLocation.waste_removal_request_id.in_(request_ids))
+        .subquery()
+    )
+    newest_ids = select(ranked.c.id).where(ranked.c.rank == 1)
+    rows = (
+        WasteRemovalVehicleLocation.query
+        .filter(WasteRemovalVehicleLocation.id.in_(newest_ids))
+        .all()
+    )
+    return {row.waste_removal_request_id: row for row in rows}
+
+
+class DispatchQueueContext:
+    """Everything a page of queue items needs, loaded up front.
+
+    Serialising one item looks up the assigned driver, the latest vehicle
+    location, the request's compliance documents and the driver's compliance
+    standing. Done per row against a page of up to 500 requests that is over a
+    thousand queries for a single dashboard load, so a caller builds this once
+    and serialises through it.
+    """
+
+    def __init__(self, bookings):
+        bookings = list(bookings or ())
+        request_ids = [booking.id for booking in bookings]
+        driver_ids = [booking.assigned_driver_user_id for booking in bookings]
+
+        self.drivers = _drivers_by_id(driver_ids)
+        self.locations = _latest_vehicle_locations_for_requests(request_ids)
+        self.compliance_documents = _compliance_documents_for_requests(request_ids)
+        # Keyed by driver rather than by request: a page is usually many
+        # requests across a handful of drivers, and the standing is the same
+        # for every request a driver holds.
+        self.driver_compliance = {
+            driver_id: _driver_dispatch_compliance_status(driver_id)
+            for driver_id in {d for d in driver_ids if d is not None}
+        }
+
+    def serialize(self, booking, now=None):
+        """One queue item, with nothing left to look up."""
+        driver_id = booking.assigned_driver_user_id
+        return _serialize_dispatch_queue_item(
+            booking,
+            driver=self.drivers.get(driver_id),
+            latest_location=self.locations.get(booking.id),
+            now=now,
+            compliance_documents=self.compliance_documents.get(booking.id, []),
+            driver_compliance=self.driver_compliance.get(driver_id),
+        )
+
+
+def _serialize_dispatch_queue_item(booking, driver=None, latest_location=None, now=None,
+                                   compliance_documents=None, driver_compliance=None):
     now = now or utcnow()
     pickup_due_minutes = None
     if booking.scheduled_pickup_at:
@@ -760,12 +843,13 @@ def _serialize_dispatch_queue_item(booking, driver=None, latest_location=None, n
 
     incident_flags = _dispatch_incident_flags(booking, latest_location=latest_location, now=now)
     incident = _dispatch_incident_summary(booking, incident_flags, now=now)
-    compliance_documents = _compliance_documents_for_request(booking.id)
+    if compliance_documents is None:
+        compliance_documents = _compliance_documents_for_request(booking.id)
     compliance_summary = _compliance_summary_for_documents(compliance_documents)
 
     return {
         'request': _serialize_waste_request(booking),
-        'driver': _serialize_dispatch_driver(driver),
+        'driver': _serialize_dispatch_driver(driver, compliance=driver_compliance),
         'latest_location': _serialize_vehicle_location(latest_location),
         'age_minutes': _minutes_since(booking.created_at, now=now),
         'pickup_due_minutes': pickup_due_minutes,

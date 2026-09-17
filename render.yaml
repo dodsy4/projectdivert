@@ -4,6 +4,10 @@ services:
     env: python
     plan: starter
     buildCommand: pip install -r requirements.txt
+    # Nothing creates tables at runtime any more -- Alembic owns the schema, so
+    # a deploy has to migrate before the new instance serves traffic. Runs once
+    # per deploy rather than once per worker, so workers cannot race it.
+    preDeployCommand: flask db upgrade && flask seed-materials
     startCommand: gunicorn --config gunicorn.conf.py wsgi:app
     autoDeploy: true
     envVars: &backend_env

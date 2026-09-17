@@ -126,7 +126,8 @@ Quick local backend setup:
 pip install -r requirements.txt
 export FLASK_APP=wsgi.py
 export FLASK_DEBUG=1          # or set SECRET_KEY: the app refuses to serve with the placeholder
-flask db upgrade
+flask db upgrade             # required: nothing creates tables at runtime
+flask seed-materials
 flask run
 ```
 
