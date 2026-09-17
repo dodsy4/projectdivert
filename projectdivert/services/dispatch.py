@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import requests
 from flask import current_app
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from projectdivert.extensions import db
 from projectdivert.models.audit import AuthAuditEvent
 from projectdivert.models.user import User
@@ -333,6 +334,10 @@ def _accept_dispatch_offer(booking, offer, assigned_driver_user_id=None):
     given request serialises on that row, and the loser sees the winner's
     committed match and gets ``already_matched``. SQLite ignores ``FOR UPDATE``,
     which is why the test inspects the statement rather than racing.
+
+    A unique constraint on ``waste_removal_matches.waste_removal_request_id``
+    backs the lock up, so the invariant also holds where the lock does not
+    apply; the commit below turns that into ``already_matched`` too.
     """
     if not booking or not offer:
         return None, 'invalid_offer'
@@ -352,6 +357,9 @@ def _accept_dispatch_offer(booking, offer, assigned_driver_user_id=None):
     # The offer was read before the lock, so its status may be stale by now.
     db.session.refresh(offer)
 
+    # The early returns below leave the lock held until the transaction ends
+    # with the request; rolling back here would expire `existing_match` while
+    # the caller is still serialising it.
     if assigned_driver_user_id is not None:
         if booking.assigned_driver_user_id and booking.assigned_driver_user_id != assigned_driver_user_id:
             return None, 'driver_mismatch'
@@ -397,7 +405,20 @@ def _accept_dispatch_offer(booking, offer, assigned_driver_user_id=None):
     if assigned_driver_user_id is not None:
         booking.assigned_driver_user_id = assigned_driver_user_id
     booking.status = 'matched'
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # The unique constraint on waste_removal_matches caught a concurrent
+        # acceptance that the row lock could not (no row locking on SQLite, or
+        # a lock taken in a separate transaction). Report it the same way the
+        # pre-flight check would have.
+        db.session.rollback()
+        logger.warning(
+            'Concurrent dispatch acceptance rejected for request_id=%s offer_id=%s',
+            booking.id,
+            offer.id,
+        )
+        return _get_latest_match_for_request(booking.id), 'already_matched'
 
     record_audit_event(
         action='dispatch_offer.accept',
@@ -1128,6 +1149,7 @@ def _run_dispatch_incident_maintenance(
     auto_resolved = 0
     skipped_owner_unavailable = 0
     changed_request_ids = []
+    escalated_request_ids = []
     items = []
     publish_jobs = []
 
@@ -1143,6 +1165,18 @@ def _run_dispatch_incident_maintenance(
         incident_state = str(incident_info.get('state') or '').strip().lower()
         created_age_minutes = _minutes_since(getattr(booking, 'created_at', None), now=now) or 0
         is_test_candidate = _dispatch_incident_is_test_candidate(booking)
+
+        # Escalation delivery lives here rather than on the admin read paths:
+        # it is an outbound HTTP call, so firing it from a GET made dashboard
+        # latency depend on the webhook and made delivery depend on somebody
+        # happening to load the page.
+        if not dry_run and _dispatch_send_escalation_webhook(
+            booking,
+            queue_item,
+            now=now,
+            source=source,
+        ):
+            escalated_request_ids.append(booking.id)
 
         can_assign_owner = (
             auto_assign
@@ -1305,8 +1339,9 @@ def _run_dispatch_incident_maintenance(
         if item_summary['applied_actions']:
             changed_request_ids.append(booking.id)
 
-    if not dry_run and changed_request_ids:
+    if not dry_run and (changed_request_ids or escalated_request_ids):
         db.session.commit()
+    if not dry_run and changed_request_ids:
         for job in publish_jobs:
             booking = db.session.get(WasteRemovalRequest, job['request_id'])
             if not booking:
@@ -1342,6 +1377,7 @@ def _run_dispatch_incident_maintenance(
             'auto_assigned': auto_assigned if not dry_run else 0,
             'auto_resolved_test': auto_resolved if not dry_run else 0,
             'skipped_owner_unavailable': skipped_owner_unavailable,
+            'escalations_sent': len(escalated_request_ids) if not dry_run else 0,
             'changed_request_count': len(set(changed_request_ids)) if not dry_run else 0,
         },
         'items': items,

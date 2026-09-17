@@ -4,7 +4,7 @@ services:
     env: python
     plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn wsgi:app
+    startCommand: gunicorn --config gunicorn.conf.py wsgi:app
     autoDeploy: true
     envVars: &backend_env
       - key: FLASK_ENV

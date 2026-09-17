@@ -56,6 +56,7 @@
             </li>
             <li class="navbar-cta-item">
               <form method="post" action="/logout" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-default navbar-btn">Logout</button>
               </form>
             </li>

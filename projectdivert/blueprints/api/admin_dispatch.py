@@ -9,7 +9,7 @@ from projectdivert.models.waste import WasteRemovalDispatchOffer, WasteRemovalRe
 from projectdivert.services.audit import record_audit_event
 from projectdivert.services.auth import jwt_required
 from projectdivert.services.compliance import _driver_dispatch_eligibility_error
-from projectdivert.services.dispatch import _accept_dispatch_offer, _build_dispatch_request_timeline, _dispatch_incident_auto_assign_enabled, _dispatch_incident_auto_resolve_test_enabled, _dispatch_incident_severity, _dispatch_location_stale_minutes, _dispatch_pending_match_sla_minutes, _dispatch_send_escalation_webhook, _dispatch_summary_for_request, _dispatch_unassigned_match_sla_minutes, _get_dispatch_incident_context, _record_dispatch_incident_event, _run_dispatch_incident_maintenance, _serialize_dispatch_driver, _serialize_dispatch_offer, _serialize_dispatch_queue_item, _serialize_waste_match, _serialize_waste_request, _serialize_waste_request_snapshot
+from projectdivert.services.dispatch import _accept_dispatch_offer, _build_dispatch_request_timeline, _dispatch_incident_auto_assign_enabled, _dispatch_incident_auto_resolve_test_enabled, _dispatch_incident_severity, _dispatch_location_stale_minutes, _dispatch_pending_match_sla_minutes, _dispatch_summary_for_request, _dispatch_unassigned_match_sla_minutes, _get_dispatch_incident_context, _record_dispatch_incident_event, _run_dispatch_incident_maintenance, _serialize_dispatch_driver, _serialize_dispatch_offer, _serialize_dispatch_queue_item, _serialize_waste_match, _serialize_waste_request, _serialize_waste_request_snapshot
 from projectdivert.services.events import _publish_waste_request_event
 from projectdivert.services.notifications import _notify_mobile_push_for_waste_event
 from projectdivert.services.utils import _current_jwt_email, _current_jwt_user_id, _is_truthy, _normalize_email, _parse_optional_bool_query, _parse_optional_int_query, _to_int_or_none
@@ -97,7 +97,6 @@ def api_admin_dispatch_queue():
     incident_counts = {}
     incident_state_counts = {}
     incident_severity_counts = {}
-    escalation_dirty = False
     for booking in rows:
         status_key = (booking.status or '').strip().lower() or 'unknown'
         status_counts[status_key] = status_counts.get(status_key, 0) + 1
@@ -122,15 +121,7 @@ def api_admin_dispatch_queue():
             incident_state_counts[state] = incident_state_counts.get(state, 0) + 1
         if severity:
             incident_severity_counts[severity] = incident_severity_counts.get(severity, 0) + 1
-        if _dispatch_send_escalation_webhook(booking, queue_item, now=now, source='api_admin_dispatch_queue'):
-            escalation_dirty = True
         items.append(queue_item)
-    if escalation_dirty:
-        try:
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-            current_app.logger.exception('Failed to persist dispatch queue escalation markers.')
 
     if incidents_only:
         items = [item for item in items if item.get('incident_flags')]
@@ -221,7 +212,6 @@ def api_admin_dispatch_incidents():
 
     now = datetime.utcnow()
     items = []
-    escalation_dirty = False
     for booking in rows:
         queue_item = _get_dispatch_incident_context(booking, now=now)
         has_flags = bool(queue_item.get('incident_flags'))
@@ -230,15 +220,7 @@ def api_admin_dispatch_incidents():
             continue
         if incident_state != 'all' and state != incident_state:
             continue
-        if _dispatch_send_escalation_webhook(booking, queue_item, now=now, source='api_admin_dispatch_incidents'):
-            escalation_dirty = True
         items.append(queue_item)
-    if escalation_dirty:
-        try:
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-            current_app.logger.exception('Failed to persist dispatch incidents escalation markers.')
 
     def _incident_sort_key(item):
         flags = item.get('incident_flags') or []
@@ -662,7 +644,6 @@ def api_admin_dispatch_telemetry():
     incident_severity_counts = {}
     ack_latency_values = []
     resolve_latency_values = []
-    escalation_dirty = False
     for booking in rows:
         status_key = (booking.status or '').strip().lower() or 'unknown'
         status_counts[status_key] = status_counts.get(status_key, 0) + 1
@@ -696,15 +677,7 @@ def api_admin_dispatch_telemetry():
             resolve_latency_values.append(
                 max(0, int((booking.incident_resolved_at - booking.created_at).total_seconds() // 60))
             )
-        if _dispatch_send_escalation_webhook(booking, queue_item, now=now, source='api_admin_dispatch_telemetry'):
-            escalation_dirty = True
         items.append(queue_item)
-    if escalation_dirty:
-        try:
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-            current_app.logger.exception('Failed to persist dispatch telemetry escalation markers.')
 
     if incidents_only:
         items = [item for item in items if item.get('incident_flags')]

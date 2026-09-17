@@ -292,6 +292,7 @@
               </td>
               <td>
                 <form class="dispatch-form" method="post" action="/admin/dispatch/override">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="request_id" value="{{ item.request.id }}">
                   <input type="hidden" name="return_query" value="{{ filter_query_string }}">
                   <select class="form-control" name="driver_user_id">
@@ -306,6 +307,7 @@
                   <button type="submit" class="btn btn-primary btn-sm">Apply</button>
                 </form>
                 <form class="dispatch-form" method="post" action="/admin/dispatch/incident">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="request_id" value="{{ item.request.id }}">
                   <input type="hidden" name="return_query" value="{{ filter_query_string }}">
                   <input type="hidden" name="action" value="ack">
@@ -313,6 +315,7 @@
                   <button type="submit" class="btn btn-warning btn-sm">Acknowledge</button>
                 </form>
                 <form class="dispatch-form" method="post" action="/admin/dispatch/incident">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="request_id" value="{{ item.request.id }}">
                   <input type="hidden" name="return_query" value="{{ filter_query_string }}">
                   <input type="hidden" name="action" value="resolve">
@@ -320,6 +323,7 @@
                   <button type="submit" class="btn btn-default btn-sm">Resolve</button>
                 </form>
                 <form class="dispatch-form" method="post" action="/admin/dispatch/incident-owner">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="request_id" value="{{ item.request.id }}">
                   <input type="hidden" name="return_query" value="{{ filter_query_string }}">
                   <select class="form-control" name="owner_admin_user_id">

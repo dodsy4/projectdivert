@@ -152,6 +152,14 @@ AUTH_SUSPICIOUS_ACTIVITY_REVOKE_MIN_LOCKOUT_LEVEL = _int_env(
     1,
 )
 
+# Shared Redis. Services read these through app.config, so they have to be
+# declared here -- an environment variable alone never reaches Flask's config.
+# Without them the job queue silently runs every job inline and the event
+# stream cannot cross worker processes.
+REDIS_URL = _clean_env_url(os.getenv('REDIS_URL', '')) or ''
+RQ_REDIS_URL = _clean_env_url(os.getenv('RQ_REDIS_URL', '')) or ''
+RQ_JOB_TIMEOUT = _int_env('RQ_JOB_TIMEOUT', 600)
+
 # Ops health monitoring
 OPS_HEALTH_AUTH_WINDOW_MINUTES = _int_env('OPS_HEALTH_AUTH_WINDOW_MINUTES', 60)
 OPS_HEALTH_DISPATCH_LIMIT = _int_env('OPS_HEALTH_DISPATCH_LIMIT', 500)
@@ -189,6 +197,15 @@ COMPLIANCE_S3_PRESIGN_EXP_SECONDS = _int_env('COMPLIANCE_S3_PRESIGN_EXP_SECONDS'
 DISPATCH_OFFER_FANOUT = _int_env('DISPATCH_OFFER_FANOUT', 10)
 WASTE_REQUEST_STREAM_HEARTBEAT_SECONDS = _int_env('WASTE_REQUEST_STREAM_HEARTBEAT_SECONDS', 20)
 WASTE_REQUEST_STREAM_HISTORY_SIZE = _int_env('WASTE_REQUEST_STREAM_HISTORY_SIZE', 200)
+# Without a Redis URL the SSE fan-out cannot leave the publishing process, so a
+# client streaming from one worker misses events produced by another. Falls back
+# to the shared REDIS_URL/RQ_REDIS_URL so a single Redis serves both.
+WASTE_REQUEST_STREAM_REDIS_URL = (os.getenv('WASTE_REQUEST_STREAM_REDIS_URL', '') or '').strip()
+WASTE_REQUEST_STREAM_REDIS_PREFIX = (
+    os.getenv('WASTE_REQUEST_STREAM_REDIS_PREFIX', 'projectdivert:waste-request-events').strip()
+    or 'projectdivert:waste-request-events'
+)
+WASTE_REQUEST_STREAM_HISTORY_TTL_SECONDS = _int_env('WASTE_REQUEST_STREAM_HISTORY_TTL_SECONDS', 3600)
 DISPATCH_PENDING_MATCH_SLA_MINUTES = _int_env('DISPATCH_PENDING_MATCH_SLA_MINUTES', 30)
 DISPATCH_UNASSIGNED_MATCH_SLA_MINUTES = _int_env('DISPATCH_UNASSIGNED_MATCH_SLA_MINUTES', 20)
 DISPATCH_LOCATION_STALE_MINUTES = _int_env('DISPATCH_LOCATION_STALE_MINUTES', 20)

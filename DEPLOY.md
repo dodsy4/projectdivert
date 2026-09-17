@@ -10,9 +10,11 @@
 Copy `.env.example` values into your host's environment settings.
 
 Required minimum:
-- `SECRET_KEY`
+- `SECRET_KEY` (the app refuses to start without it unless `FLASK_DEBUG=1`)
 - `DATABASE_URL`
 - `GOOGLE_MAPS_API_KEY`
+- `REDIS_URL` or `RQ_REDIS_URL` — needed for the job queue and for live job
+  tracking to work across more than one web worker
 
 For auth + request-notification emails:
 - `MAIL_PROVIDER`
@@ -24,7 +26,13 @@ For auth + request-notification emails:
 Option A: use `render.yaml` Blueprint deploy.
 Option B: create a Web Service manually with:
 - Build command: `pip install -r requirements.txt`
-- Start command: `gunicorn wsgi:app`
+- Start command: `gunicorn --config gunicorn.conf.py wsgi:app`
+
+The config file is not optional. Gunicorn's defaults are a single synchronous
+worker, which the Server-Sent Events endpoint at
+`/api/v1/waste-requests/<id>/events` will occupy for as long as one client is
+watching a job, and which the default 30s timeout would kill anyway.
+`gunicorn.conf.py` sets threaded workers and the matching timeouts.
 
 ## 4. Database Migration
 After first deploy, run:
@@ -62,6 +70,12 @@ Use the restore drill checklist monthly and before launch:
 - `FLASK_DEBUG=0`
 - `SESSION_COOKIE_SECURE=1`
 - Rotate `SECRET_KEY` and API keys
+- `SECRET_KEY` and `JWT_SECRET_KEY` must not be the development placeholder;
+  the app refuses to boot if they are, and
+  `scripts/production_preflight.sh` checks the same thing before a deploy
+- CSRF protection covers every cookie-authenticated form; the `/api/v1`
+  blueprints are exempt because they authenticate by Bearer token or provider
+  signature rather than by cookie
 - Enable HTTPS custom domain
 - Enable DB backups on your provider
 - Install local or host-level backup automation (`scripts/db_backup.sh`)

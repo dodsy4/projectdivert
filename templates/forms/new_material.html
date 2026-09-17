@@ -127,6 +127,7 @@
   </div>
 
   <form method="post" class="material-form" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <section class="section-card">
       <h3 class="section-title">Material Details</h3>
 

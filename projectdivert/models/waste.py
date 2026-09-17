@@ -99,6 +99,17 @@ class WasteRequestCommunicationLog(db.Model):
 class WasteRemovalMatch(db.Model):
     __tablename__ = 'waste_removal_matches'
 
+    # One match per request, enforced by the database rather than by the
+    # read-then-write check in _accept_dispatch_offer alone: two drivers
+    # accepting different offers on the same request concurrently would both
+    # see no existing match and both insert one, double-booking the job.
+    __table_args__ = (
+        db.UniqueConstraint(
+            'waste_removal_request_id',
+            name='uq_waste_removal_matches_request_id',
+        ),
+    )
+
     id = db.Column(db.Integer, primary_key=True)
     waste_removal_request_id = db.Column(
         db.Integer,

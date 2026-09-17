@@ -3,6 +3,7 @@
 {% block content %}
   <div class="form-wrapper">
     <form method="post" class="form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <h3 class="form-heading">Send Material Request</h3>
       <p class="text-muted">Share your contact details and a short message so the material owner can respond.</p>
       <div class="form-group">
