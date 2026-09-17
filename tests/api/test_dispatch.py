@@ -908,3 +908,51 @@ def test_waste_request_completion_requires_verified_collection_documents(client,
     )
     assert completed.status_code == 200
     assert completed.get_json()['request']['status'] == 'completed'
+
+
+def test_accepting_an_offer_locks_the_request_row(app_context):
+    """Concurrent acceptances must serialise on the request row.
+
+    SQLite ignores ``FOR UPDATE``, so a behavioural test cannot catch the lock
+    going missing -- the statement itself is inspected instead.
+    """
+    from sqlalchemy import event
+
+    from projectdivert.services.dispatch import _accept_dispatch_offer
+
+    db = app_context.db
+    with app_context.app.app_context():
+        booking = app_context.WasteRemovalRequest(
+            requester_name='Sam', requester_email='sam@example.com',
+            material_type='Timber', waste_amount=2.0, waste_unit='tonnes',
+            pickup_address='1 Site Road', pickup_postcode='SW1A1AA',
+            scheduled_pickup_at=datetime.utcnow() + timedelta(days=2),
+            status='pending',
+        )
+        db.session.add(booking)
+        db.session.commit()
+        offer = app_context.WasteRemovalDispatchOffer(
+            waste_removal_request_id=booking.id,
+            provider_name='Acme Recycling', provider_latitude=51.5,
+            provider_longitude=-0.12, distance_miles=4.2, match_radius_miles=25.0,
+            offer_rank=1, offer_token='lock-test-token', status='offered',
+        )
+        db.session.add(offer)
+        db.session.commit()
+
+        locked_statements = []
+
+        @event.listens_for(db.engine, 'before_execute')
+        def _record_locking_selects(conn, clauseelement, multiparams, params, execution_options):
+            if getattr(clauseelement, '_for_update_arg', None) is not None:
+                locked_statements.append(str(clauseelement))
+
+        try:
+            _match, outcome = _accept_dispatch_offer(booking, offer)
+        finally:
+            event.remove(db.engine, 'before_execute', _record_locking_selects)
+
+        assert outcome == 'accepted'
+        assert any('FROM waste_removal_requests' in statement for statement in locked_statements), (
+            'the request row should be selected FOR UPDATE before the match is created'
+        )
