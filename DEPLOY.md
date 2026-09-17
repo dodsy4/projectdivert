@@ -35,8 +35,15 @@ watching a job, and which the default 30s timeout would kill anyway.
 `gunicorn.conf.py` sets threaded workers and the matching timeouts.
 
 ## 4. Database Migration
-After first deploy, run:
+The Blueprint runs `flask db upgrade && flask seed-materials` as a pre-deploy
+step, so a Blueprint deploy migrates itself. Nothing creates tables at runtime:
+Alembic owns the schema, and an un-migrated database now fails loudly instead of
+being silently patched up by whichever web worker happened to serve the first
+request.
+
+On a manually created service, or for the first deploy, run:
 - `flask db upgrade`
+- `flask seed-materials` (loads the bundled material catalogue if it is empty)
 - `flask seed-reference-data` (loads supplier/site/offset reference tables from existing files)
 
 ## 4a. Production Preflight

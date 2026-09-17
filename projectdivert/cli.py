@@ -37,6 +37,26 @@ def seed_reference_data(force):
 
 
 
+@click.command('seed-materials')
+@with_appcontext
+def seed_materials():
+    """Load the bundled material catalogue if the table is empty.
+
+    Used to run on the first request of every process. That made the web
+    workers responsible for populating the database, which is a deploy step, so
+    it lives here and runs once per deploy instead.
+    """
+    from projectdivert.models.catalog import Material
+    from projectdivert.services.reference_data import _seed_materials_if_empty
+
+    before = Material.query.count()
+    _seed_materials_if_empty()
+    after = Material.query.count()
+    click.echo('Materials: {} before, {} after ({} seeded).'.format(
+        before, after, after - before,
+    ))
+
+
 @click.command('auth-token-cleanup')
 @click.option(
     '--retention-days',
@@ -241,6 +261,7 @@ def enqueue_job(job_name, sync, dry_run):
 
 COMMANDS = (
     seed_reference_data,
+    seed_materials,
     auth_token_cleanup,
     ops_health_digest,
     dispatch_incident_maintenance,

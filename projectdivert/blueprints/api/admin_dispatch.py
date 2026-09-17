@@ -4,11 +4,11 @@ from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import SQLAlchemyError
 from projectdivert.extensions import db
 from projectdivert.models.user import User
-from projectdivert.models.waste import WasteRemovalDispatchOffer, WasteRemovalRequest, WasteRemovalVehicleLocation
+from projectdivert.models.waste import WasteRemovalDispatchOffer, WasteRemovalRequest
 from projectdivert.services.audit import record_audit_event
 from projectdivert.services.auth import jwt_required
 from projectdivert.services.compliance import _driver_dispatch_eligibility_error
-from projectdivert.services.dispatch import _accept_dispatch_offer, _build_dispatch_request_timeline, _dispatch_incident_auto_assign_enabled, _dispatch_incident_auto_resolve_test_enabled, _dispatch_incident_severity, _dispatch_location_stale_minutes, _dispatch_pending_match_sla_minutes, _dispatch_summary_for_request, _dispatch_unassigned_match_sla_minutes, _get_dispatch_incident_context, _record_dispatch_incident_event, _run_dispatch_incident_maintenance, _serialize_dispatch_driver, _serialize_dispatch_offer, _serialize_dispatch_queue_item, _serialize_waste_match, _serialize_waste_request, _serialize_waste_request_snapshot
+from projectdivert.services.dispatch import _accept_dispatch_offer, DispatchQueueContext, _build_dispatch_request_timeline, _dispatch_incident_auto_assign_enabled, _dispatch_incident_auto_resolve_test_enabled, _dispatch_incident_severity, _dispatch_location_stale_minutes, _dispatch_pending_match_sla_minutes, _dispatch_summary_for_request, _dispatch_unassigned_match_sla_minutes, _get_dispatch_incident_context, _record_dispatch_incident_event, _run_dispatch_incident_maintenance, _serialize_dispatch_driver, _serialize_dispatch_offer, _serialize_waste_match, _serialize_waste_request, _serialize_waste_request_snapshot
 from projectdivert.services.events import _publish_waste_request_event
 from projectdivert.services.notifications import _notify_mobile_push_for_waste_event
 from projectdivert.services.utils import _current_jwt_email, _current_jwt_user_id, _is_truthy, _normalize_email, _parse_optional_bool_query, _parse_optional_int_query, _to_int_or_none, utcnow
@@ -96,22 +96,12 @@ def api_admin_dispatch_queue():
     incident_counts = {}
     incident_state_counts = {}
     incident_severity_counts = {}
+    queue_context = DispatchQueueContext(rows)
     for booking in rows:
         status_key = (booking.status or '').strip().lower() or 'unknown'
         status_counts[status_key] = status_counts.get(status_key, 0) + 1
 
-        driver = db.session.get(User, booking.assigned_driver_user_id) if booking.assigned_driver_user_id else None
-        latest_location = (
-            WasteRemovalVehicleLocation.query.filter_by(waste_removal_request_id=booking.id)
-            .order_by(WasteRemovalVehicleLocation.recorded_at.desc(), WasteRemovalVehicleLocation.id.desc())
-            .first()
-        )
-        queue_item = _serialize_dispatch_queue_item(
-            booking,
-            driver=driver,
-            latest_location=latest_location,
-            now=now,
-        )
+        queue_item = queue_context.serialize(booking, now=now)
         for flag in queue_item['incident_flags']:
             incident_counts[flag] = incident_counts.get(flag, 0) + 1
         state = (queue_item.get('incident') or {}).get('state')
@@ -643,22 +633,12 @@ def api_admin_dispatch_telemetry():
     incident_severity_counts = {}
     ack_latency_values = []
     resolve_latency_values = []
+    queue_context = DispatchQueueContext(rows)
     for booking in rows:
         status_key = (booking.status or '').strip().lower() or 'unknown'
         status_counts[status_key] = status_counts.get(status_key, 0) + 1
 
-        driver = db.session.get(User, booking.assigned_driver_user_id) if booking.assigned_driver_user_id else None
-        latest_location = (
-            WasteRemovalVehicleLocation.query.filter_by(waste_removal_request_id=booking.id)
-            .order_by(WasteRemovalVehicleLocation.recorded_at.desc(), WasteRemovalVehicleLocation.id.desc())
-            .first()
-        )
-        queue_item = _serialize_dispatch_queue_item(
-            booking,
-            driver=driver,
-            latest_location=latest_location,
-            now=now,
-        )
+        queue_item = queue_context.serialize(booking, now=now)
         for flag in queue_item.get('incident_flags') or []:
             incident_counts[flag] = incident_counts.get(flag, 0) + 1
         incident_info = queue_item.get('incident') or {}
