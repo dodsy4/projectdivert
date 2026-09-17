@@ -51,6 +51,22 @@ def _make_request(app_context, email='sam@example.com', status='pending',
         return booking.id
 
 
+def _make_offer(app_context, request_id, rank=1, status='offered', provider='Acme Recycling'):
+    with app_context.app.app_context():
+        offer = app_context.WasteRemovalDispatchOffer(
+            waste_removal_request_id=request_id,
+            provider_name=provider, provider_type='recycler',
+            provider_city='London', provider_postcode='SW1A1AA',
+            provider_latitude=51.5, provider_longitude=-0.12,
+            distance_miles=4.2, match_radius_miles=25.0,
+            offer_rank=rank, offer_token='token-{}-{}'.format(request_id, rank),
+            status=status,
+        )
+        app_context.db.session.add(offer)
+        app_context.db.session.commit()
+        return offer.id
+
+
 # ---------------------------------------------------------------------------
 # Webhook security
 # ---------------------------------------------------------------------------
@@ -193,6 +209,54 @@ def test_claiming_requires_a_driver_role(app_context):
         user = app_context.db.session.get(app_context.User, user_id)
         result = chatbot._tool_claim_job(user, request_id)
     assert 'Only a driver' in result['error']
+
+
+def test_claiming_a_job_accepts_the_open_offer(app_context):
+    """The happy path: an offer sits at ``offered``, and a claim matches it."""
+    user_id = _make_user(app_context, role='driver', email='driver@example.com')
+    request_id = _make_request(app_context)
+    offer_id = _make_offer(app_context, request_id)
+    with app_context.app.app_context():
+        user = app_context.db.session.get(app_context.User, user_id)
+        result = chatbot._tool_claim_job(user, request_id)
+
+        assert result.get('claimed') is True, result
+        assert result['request']['request_id'] == request_id
+
+        match = app_context.WasteRemovalMatch.query.filter_by(
+            waste_removal_request_id=request_id).first()
+        assert match is not None
+        assert match.provider_name == 'Acme Recycling'
+
+        booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
+        assert booking.assigned_driver_user_id == user_id
+        assert booking.status == 'matched'
+
+        offer = app_context.db.session.get(app_context.WasteRemovalDispatchOffer, offer_id)
+        assert offer.status == 'accepted'
+
+
+def test_claiming_an_already_matched_job_is_not_reported_as_a_claim(app_context):
+    """``already_matched`` comes back as an outcome, and must not read as success."""
+    user_id = _make_user(app_context, role='driver', email='driver@example.com')
+    request_id = _make_request(app_context)
+    _make_offer(app_context, request_id, rank=1)
+    with app_context.app.app_context():
+        user = app_context.db.session.get(app_context.User, user_id)
+        assert chatbot._tool_claim_job(user, request_id).get('claimed') is True
+
+    # A second open offer arriving after the match -- the shape a concurrent
+    # acceptance leaves behind.
+    _make_offer(app_context, request_id, rank=2, provider='Beta Skips')
+    with app_context.app.app_context():
+        user = app_context.db.session.get(app_context.User, user_id)
+        result = chatbot._tool_claim_job(user, request_id)
+        assert 'claimed' not in result
+        assert 'already' in result['error']
+
+        matches = app_context.WasteRemovalMatch.query.filter_by(
+            waste_removal_request_id=request_id).count()
+        assert matches == 1
 
 
 def test_creating_a_request_rejects_a_past_date(app_context):

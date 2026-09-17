@@ -318,11 +318,39 @@ def _dispatch_summary_for_request(request_id):
 
 
 def _accept_dispatch_offer(booking, offer, assigned_driver_user_id=None):
+    """Accept one dispatch offer, returning ``(match_row, outcome)``.
+
+    ``outcome`` is ``'accepted'`` only when this call created the match. Every
+    other value -- ``'already_matched'``, ``'driver_mismatch'``,
+    ``'offer_unavailable'``, ``'invalid_offer'`` -- means no match was made, so
+    callers must compare against ``'accepted'`` rather than treating the second
+    value as an error flag (it is truthy on success).
+
+    Two drivers can accept two different offers for the same request at the
+    same instant. Both would read an ``offered`` offer and no existing match,
+    and both would create one, double-booking the job. So the request row is
+    locked first and the offer re-read underneath it: every acceptance for a
+    given request serialises on that row, and the loser sees the winner's
+    committed match and gets ``already_matched``. SQLite ignores ``FOR UPDATE``,
+    which is why the test inspects the statement rather than racing.
+    """
     if not booking or not offer:
         return None, 'invalid_offer'
 
     if offer.waste_removal_request_id != booking.id:
         return None, 'invalid_offer'
+
+    booking = (
+        db.session.query(WasteRemovalRequest)
+        .filter(WasteRemovalRequest.id == booking.id)
+        .populate_existing()
+        .with_for_update()
+        .first()
+    )
+    if not booking:
+        return None, 'invalid_offer'
+    # The offer was read before the lock, so its status may be stale by now.
+    db.session.refresh(offer)
 
     if assigned_driver_user_id is not None:
         if booking.assigned_driver_user_id and booking.assigned_driver_user_id != assigned_driver_user_id:

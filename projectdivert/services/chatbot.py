@@ -308,6 +308,14 @@ def _tool_get_my_jobs(user):
     return {'count': len(rows), 'jobs': [_summarise_request(r) for r in rows]}
 
 
+_CLAIM_OUTCOME_ERRORS = {
+    'already_matched': 'Someone else has already been matched to that job.',
+    'driver_mismatch': 'That job is assigned to a different driver.',
+    'offer_unavailable': 'That dispatch offer is no longer available.',
+    'invalid_offer': 'That dispatch offer is not valid for this job.',
+}
+
+
 def _tool_claim_job(user, request_id):
     if user.role not in ('driver', 'admin'):
         return {'error': 'Only a driver can claim a job.'}
@@ -319,7 +327,7 @@ def _tool_claim_job(user, request_id):
         WasteRemovalDispatchOffer.query
         .filter(
             WasteRemovalDispatchOffer.waste_removal_request_id == booking.id,
-            WasteRemovalDispatchOffer.status == 'pending',
+            WasteRemovalDispatchOffer.status == 'offered',
         )
         .order_by(WasteRemovalDispatchOffer.offer_rank.asc())
         .first()
@@ -327,9 +335,12 @@ def _tool_claim_job(user, request_id):
     if not offer:
         return {'error': 'That job has no open dispatch offer left to claim.'}
 
-    match, error = _accept_dispatch_offer(booking, offer, assigned_driver_user_id=user.id)
-    if error:
-        return {'error': 'Could not claim that job ({}).'.format(error)}
+    # The second value is an outcome, not an error flag: only 'accepted' is a
+    # claim. The others are mapped to the same messages the JSON API gives.
+    _match, outcome = _accept_dispatch_offer(booking, offer, assigned_driver_user_id=user.id)
+    if outcome != 'accepted':
+        return {'error': _CLAIM_OUTCOME_ERRORS.get(
+            outcome, 'Could not claim that job ({}).'.format(outcome))}
 
     record_audit_event(
         action='dispatch_offer.accept',
