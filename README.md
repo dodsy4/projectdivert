@@ -125,9 +125,15 @@ Quick local backend setup:
 ```bash
 pip install -r requirements.txt
 export FLASK_APP=wsgi.py
+export FLASK_DEBUG=1          # or set SECRET_KEY: the app refuses to serve with the placeholder
 flask db upgrade
 flask run
 ```
+
+In production the app is served through `gunicorn.conf.py`, which configures
+threaded workers — the live job stream is a long-lived SSE response, and
+gunicorn's default single synchronous worker cannot serve it alongside anything
+else. See [`DEPLOY.md`](./DEPLOY.md).
 
 Or with Docker:
 ```bash

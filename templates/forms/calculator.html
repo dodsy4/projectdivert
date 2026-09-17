@@ -61,6 +61,7 @@
   </div>
 
   <form method="post" class="calc-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <section class="calc-section">
       <h3 class="calc-title">1. Material and Quantity</h3>
 

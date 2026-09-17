@@ -11,7 +11,7 @@ from projectdivert.models.waste import WasteRemovalRequest, WasteRemovalVehicleL
 from projectdivert.services.audit import _build_audit_events_query, _serialize_audit_event
 from projectdivert.services.auth import _current_user_is_admin
 from projectdivert.services.compliance import _driver_dispatch_eligibility_error
-from projectdivert.services.dispatch import _build_dispatch_request_timeline, _dispatch_incident_severity, _dispatch_location_stale_minutes, _dispatch_pending_match_sla_minutes, _dispatch_send_escalation_webhook, _dispatch_unassigned_match_sla_minutes, _get_dispatch_incident_context, _record_dispatch_incident_event, _serialize_dispatch_driver, _serialize_dispatch_queue_item, _serialize_waste_request, _serialize_waste_request_snapshot
+from projectdivert.services.dispatch import _build_dispatch_request_timeline, _dispatch_incident_severity, _dispatch_location_stale_minutes, _dispatch_pending_match_sla_minutes, _dispatch_unassigned_match_sla_minutes, _get_dispatch_incident_context, _record_dispatch_incident_event, _serialize_dispatch_driver, _serialize_dispatch_queue_item, _serialize_waste_request, _serialize_waste_request_snapshot
 from projectdivert.services.events import _publish_waste_request_event
 from projectdivert.services.notifications import _notify_mobile_push_for_waste_event
 from projectdivert.services.utils import _parse_optional_bool_query, _parse_optional_int_query, _to_int_or_none
@@ -95,7 +95,6 @@ def admin_dispatch_board():
     queue_items = []
     status_counts = {}
     incident_counts = {}
-    escalation_dirty = False
     for booking in rows:
         status_key = (booking.status or '').strip().lower() or 'unknown'
         status_counts[status_key] = status_counts.get(status_key, 0) + 1
@@ -115,15 +114,7 @@ def admin_dispatch_board():
         )
         for flag in queue_item.get('incident_flags') or []:
             incident_counts[flag] = incident_counts.get(flag, 0) + 1
-        if _dispatch_send_escalation_webhook(booking, queue_item, now=now, source='admin_dispatch_board'):
-            escalation_dirty = True
         queue_items.append(queue_item)
-    if escalation_dirty:
-        try:
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-            current_app.logger.exception('Failed to persist dispatch board escalation markers.')
     if incidents_only:
         queue_items = [item for item in queue_items if item.get('incident_flags')]
     if incident_state_filter != 'all':

@@ -30,6 +30,7 @@ def _register_blueprints(app):
         admin_security, auth, compliance, docs, drivers, payments, push,
         waste_requests, whatsapp,
     )
+    from projectdivert.extensions import csrf
 
     for module in (
         web, admin,
@@ -38,6 +39,19 @@ def _register_blueprints(app):
         docs, whatsapp, certificates,
     ):
         app.register_blueprint(module.bp)
+
+    # web, admin and certificates are cookie-authenticated: a cross-site POST
+    # would carry the session, so they need CSRF tokens. Everything under
+    # /api/v1 is authenticated by a Bearer token or a provider signature and
+    # never by a cookie, so a forged cross-site request has nothing to borrow --
+    # and requiring a token there would be unobtainable for the mobile app and
+    # would break Stripe's and Twilio's webhook posts outright.
+    for module in (
+        auth, admin_security, admin_ops, admin_billing, admin_dispatch,
+        admin_compliance, drivers, compliance, payments, push, waste_requests,
+        docs, whatsapp,
+    ):
+        csrf.exempt(module.bp)
 
 
 def _register_template_filters(app):
@@ -81,6 +95,39 @@ def _configure_logging(app):
         logger.setLevel(logging.INFO)
 
 
+#: The placeholder in config.py, kept here so the guard below is self-contained.
+DEV_SECRET_KEY = 'dev-only-change-me'
+
+
+def _verify_secrets(app):
+    """Refuse to serve with the placeholder secret key.
+
+    SECRET_KEY signs session cookies and, unless JWT_SECRET_KEY is set
+    separately, every API access and refresh token. Left at its default, all of
+    those are forgeable by anyone who has read config.py -- so this is a boot
+    failure rather than a warning. scripts/production_preflight.sh checks the
+    same thing before a deploy; this catches the case where nobody ran it.
+
+    Debug and testing runs are exempt, so the local quickstart still works
+    without any environment set up.
+    """
+    if app.debug or app.config.get('TESTING'):
+        return
+
+    insecure = [
+        name for name in ('SECRET_KEY', 'JWT_SECRET_KEY')
+        if not str(app.config.get(name) or '').strip()
+        or str(app.config.get(name)).strip() == DEV_SECRET_KEY
+    ]
+    if insecure:
+        raise RuntimeError(
+            '{} must be set to a strong random value before serving traffic '
+            '(currently unset or using the development default). Set it in the '
+            'environment, or run with FLASK_DEBUG=1 for local development.'
+            .format(' and '.join(insecure))
+        )
+
+
 def create_app(config_object='config'):
     """Build and configure a Project Divert application instance."""
     # root_path is pinned to the repository root, not the package directory:
@@ -93,6 +140,7 @@ def create_app(config_object='config'):
         static_folder=os.path.join(BASE_DIR, 'static'),
     )
     app.config.from_object(config_object)
+    _verify_secrets(app)
 
     init_extensions(app)
 

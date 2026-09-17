@@ -3,6 +3,7 @@
 {% block content %}
   <div class="form-wrapper">
     <form method="post" class="form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <h3 class="form-heading">Find Nearby Materials</h3>
       <p class="text-muted">Enter a postcode and search radius in miles to see available materials near your area.</p>
       <div class="form-group">

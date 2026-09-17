@@ -82,6 +82,7 @@
   </div>
 
   <form method="post" class="account-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <section class="section-card">
       <h3 class="section-title">1. Organization Details</h3>
       <div class="row">
