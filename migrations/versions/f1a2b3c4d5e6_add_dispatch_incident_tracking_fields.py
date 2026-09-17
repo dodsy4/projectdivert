@@ -65,13 +65,8 @@ def upgrade():
         _has_column(inspector, table_name, 'incident_owner_admin_user_id')
         and not _has_fk_name(inspector, table_name, fk_name)
     ):
-        op.create_foreign_key(
-            fk_name,
-            table_name,
-            'users',
-            ['incident_owner_admin_user_id'],
-            ['id'],
-        )
+        with op.batch_alter_table(table_name) as batch_op:
+            batch_op.create_foreign_key(fk_name, 'users', ['incident_owner_admin_user_id'], ['id'])
 
     for index_name, columns in [
         ('ix_waste_removal_requests_incident_state', ['incident_state']),
@@ -105,7 +100,8 @@ def downgrade():
 
     fk_name = 'fk_waste_removal_requests_incident_owner_admin_user_id_users'
     if _has_fk_name(inspector, table_name, fk_name):
-        op.drop_constraint(fk_name, table_name, type_='foreignkey')
+        with op.batch_alter_table(table_name) as batch_op:
+            batch_op.drop_constraint(fk_name, type_='foreignkey')
 
     inspector = sa.inspect(bind)
     for column_name in [

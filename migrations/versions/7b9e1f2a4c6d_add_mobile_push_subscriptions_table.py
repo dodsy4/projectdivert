@@ -64,13 +64,13 @@ def upgrade():
             op.create_index('ix_mobile_push_subscriptions_is_active', table_name, ['is_active'], unique=False)
 
         if not _has_fk(inspector, table_name, 'user_id'):
-            op.create_foreign_key(
-                'fk_mobile_push_subscriptions_user_id_users',
-                table_name,
-                'users',
-                ['user_id'],
-                ['id'],
-            )
+            with op.batch_alter_table(table_name) as batch_op:
+                batch_op.create_foreign_key(
+                    'fk_mobile_push_subscriptions_user_id_users',
+                    'users',
+                    ['user_id'],
+                    ['id'],
+                )
 
 
 def downgrade():
@@ -89,6 +89,10 @@ def downgrade():
         op.drop_index('ix_mobile_push_subscriptions_user_id', table_name=table_name)
 
     if _has_fk(inspector, table_name, 'user_id'):
-        op.drop_constraint('fk_mobile_push_subscriptions_user_id_users', table_name, type_='foreignkey')
+        with op.batch_alter_table(table_name) as batch_op:
+            batch_op.drop_constraint(
+                'fk_mobile_push_subscriptions_user_id_users',
+                type_='foreignkey',
+            )
 
     op.drop_table(table_name)

@@ -60,13 +60,13 @@ def upgrade():
     inspector = sa.inspect(bind)
     if not _has_column(inspector, users_table, 'carrier_company_id'):
         op.add_column(users_table, sa.Column('carrier_company_id', sa.Integer(), nullable=True))
-        op.create_foreign_key(
-            'fk_users_carrier_company_id_carrier_companies',
-            users_table,
-            company_table,
-            ['carrier_company_id'],
-            ['id'],
-        )
+        with op.batch_alter_table(users_table) as batch_op:
+            batch_op.create_foreign_key(
+                'fk_users_carrier_company_id_carrier_companies',
+                company_table,
+                ['carrier_company_id'],
+                ['id'],
+            )
 
     inspector = sa.inspect(bind)
     if _has_column(inspector, users_table, 'carrier_company_id') and not _has_index(
@@ -137,7 +137,11 @@ def downgrade():
     if _has_column(inspector, users_table, 'carrier_company_id'):
         if _has_index(inspector, users_table, 'ix_users_carrier_company_id'):
             op.drop_index('ix_users_carrier_company_id', table_name=users_table)
-        op.drop_constraint('fk_users_carrier_company_id_carrier_companies', users_table, type_='foreignkey')
+        with op.batch_alter_table(users_table) as batch_op:
+            batch_op.drop_constraint(
+                'fk_users_carrier_company_id_carrier_companies',
+                type_='foreignkey',
+            )
         op.drop_column(users_table, 'carrier_company_id')
 
     inspector = sa.inspect(bind)

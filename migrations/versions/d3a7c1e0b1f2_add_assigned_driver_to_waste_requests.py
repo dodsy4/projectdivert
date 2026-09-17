@@ -49,13 +49,8 @@ def upgrade():
 
     inspector = sa.inspect(bind)
     if not _has_fk(inspector, table_name, column_name):
-        op.create_foreign_key(
-            fk_name,
-            table_name,
-            'users',
-            [column_name],
-            ['id'],
-        )
+        with op.batch_alter_table(table_name) as batch_op:
+            batch_op.create_foreign_key(fk_name, 'users', [column_name], ['id'])
 
     inspector = sa.inspect(bind)
     if not _has_index(inspector, table_name, index_name):
@@ -75,7 +70,8 @@ def downgrade():
 
     inspector = sa.inspect(bind)
     if _has_fk(inspector, table_name, column_name):
-        op.drop_constraint(fk_name, table_name, type_='foreignkey')
+        with op.batch_alter_table(table_name) as batch_op:
+            batch_op.drop_constraint(fk_name, type_='foreignkey')
 
     inspector = sa.inspect(bind)
     if _has_column(inspector, table_name, column_name):
