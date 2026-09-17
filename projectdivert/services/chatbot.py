@@ -18,7 +18,6 @@ Both the Anthropic SDK and a configured API key are optional: without either,
 import json
 import logging
 import time
-from datetime import datetime
 
 from flask import current_app
 
@@ -35,11 +34,11 @@ from projectdivert.services.compliance import (
 )
 from projectdivert.services.dispatch import (
     _accept_dispatch_offer,
-    _create_dispatch_offers_for_request,
     _get_latest_match_for_request,
 )
-from projectdivert.services.geo import PostcodeLookupUnavailable, _postcode_coordinates
-from projectdivert.services.utils import _is_truthy, _to_float_or_none, _to_int_or_none, to_utc_naive, utcnow
+from projectdivert.services.geo import PostcodeLookupUnavailable
+from projectdivert.services.utils import _is_truthy, _to_float_or_none, _to_int_or_none
+from projectdivert.services.waste_requests import WasteRequestError, create_waste_request
 
 logger = logging.getLogger(__name__)
 
@@ -388,60 +387,76 @@ def _tool_complete_job(user, request_id):
 
 
 def _tool_create_request(user, **fields):
-    amount = _to_float_or_none(fields.get('waste_amount'))
-    if amount is None or amount <= 0:
-        return {'error': 'The amount must be a positive number.'}
+    """Raise a collection request on behalf of a WhatsApp user.
 
-    raw_when = str(fields.get('scheduled_pickup_at') or '').strip()
-    try:
-        # replace(tzinfo=None) discarded the offset rather than converting, so
-        # a client sending 14:00+01:00 was stored as 14:00 UTC -- an hour late.
-        scheduled = to_utc_naive(datetime.fromisoformat(raw_when.replace('Z', '+00:00')))
-    except ValueError:
-        return {'error': 'I could not read that collection date. Ask for a date and time.'}
-    if scheduled <= utcnow():
-        return {'error': 'The collection date needs to be in the future.'}
+    Goes through the same service as the web form and the JSON API. It used to
+    have its own copy, which had drifted: it stored status 'pending' rather than
+    'pending_match', so the request never appeared on the dispatch board, and it
+    built dispatch offers without ever persisting them, so no driver was
+    notified and there was nothing for anyone to claim.
+    """
+    payload = {
+        # The requester is whoever is messaging; the assistant never asks.
+        'requester_name': (user.name or user.email or 'WhatsApp user'),
+        'requester_email': (user.email or ''),
+        # Defaults the conversation does not need to establish.
+        'waste_unit': str(fields.get('waste_unit') or 'tonnes'),
+        'match_radius_miles': (
+            _to_float_or_none(current_app.config.get('WHATSAPP_DEFAULT_MATCH_RADIUS_MILES'))
+            or 25.0
+        ),
+    }
+    for field in ('material_type', 'waste_amount', 'pickup_address',
+                  'pickup_postcode', 'scheduled_pickup_at', 'notes',
+                  'custom_material_type', 'pickup_city', 'pickup_county'):
+        if fields.get(field) is not None:
+            payload[field] = fields[field]
 
-    postcode = str(fields.get('pickup_postcode') or '').strip()
     try:
-        latitude, longitude = _postcode_coordinates(postcode)
+        created = create_waste_request(payload)
+    except WasteRequestError as exc:
+        db.session.rollback()
+        return {'error': _conversational_error(exc)}
     except PostcodeLookupUnavailable:
+        db.session.rollback()
         return {'error': 'The postcode service is down, so I cannot book that '
                          'right now. Tell the user to try again shortly.'}
-    except ValueError:
-        return {'error': 'That postcode did not look valid. Ask the user to check it.'}
-
-    booking = WasteRemovalRequest(
-        requester_name=(user.name or user.email or 'WhatsApp user')[:120],
-        requester_email=(user.email or '')[:255].lower(),
-        material_type=str(fields.get('material_type') or '')[:120],
-        waste_amount=amount,
-        waste_unit=str(fields.get('waste_unit') or 'tonnes')[:32],
-        pickup_address=str(fields.get('pickup_address') or '')[:255],
-        pickup_postcode=postcode[:32],
-        scheduled_pickup_at=scheduled,
-        notes=(str(fields.get('notes') or '').strip() or None),
-        status='pending',
-    )
-    db.session.add(booking)
-    db.session.commit()
-
-    radius = _to_float_or_none(current_app.config.get('WHATSAPP_DEFAULT_MATCH_RADIUS_MILES')) or 25.0
-    try:
-        _create_dispatch_offers_for_request(booking, latitude, longitude, radius)
-        db.session.commit()
-    except Exception:
-        logger.exception('Creating dispatch offers for request %s failed.', booking.id)
+    except ValueError as exc:
+        db.session.rollback()
+        return {'error': str(exc)}
 
     record_audit_event(
         action='waste_request.create',
         entity_type='waste_request',
-        entity_id=booking.id,
+        entity_id=created.booking.id,
         summary='Raised via the WhatsApp assistant',
         source='whatsapp_bot',
     )
     db.session.commit()
-    return {'created': True, 'request': _summarise_request(booking)}
+    return {'created': True, 'request': _summarise_request(created.booking)}
+
+
+#: Service errors phrased for the assistant to say out loud. Anything not listed
+#: falls through to the service's own wording, which is already a sentence.
+_CONVERSATIONAL_ERRORS = {
+    'waste_amount must be a positive number': 'The amount must be a positive number.',
+    'scheduled_pickup_at must be in the future': 'The collection date needs to be in the future.',
+    'Please provide a valid scheduled_pickup_at.': (
+        'I could not read that collection date. Ask for a date and time.'
+    ),
+    'Please enter a valid pickup postcode.': (
+        'That postcode did not look valid. Ask the user to check it.'
+    ),
+}
+
+
+def _conversational_error(exc):
+    message = str(exc)
+    if message in _CONVERSATIONAL_ERRORS:
+        return _CONVERSATIONAL_ERRORS[message]
+    if exc.fields and message == 'Missing required field(s)':
+        return 'I still need: {}. Ask the user for them.'.format(', '.join(exc.fields))
+    return message
 
 
 def _tool_list_reuse_material(user, **fields):

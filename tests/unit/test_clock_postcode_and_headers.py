@@ -96,15 +96,12 @@ def test_the_package_uses_no_other_clock():
 
 def test_whatsapp_pickup_times_honour_an_offset(app_context, monkeypatch):
     """The chatbot used to drop the offset, booking an hour late."""
-    from projectdivert.services import chatbot
+    from projectdivert.services import chatbot, waste_requests
 
-    captured = {}
-
-    def _capture(postcode):
-        captured['postcode'] = postcode
-        return 51.5072, -0.1276
-
-    monkeypatch.setattr(chatbot, '_postcode_coordinates', _capture)
+    # All three transports geocode through the shared service now.
+    monkeypatch.setattr(
+        waste_requests, '_postcode_coordinates', lambda postcode: (51.5072, -0.1276),
+    )
     monkeypatch.setattr(app_context.reference_data, 'suppliers', None)
 
     user = app_context.User(email='wa@example.com', name='WA', role='customer',

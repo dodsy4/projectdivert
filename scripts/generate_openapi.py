@@ -91,8 +91,18 @@ def required_roles(decorators):
 
 
 def json_body_fields(node):
-    """Field names read off the parsed JSON body of a view."""
-    body_vars = set()
+    """Field names read off the parsed JSON body of a view or service.
+
+    A view assigns the body from get_json(); a service is handed it as a
+    parameter, so its parameters count as body sources too -- otherwise the
+    optional fields a service reads never reach the spec.
+    """
+    body_vars = {arg.arg for arg in node.args.args}
+    body_vars.update(arg.arg for arg in getattr(node.args, 'kwonlyargs', []))
+    # A view's own parameters are path arguments, not a body.
+    if any(getattr(d, 'id', '') == 'bp' or 'bp.route' in ast.dump(d)
+           for d in node.decorator_list):
+        body_vars = set()
     for x in ast.walk(node):
         if isinstance(x, ast.Assign) and isinstance(x.value, (ast.Call, ast.BoolOp)):
             seg = ast.dump(x.value)
@@ -176,6 +186,92 @@ def error_messages(node):
 SERVICE_DIR = ROOT / 'projectdivert' / 'services'
 
 
+def load_service_functions():
+    """Map service function name -> (its ast.FunctionDef, its module's tree).
+
+    A view that hands the work to a service still has to document what that
+    service accepts and what it can refuse, so the analysis has to follow the
+    call rather than stop at the view body.
+    """
+    out = {}
+    for path in sorted(SERVICE_DIR.rglob('*.py')):
+        tree = ast.parse(path.read_text())
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef):
+                out.setdefault(node.name, (node, tree))
+    return out
+
+
+def analysed_nodes(view_node, service_functions, depth=2):
+    """The view, the services it calls, and the helpers those call.
+
+    Bounded depth on purpose: it reaches a service and the helper it validates
+    with, without dragging in the whole call graph beneath.
+    """
+    def body_calls(fn):
+        # Walk the body only. ast.walk on a FunctionDef also covers its
+        # decorator_list, which would follow jwt_required into the auth service
+        # and attach its 401/403 errors to every endpoint in the API.
+        for statement in fn.body:
+            for x in ast.walk(statement):
+                yield x
+
+    nodes, trees, seen = [view_node], [], set()
+    frontier, remaining = [view_node], depth
+    while frontier and remaining > 0:
+        next_frontier = []
+        for current in frontier:
+            for x in body_calls(current):
+                if not (isinstance(x, ast.Call) and isinstance(x.func, ast.Name)):
+                    continue
+                found = service_functions.get(x.func.id)
+                if found is None or x.func.id in seen:
+                    continue
+                seen.add(x.func.id)
+                node, tree = found
+                nodes.append(node)
+                trees.append(tree)
+                next_frontier.append(node)
+        frontier, remaining = next_frontier, remaining - 1
+    return nodes, trees
+
+
+def constant_string_sequence_fields(tree, wanted='required'):
+    """Field names from a module-level FIELDS constant, list or tuple.
+
+    A service declares REQUIRED_FIELDS at module level rather than rebuilding
+    the list inside the function, which the in-function scan cannot see.
+    """
+    found = set()
+    for node in getattr(tree, 'body', []):
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, (ast.Tuple, ast.List)):
+            continue
+        names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        if not names or not names[0].lower().endswith(('field', 'fields')):
+            continue
+        if wanted not in names[0].lower():
+            continue
+        found.update(e.value for e in node.value.elts
+                     if isinstance(e, ast.Constant) and isinstance(e.value, str))
+    return sorted(found)
+
+
+def raised_error_messages(node):
+    """Messages from ``raise SomeError('...')`` inside a service.
+
+    Views report errors by returning a dict; a service raises instead, so the
+    dict scan alone would document none of them.
+    """
+    out = set()
+    for x in ast.walk(node):
+        if not isinstance(x, ast.Raise) or not isinstance(x.exc, ast.Call):
+            continue
+        for arg in x.exc.args:
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                out.add(arg.value)
+    return sorted(out)
+
+
 def load_serializer_keys():
     """Map serializer function name -> the keys of the dict it returns."""
     out = {}
@@ -239,6 +335,7 @@ def build_spec():
     app = create_app()
     views = load_view_sources()
     serializer_keys = load_serializer_keys()
+    service_functions = load_service_functions()
 
     paths = {}
     used_tags = {}
@@ -269,11 +366,29 @@ def build_spec():
                            'schema': {'type': 'string'}})
 
         roles = required_roles(decorators)
-        req_listed, opt_listed = listed_fields(node)
-        body_fields = sorted(set(json_body_fields(node)) | set(req_listed) | set(opt_listed))
-        form_fields = request_attr_fields(node, 'form')
-        codes = status_codes(node)
-        errors = error_messages(node)
+
+        # A view that delegates to a service is documented from both, or the
+        # spec loses the request body and the errors the service raises.
+        targets, target_trees = analysed_nodes(node, service_functions)
+        req_listed, opt_listed = set(), set()
+        body_fields, form_fields, codes, errors = set(), set(), set(), set()
+        for target in targets:
+            required_here, optional_here = listed_fields(target)
+            req_listed.update(required_here)
+            opt_listed.update(optional_here)
+            body_fields.update(json_body_fields(target))
+            form_fields.update(request_attr_fields(target, 'form'))
+            codes.update(status_codes(target))
+            errors.update(error_messages(target))
+            errors.update(raised_error_messages(target))
+        for tree in target_trees:
+            req_listed.update(constant_string_sequence_fields(tree, 'required'))
+
+        # The service reads optional fields straight off the payload mapping it
+        # is handed, which the JSON-body scan sees once the service is followed.
+        req_listed, opt_listed = sorted(req_listed), sorted(opt_listed)
+        body_fields = sorted(set(body_fields) | set(req_listed) | set(opt_listed))
+        form_fields, codes, errors = sorted(form_fields), sorted(codes), sorted(errors)
         props = response_properties(node, serializer_keys)
 
         for method in sorted(m for m in rule.methods if m not in ('HEAD', 'OPTIONS')):
