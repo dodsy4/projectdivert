@@ -1,7 +1,7 @@
 """Driver dispatch, offers, incidents and request timelines."""
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 import requests
 from flask import current_app
 from sqlalchemy import func
@@ -18,7 +18,7 @@ from projectdivert.services.geo import _haversine_miles
 from projectdivert.services.notifications import _notify_mobile_push_for_waste_event
 from projectdivert.services.payments import _financial_summary_for_request
 from projectdivert.services.reference_data import _ensure_reference_data_loaded
-from projectdivert.services.utils import _current_jwt_role, _is_truthy, _minutes_since, _normalize_email, _parse_yes_no_flag, _to_float_or_none, _to_int_or_none, _to_percent_or_none
+from projectdivert.services.utils import _current_jwt_role, _is_truthy, _minutes_since, _normalize_email, _parse_yes_no_flag, _to_float_or_none, _to_int_or_none, _to_percent_or_none, utcnow
 from projectdivert.services import reference_data
 import logging
 
@@ -371,7 +371,7 @@ def _accept_dispatch_offer(booking, offer, assigned_driver_user_id=None):
     if existing_match:
         return existing_match, 'already_matched'
 
-    now = datetime.utcnow()
+    now = utcnow()
     offer.status = 'accepted'
     offer.responded_at = now
 
@@ -573,7 +573,7 @@ def _dispatch_incident_flags(booking, latest_location=None, now=None):
     if not booking:
         return []
 
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     status = (booking.status or '').strip().lower()
     age_minutes = _minutes_since(booking.created_at, now=now) or 0
     pickup_due_minutes = None
@@ -627,7 +627,7 @@ def _dispatch_effective_incident_state(booking, flags):
 
 
 def _dispatch_incident_summary(booking, flags, now=None):
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     flags = list(flags or [])
     state = _dispatch_effective_incident_state(booking, flags)
     severity = _dispatch_incident_severity(flags)
@@ -688,7 +688,7 @@ def _dispatch_send_escalation_webhook(booking, queue_item, now=None, source=''):
     if not breach_type or not severity:
         return False
 
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     escalation_key = _dispatch_escalation_key_for_item(queue_item)
     if not escalation_key:
         return False
@@ -753,7 +753,7 @@ def _dispatch_send_escalation_webhook(booking, queue_item, now=None, source=''):
 
 
 def _serialize_dispatch_queue_item(booking, driver=None, latest_location=None, now=None):
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     pickup_due_minutes = None
     if booking.scheduled_pickup_at:
         pickup_due_minutes = int((now - booking.scheduled_pickup_at).total_seconds() // 60)
@@ -828,7 +828,7 @@ def _record_dispatch_incident_event(
         actor_email=(_normalize_email(actor_email) or None),
         source=normalized_source,
         details_json=_normalize_auth_audit_details(details),
-        created_at=occurred_at or datetime.utcnow(),
+        created_at=occurred_at or utcnow(),
     )
     db.session.add(row)
     return row
@@ -982,7 +982,7 @@ def _build_dispatch_request_timeline(
         )
 
     if include_actor_auth and actor_user_ids:
-        auth_since = datetime.utcnow() - timedelta(hours=auth_window_hours)
+        auth_since = utcnow() - timedelta(hours=auth_window_hours)
         auth_rows = (
             AuthAuditEvent.query.filter(
                 AuthAuditEvent.user_id.in_(sorted(actor_user_ids)),
@@ -1038,7 +1038,7 @@ def _build_dispatch_request_timeline(
 
 
 def _get_dispatch_incident_context(booking, now=None):
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     latest_location = (
         WasteRemovalVehicleLocation.query.filter_by(waste_removal_request_id=booking.id)
         .order_by(WasteRemovalVehicleLocation.recorded_at.desc(), WasteRemovalVehicleLocation.id.desc())
@@ -1119,7 +1119,7 @@ def _run_dispatch_incident_maintenance(
     source='system_dispatch_incident_maintenance',
     now=None,
 ):
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     limit = _dispatch_incident_maintenance_limit(limit)
     resolve_test_minutes = _dispatch_incident_auto_resolve_test_minutes(resolve_test_minutes)
     auto_assign = bool(auto_assign)

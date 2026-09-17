@@ -1,7 +1,6 @@
 """Waste requests routes."""
 
 import queue
-from datetime import datetime
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 from projectdivert.extensions import db
 from projectdivert.models.waste import WasteRemovalRequest, WasteRemovalVehicleLocation
@@ -10,9 +9,9 @@ from projectdivert.services.auth import _request_access_allowed, _request_driver
 from projectdivert.services.compliance import COMPLIANCE_COMPLETION_REQUIRED_TYPES, _compliance_documents_for_request, _compliance_missing_required_document_types, _compliance_summary_for_documents
 from projectdivert.services.dispatch import _create_dispatch_offers_for_request, _get_latest_match_for_request, _serialize_vehicle_location, _serialize_waste_request, _serialize_waste_request_snapshot
 from projectdivert.services.events import _format_sse_event, _parse_waste_request_last_event_id, _publish_waste_request_event, _subscribe_waste_request_events, _unsubscribe_waste_request_events, _waste_request_replay_events_since
-from projectdivert.services.geo import _postcode_coordinates
+from projectdivert.services.geo import PostcodeLookupUnavailable, _postcode_coordinates
 from projectdivert.services.notifications import _notify_dispatch_offers, _notify_mobile_push_for_waste_event
-from projectdivert.services.utils import _current_jwt_email, _current_jwt_role, _current_jwt_user_id, _parse_datetime_or_error, _to_float_or_none
+from projectdivert.services.utils import _current_jwt_email, _current_jwt_role, _current_jwt_user_id, _parse_datetime_or_error, _to_float_or_none, utcnow
 from projectdivert.services import geo
 
 bp = Blueprint('api_waste_requests', __name__)
@@ -69,7 +68,7 @@ def api_create_waste_request():
             return jsonify({'error': 'match_radius_miles must be a positive number'}), 400
 
         scheduled_pickup_at = _parse_datetime_or_error(cleaned['scheduled_pickup_at'], 'scheduled_pickup_at')
-        if scheduled_pickup_at <= datetime.now():
+        if scheduled_pickup_at <= utcnow():
             return jsonify({'error': 'scheduled_pickup_at must be in the future'}), 400
 
         pickup_latitude, pickup_longitude = _postcode_coordinates(cleaned['pickup_postcode'])
@@ -143,6 +142,11 @@ def api_create_waste_request():
             ),
             201,
         )
+    except PostcodeLookupUnavailable as exc:
+        # Upstream is down, so this is not the caller's fault and retrying later
+        # may well work -- reporting it as a 400 would say the opposite.
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 503
     except ValueError as exc:
         db.session.rollback()
         return jsonify({'error': str(exc)}), 400
@@ -185,7 +189,7 @@ def api_stream_waste_request_events(request_id):
     initial_event = {
         'event': 'snapshot',
         'request_id': request_id,
-        'occurred_at': datetime.utcnow().isoformat() + 'Z',
+        'occurred_at': utcnow().isoformat() + 'Z',
         'payload': _serialize_waste_request_snapshot(booking),
         'metadata': {},
     }
@@ -318,7 +322,7 @@ def api_create_vehicle_location(request_id):
         except ValueError as exc:
             return jsonify({'error': str(exc)}), 400
     else:
-        recorded_at = datetime.utcnow()
+        recorded_at = utcnow()
 
     location_row = WasteRemovalVehicleLocation(
         waste_removal_request_id=booking.id,

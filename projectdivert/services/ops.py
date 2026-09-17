@@ -1,7 +1,7 @@
 """Operational health snapshots and digests."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 import requests
 from flask import current_app
 from projectdivert.models.audit import AuthAuditEvent
@@ -9,7 +9,7 @@ from projectdivert.models.waste import WasteRemovalRequest, WasteRemovalVehicleL
 from projectdivert.services.billing import _collect_admin_billing_followups, _offline_billing_followup_limit
 from projectdivert.services.dispatch import _serialize_dispatch_queue_item
 from projectdivert.services.notifications import _send_account_email
-from projectdivert.services.utils import _is_truthy
+from projectdivert.services.utils import _is_truthy, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def _ops_health_thresholds():
 
 
 def _collect_ops_health_snapshot(auth_window_minutes=None, dispatch_limit=None, now=None):
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     auth_window_minutes = _ops_health_auth_window_minutes(auth_window_minutes)
     dispatch_limit = _ops_health_dispatch_limit(dispatch_limit)
     thresholds = _ops_health_thresholds()

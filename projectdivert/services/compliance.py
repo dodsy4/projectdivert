@@ -1,10 +1,9 @@
 """Waste, driver and carrier-company compliance documents."""
 
-from datetime import datetime
 from projectdivert.extensions import db
 from projectdivert.models.compliance import CarrierCompany, CompanyComplianceDocument, DriverComplianceDocument, WasteComplianceDocument
 from projectdivert.models.user import User
-from projectdivert.services.utils import _parse_datetime_or_error, _to_int_or_none
+from projectdivert.services.utils import _parse_datetime_or_error, _to_int_or_none, utcnow
 
 
 def _driver_dispatch_eligibility_error(driver_user_id):
@@ -157,7 +156,7 @@ def _serialize_company_compliance_document(document):
 def _compliance_document_is_effectively_verified(document, now=None):
     if not document:
         return False
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     status = str(document.status or '').strip().lower()
     if status != 'verified':
         return False
@@ -193,7 +192,7 @@ def _company_compliance_documents_for_company(carrier_company_id):
 
 
 def _driver_compliance_summary_for_documents(documents):
-    now = datetime.utcnow()
+    now = utcnow()
     by_type = {}
     for doc_type in sorted(DRIVER_COMPLIANCE_DOCUMENT_TYPES):
         typed_docs = [row for row in documents if row.document_type == doc_type]
@@ -226,7 +225,7 @@ def _driver_compliance_summary_for_documents(documents):
 
 
 def _company_compliance_summary_for_documents(documents):
-    now = datetime.utcnow()
+    now = utcnow()
     by_type = {}
     for doc_type in sorted(COMPANY_COMPLIANCE_DOCUMENT_TYPES):
         typed_docs = [row for row in documents if row.document_type == doc_type]
@@ -374,7 +373,7 @@ def _build_driver_compliance_document(driver_user_id, payload, actor_user_id, ac
     )
     if actor_role == 'admin' and status in {'verified', 'rejected', 'expired'}:
         document.verified_by_user_id = actor_user_id
-        document.verified_at = datetime.utcnow()
+        document.verified_at = utcnow()
     return document
 
 
@@ -427,12 +426,12 @@ def _build_company_compliance_document(carrier_company_id, payload, actor_user_i
     )
     if status in {'verified', 'rejected', 'expired'}:
         document.verified_by_user_id = actor_user_id
-        document.verified_at = datetime.utcnow()
+        document.verified_at = utcnow()
     return document
 
 
 def _compliance_summary_for_documents(documents):
-    now = datetime.utcnow()
+    now = utcnow()
     by_type = {}
     for doc_type in sorted(COMPLIANCE_DOCUMENT_TYPES):
         by_type[doc_type] = {

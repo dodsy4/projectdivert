@@ -2,13 +2,12 @@
 
 import json
 import uuid
-from datetime import datetime
 from flask import g, has_request_context, request
 from sqlalchemy import func
 from flask_login import current_user
 from projectdivert.extensions import db
 from projectdivert.models.audit import AuditEvent, AuthAuditEvent
-from projectdivert.services.utils import _current_jwt_claims, _current_jwt_email, _current_jwt_role, _current_jwt_user_id, _json_safe, _normalize_email, _parse_optional_bool_query, _parse_optional_int_query, _parse_query_datetime_utc, _request_client_ip, _to_int_or_none
+from projectdivert.services.utils import _current_jwt_claims, _current_jwt_email, _current_jwt_role, _current_jwt_user_id, _json_safe, _normalize_email, _parse_optional_bool_query, _parse_optional_int_query, _parse_query_datetime_utc, _request_client_ip, _to_int_or_none, utcnow
 import logging
 
 logger = logging.getLogger(__name__)
@@ -51,7 +50,7 @@ def _persist_auth_audit_event(payload, occurred_at=None):
                     ip=(str(payload.get('ip') or '').strip()[:64] or None),
                     user_agent=(str(payload.get('user_agent') or '').strip()[:255] or None),
                     details_json=_normalize_auth_audit_details(payload.get('details')),
-                    occurred_at=occurred_at or datetime.utcnow(),
+                    occurred_at=occurred_at or utcnow(),
                 )
             )
     except Exception:
@@ -115,7 +114,7 @@ def _serialize_auth_blocklist_entry(row):
         'metadata': row.metadata_json or {},
         'created_at': row.created_at.isoformat() + 'Z' if row.created_at else None,
         'updated_at': row.updated_at.isoformat() + 'Z' if row.updated_at else None,
-        'is_active': bool((row.revoked_at is None) and (row.expires_at is None or row.expires_at > datetime.utcnow())),
+        'is_active': bool((row.revoked_at is None) and (row.expires_at is None or row.expires_at > utcnow())),
     }
 
 
@@ -193,7 +192,7 @@ def _build_admin_auth_audit_query(filters):
 
 
 def _audit_auth_event(event_type, success, status_code, email=None, user_id=None, details=None):
-    occurred_at = datetime.utcnow()
+    occurred_at = utcnow()
     payload = {
         'event': str(event_type or '').strip().lower() or 'unknown',
         'success': bool(success),
@@ -332,7 +331,7 @@ def record_audit_event(
     failure is swallowed after logging.
     """
     actor = actor or _audit_actor()
-    occurred_at = occurred_at or datetime.utcnow()
+    occurred_at = occurred_at or utcnow()
     try:
         g.audit_explicitly_recorded = True
     except Exception:

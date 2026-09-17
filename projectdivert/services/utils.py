@@ -7,6 +7,37 @@ import babel
 from flask import g, request
 
 
+def utcnow():
+    """The application's only clock: the current time in UTC, without a tzinfo.
+
+    Every stored timestamp is naive UTC, so a naive UTC "now" is what they can
+    be compared against. Use this rather than :func:`datetime.datetime.utcnow`,
+    which is deprecated, or :func:`datetime.datetime.now`, which returns the
+    server's local time and silently disagrees with everything in the database
+    whenever the server is not on UTC.
+
+    The columns themselves are still naive; making them timezone-aware would
+    need a migration and would change comparison semantics across the whole
+    codebase, so the convention is enforced here instead.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def to_utc_naive(value):
+    """Normalise a parsed datetime to the naive-UTC convention used for storage.
+
+    An aware value is converted to UTC before its tzinfo is dropped, so an
+    explicit offset from a client is honoured rather than discarded. A naive
+    value is assumed to already be UTC, which is what the callers that parse
+    bare ``YYYY-MM-DDTHH:MM`` strings have always effectively done.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
 def _normalize_email(email):
     return str(email or '').strip().lower()
 
@@ -89,7 +120,7 @@ def _is_valid_email(email):
 
 
 def _token_expired(expires_at):
-    return bool(expires_at and expires_at <= datetime.utcnow())
+    return bool(expires_at and expires_at <= utcnow())
 
 
 def _current_jwt_claims():
@@ -192,9 +223,10 @@ def _parse_datetime_or_error(value, label):
     except (TypeError, ValueError, OverflowError):
         raise ValueError('Please provide a valid {}.'.format(label))
 
-    if parsed.tzinfo is not None:
-        parsed = parsed.astimezone().replace(tzinfo=None)
-    return parsed
+    # astimezone() with no argument converts to the server's local zone, which
+    # made a client's explicit offset land an hour out whenever the server was
+    # not on UTC. Storage is UTC, so normalise to UTC.
+    return to_utc_naive(parsed)
 
 
 def _hours_since(timestamp, now=None):
@@ -207,7 +239,7 @@ def _hours_since(timestamp, now=None):
 def _minutes_since(timestamp, now=None):
     if not timestamp:
         return None
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     return max(0, int((now - timestamp).total_seconds() // 60))
 
 

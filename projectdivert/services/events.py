@@ -21,13 +21,13 @@ import json
 import queue
 import threading
 from collections import OrderedDict, deque
-from datetime import datetime
 try:
     import redis
 except Exception:  # pragma: no cover - optional dependency
     redis = None
 from flask import current_app
 import logging
+from projectdivert.services.utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -312,7 +312,7 @@ def _publish_waste_request_event(request_id, event_name, payload=None, metadata=
         'event_id': _next_waste_request_event_id(client),
         'event': str(event_name or 'update').strip() or 'update',
         'request_id': request_id,
-        'occurred_at': datetime.utcnow().isoformat() + 'Z',
+        'occurred_at': utcnow().isoformat() + 'Z',
         'payload': payload,
         'metadata': metadata or {},
     }

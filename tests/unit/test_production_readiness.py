@@ -6,13 +6,14 @@ read-only endpoints, cross-process event fan-out, CSRF enforcement on the
 cookie-authenticated routes, and the boot guard on the placeholder secret key.
 """
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 from fakeredis import FakeStrictRedis
 
 import projectdivert
 from projectdivert.services import dispatch, events
+from projectdivert.services.utils import utcnow
 
 
 # --- Double-booking (#1) ---------------------------------------------------
@@ -29,7 +30,7 @@ def _seed_request_with_two_offers(app_context):
             waste_unit='Tonnes',
             pickup_address='1 Example Road',
             pickup_postcode='SW1A1AA',
-            scheduled_pickup_at=datetime.utcnow() + timedelta(days=1),
+            scheduled_pickup_at=utcnow() + timedelta(days=1),
             status='pending_match',
         )
         app_context.db.session.add(booking)
@@ -173,7 +174,7 @@ def _seed_breaching_request(app_context, age_minutes=90):
     request_id, offer_ids = _seed_request_with_two_offers(app_context)
     with app_context.app.app_context():
         booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
-        booking.created_at = datetime.utcnow() - timedelta(minutes=age_minutes)
+        booking.created_at = utcnow() - timedelta(minutes=age_minutes)
         app_context.db.session.commit()
     return request_id, offer_ids
 

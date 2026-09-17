@@ -1,9 +1,9 @@
 """Shared builders and fakes for the test suite."""
 
 import json
-from datetime import datetime, timedelta
-from datetime import datetime, timedelta
+from datetime import timedelta
 import pandas as pd
+from projectdivert.services.utils import utcnow
 
 
 class FakeResponse:
@@ -86,7 +86,7 @@ def _seed_driver_dispatch_compliance(app_context, driver_email, verifier_email=N
         driver.carrier_company_id = company.id
         app_context.DriverComplianceDocument.query.filter_by(driver_user_id=driver.id).delete()
         app_context.CompanyComplianceDocument.query.filter_by(carrier_company_id=company.id).delete()
-        now = datetime.utcnow()
+        now = utcnow()
         expires_at = now + timedelta(days=365)
         for document_type in ['carrier_license', 'insurance_certificate']:
             app_context.db.session.add(

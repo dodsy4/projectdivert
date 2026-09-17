@@ -88,6 +88,10 @@ class AppUnderTest:
         self._auth_login_lockouts = rate_limit._auth_login_lockouts
 
 
+def _reset_postcode_cache():
+    geo.clear_postcode_cache()
+
+
 def _reset_auth_state():
     with rate_limit._auth_rate_limit_lock:
         rate_limit._auth_rate_limit_events.clear()
@@ -112,6 +116,7 @@ def app_context(flask_app):
         AUTH_LOGIN_LOCKOUT_ENABLED=False,
     )
     _reset_auth_state()
+    _reset_postcode_cache()
 
     with flask_app.app_context():
         db.session.remove()

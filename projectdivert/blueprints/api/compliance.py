@@ -1,6 +1,5 @@
 """Compliance routes."""
 
-from datetime import datetime
 from flask import Blueprint, current_app, jsonify, request
 from projectdivert.extensions import db
 from projectdivert.models.compliance import WasteComplianceDocument
@@ -11,7 +10,7 @@ from projectdivert.services.compliance import COMPLIANCE_DOCUMENT_STATUSES, COMP
 from projectdivert.services.dispatch import _serialize_waste_request_snapshot
 from projectdivert.services.events import _publish_waste_request_event
 from projectdivert.services.uploads import _build_compliance_signed_upload, _compliance_storage_backend, _save_compliance_upload
-from projectdivert.services.utils import _current_jwt_role, _current_jwt_user_id, _parse_datetime_or_error
+from projectdivert.services.utils import _current_jwt_role, _current_jwt_user_id, _parse_datetime_or_error, utcnow
 
 bp = Blueprint('api_compliance', __name__)
 
@@ -224,7 +223,7 @@ def api_create_waste_request_compliance_document(request_id):
     if issued_at and expires_at and expires_at <= issued_at:
         return jsonify({'error': 'expires_at must be later than issued_at'}), 400
 
-    now = datetime.utcnow()
+    now = utcnow()
     current_user_id = _current_jwt_user_id()
     document = WasteComplianceDocument(
         waste_removal_request_id=booking.id,
@@ -318,7 +317,7 @@ def api_admin_verify_waste_request_compliance_document(request_id, document_id):
     previous_status = document.status
     document.status = status
     document.verified_by_user_id = _current_jwt_user_id()
-    document.verified_at = datetime.utcnow()
+    document.verified_at = utcnow()
     document.expires_at = expires_at
     if notes is not None:
         document.notes = notes

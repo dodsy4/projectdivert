@@ -1,6 +1,5 @@
 """Web routes."""
 
-from datetime import datetime
 import dateutil.parser
 import requests
 from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
@@ -15,11 +14,11 @@ from projectdivert.models.charity import Charity
 from projectdivert.models.user import User
 from projectdivert.models.waste import WasteRemovalRequest
 from projectdivert.services.dispatch import _create_dispatch_offers_for_request
-from projectdivert.services.geo import _postcode_coordinates
+from projectdivert.services.geo import PostcodeLookupUnavailable, _postcode_coordinates
 from projectdivert.services.lca_glue import assess_diversion_estimate
 from projectdivert.services.notifications import _notify_dispatch_offers
 from projectdivert.services.uploads import MAX_MATERIAL_IMAGES, _decode_material_images, _encode_material_images, _save_material_images, _serialize_material
-from projectdivert.services.utils import _require_form_fields, _require_positive_number, _to_float_or_none
+from projectdivert.services.utils import _require_form_fields, _require_positive_number, _to_float_or_none, to_utc_naive, utcnow
 from projectdivert.services import geo
 from projectdivert.services import notifications
 
@@ -737,7 +736,9 @@ def create_waste_removal_request_form():
             form.requester_name.data = current_user.name
         if current_user.email:
             form.requester_email.data = current_user.email
-    min_pickup_iso = datetime.now().replace(second=0, microsecond=0).strftime('%Y-%m-%dT%H:%M')
+    # Same clock the submission is validated against, so the form cannot
+    # offer a value the server will then reject.
+    min_pickup_iso = utcnow().replace(second=0, microsecond=0).strftime('%Y-%m-%dT%H:%M')
     return render_template('forms/waste_removal_request.html', form=form, min_pickup_iso=min_pickup_iso)
 
 
@@ -792,9 +793,8 @@ def create_waste_removal_request_submission():
         except (TypeError, ValueError, OverflowError):
             raise ValueError('Please provide a valid scheduled pickup date and time.')
 
-        if scheduled_pickup_at.tzinfo is not None:
-            scheduled_pickup_at = scheduled_pickup_at.astimezone().replace(tzinfo=None)
-        if scheduled_pickup_at <= datetime.now():
+        scheduled_pickup_at = to_utc_naive(scheduled_pickup_at)
+        if scheduled_pickup_at <= utcnow():
             raise ValueError('Scheduled pickup time must be in the future.')
 
         pickup_latitude, pickup_longitude = _postcode_coordinates(form['pickup_postcode'])
@@ -902,6 +902,12 @@ def create_waste_removal_request_submission():
             current_app.logger.warning(
                 'WASTE_REMOVAL_NOTIFICATION_EMAIL not set; waste removal email notification skipped.'
             )
+    except PostcodeLookupUnavailable as exc:
+        # Say it is the service and not their postcode, so they retry rather
+        # than re-checking a postcode that was correct all along.
+        error = True
+        db.session.rollback()
+        flash('{} Please try again in a moment.'.format(exc))
     except ValueError as exc:
         error = True
         db.session.rollback()

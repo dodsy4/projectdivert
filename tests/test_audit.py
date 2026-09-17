@@ -1,6 +1,6 @@
 """Tests for the application-wide audit log (AuditEvent + capture hooks)."""
 
-from datetime import datetime
+
 
 import pytest
 

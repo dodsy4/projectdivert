@@ -1,6 +1,5 @@
 """Admin routes."""
 
-from datetime import datetime
 from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
 from sqlalchemy import func
 from flask_login import current_user, login_required
@@ -14,7 +13,7 @@ from projectdivert.services.compliance import _driver_dispatch_eligibility_error
 from projectdivert.services.dispatch import _build_dispatch_request_timeline, _dispatch_incident_severity, _dispatch_location_stale_minutes, _dispatch_pending_match_sla_minutes, _dispatch_unassigned_match_sla_minutes, _get_dispatch_incident_context, _record_dispatch_incident_event, _serialize_dispatch_driver, _serialize_dispatch_queue_item, _serialize_waste_request, _serialize_waste_request_snapshot
 from projectdivert.services.events import _publish_waste_request_event
 from projectdivert.services.notifications import _notify_mobile_push_for_waste_event
-from projectdivert.services.utils import _parse_optional_bool_query, _parse_optional_int_query, _to_int_or_none
+from projectdivert.services.utils import _parse_optional_bool_query, _parse_optional_int_query, _to_int_or_none, utcnow
 
 bp = Blueprint('admin', __name__)
 
@@ -91,7 +90,7 @@ def admin_dispatch_board():
 
     rows = query.order_by(WasteRemovalRequest.created_at.asc(), WasteRemovalRequest.id.asc()).all()
 
-    now = datetime.utcnow()
+    now = utcnow()
     queue_items = []
     status_counts = {}
     incident_counts = {}
@@ -239,7 +238,7 @@ def admin_dispatch_override_form():
         return redirect(redirect_target)
 
     reason = (str(request.form.get('reason') or '').strip()[:255] or None)
-    now = datetime.utcnow()
+    now = utcnow()
     booking.assigned_driver_user_id = new_driver_user_id
     _record_dispatch_incident_event(
         booking.id,
@@ -379,7 +378,7 @@ def admin_dispatch_incident_form():
         flash('No active incident to acknowledge for request #{}.'.format(request_id))
         return redirect(redirect_target)
 
-    now = datetime.utcnow()
+    now = utcnow()
     if action == 'ack':
         booking.incident_state = 'acknowledged'
         booking.incident_severity = _dispatch_incident_severity(flags)
@@ -500,7 +499,7 @@ def admin_dispatch_incident_owner_form():
         flash('No owner change.')
         return redirect(redirect_target)
 
-    now = datetime.utcnow()
+    now = utcnow()
     booking.incident_owner_admin_user_id = new_owner_user_id
     booking.incident_updated_at = now
     if notes:

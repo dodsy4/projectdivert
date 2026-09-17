@@ -8,9 +8,10 @@ is that a caller cannot widen its own view: a customer asking for
 ``scope=all`` must still see only their own rows.
 """
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from tests.helpers import _auth_header, _create_user
+from projectdivert.services.utils import utcnow
 
 LIST = '/api/v1/waste-requests'
 ME = '/api/v1/auth/me'
@@ -23,7 +24,7 @@ def _make_request(app_context, email, status='pending', driver_id=None, material
             requester_name='Requester', requester_email=email,
             material_type=material, waste_amount=1.5, waste_unit='tonnes',
             pickup_address='1 Site Road', pickup_postcode='SW1A1AA',
-            scheduled_pickup_at=datetime.utcnow() + timedelta(days=1),
+            scheduled_pickup_at=utcnow() + timedelta(days=1),
             status=status, assigned_driver_user_id=driver_id,
         )
         app_context.db.session.add(booking)

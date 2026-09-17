@@ -89,6 +89,13 @@ SESSION_COOKIE_SECURE = _bool_env('SESSION_COOKIE_SECURE', True)
 SESSION_COOKIE_SAMESITE = os.getenv('SESSION_COOKIE_SAMESITE', 'Lax')
 REMEMBER_COOKIE_SECURE = SESSION_COOKIE_SECURE
 
+# Response security headers. Set CONTENT_SECURITY_POLICY to override the default
+# in projectdivert/hooks.py, or to an empty string to send no CSP at all.
+CONTENT_SECURITY_POLICY = os.getenv('CONTENT_SECURITY_POLICY')
+# Off unless set: a browser that sees this header pins the domain to HTTPS for
+# its duration, which is not something to enable by accident. 63072000 = 2 years.
+HSTS_MAX_AGE_SECONDS = _int_env('HSTS_MAX_AGE_SECONDS', 0)
+
 # Forms and URL behavior
 WTF_CSRF_ENABLED = True
 PREFERRED_URL_SCHEME = os.getenv('PREFERRED_URL_SCHEME', 'https')

@@ -1,7 +1,7 @@
 """Mobile models."""
 
-from datetime import datetime
 from projectdivert.extensions import db
+from projectdivert.services.utils import utcnow
 
 
 class MobilePushSubscription(db.Model):
@@ -18,13 +18,13 @@ class MobilePushSubscription(db.Model):
     token = db.Column(db.String(255), nullable=False, unique=True, index=True)
     platform = db.Column(db.String(32))
     is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
-    last_seen_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    last_seen_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     updated_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
     )
 
     def __repr__(self):

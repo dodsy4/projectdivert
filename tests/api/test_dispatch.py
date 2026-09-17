@@ -1,10 +1,10 @@
 """Tests for dispatch offers, incidents, telemetry and admin override."""
 
 from datetime import datetime, timedelta
-from datetime import datetime, timedelta
 import pandas as pd
 
 from tests.helpers import _auth_header, _create_user, _fake_postcode_lookup, _provider_frame, _seed_driver_dispatch_compliance
+from projectdivert.services.utils import utcnow
 
 
 def test_api_status_and_location_flow(client, app_context, monkeypatch):
@@ -216,7 +216,7 @@ def test_admin_dispatch_incident_ack_resolve_flow(client, app_context, monkeypat
         request_id = create_response.get_json()['request']['id']
         with app_context.app.app_context():
             booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
-            booking.created_at = datetime.utcnow() - timedelta(minutes=2)
+            booking.created_at = utcnow() - timedelta(minutes=2)
             app_context.db.session.commit()
 
         incidents = client.get('/api/v1/admin/dispatch/incidents?active_only=false&limit=50', headers=admin_headers)
@@ -342,7 +342,7 @@ def test_admin_dispatch_incident_owner_reassignment_flow(client, app_context, mo
         request_id = create_response.get_json()['request']['id']
         with app_context.app.app_context():
             booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
-            booking.created_at = datetime.utcnow() - timedelta(minutes=3)
+            booking.created_at = utcnow() - timedelta(minutes=3)
             app_context.db.session.commit()
             owner_two_id = app_context.User.query.filter_by(email='opsowner2@example.com').first().id
             customer_id = app_context.User.query.filter_by(email='notadminowner@example.com').first().id
@@ -432,7 +432,7 @@ def test_admin_dispatch_incident_maintenance_dry_run_and_apply(client, app_conte
 
         with app_context.app.app_context():
             booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
-            booking.created_at = datetime.utcnow() - timedelta(minutes=90)
+            booking.created_at = utcnow() - timedelta(minutes=90)
             app_context.db.session.commit()
 
         dry_run = client.post(
@@ -532,7 +532,7 @@ def test_admin_dispatch_request_timeline_includes_dispatch_and_auth_events(clien
         request_id = create_response.get_json()['request']['id']
         with app_context.app.app_context():
             booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
-            booking.created_at = datetime.utcnow() - timedelta(minutes=3)
+            booking.created_at = utcnow() - timedelta(minutes=3)
             app_context.db.session.commit()
             owner_two_id = app_context.User.query.filter_by(email='opsadmintimeline2@example.com').first().id
             driver_id = app_context.User.query.filter_by(email='timelinedriver@example.com').first().id
@@ -926,7 +926,7 @@ def test_accepting_an_offer_locks_the_request_row(app_context):
             requester_name='Sam', requester_email='sam@example.com',
             material_type='Timber', waste_amount=2.0, waste_unit='tonnes',
             pickup_address='1 Site Road', pickup_postcode='SW1A1AA',
-            scheduled_pickup_at=datetime.utcnow() + timedelta(days=2),
+            scheduled_pickup_at=utcnow() + timedelta(days=2),
             status='pending',
         )
         db.session.add(booking)
