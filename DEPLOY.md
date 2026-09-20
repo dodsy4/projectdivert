@@ -41,6 +41,20 @@ Alembic owns the schema, and an un-migrated database now fails loudly instead of
 being silently patched up by whichever web worker happened to serve the first
 request.
 
+### If the host has no pre-deploy hook
+
+`preDeployCommand` is a paid Render feature, and the free tier has no shell
+either, so there is nowhere to run the migration except a developer's laptop.
+Setting `MIGRATE_ON_BOOT=1` makes the application migrate itself instead: the
+gunicorn master process runs `flask db upgrade` once, before it forks any
+worker, so there is no race between workers. A failed migration refuses to
+start rather than serving against a schema the code does not match.
+
+This is deliberately off by default. Where a platform *can* migrate before a
+release goes live, it should -- a deploy that cannot migrate is better refused
+than half-applied. It also assumes a single instance; several booting at once
+would contend for the same migration.
+
 On a manually created service, or for the first deploy, run:
 - `flask db upgrade`
 - `flask seed-materials` (loads the bundled material catalogue if it is empty)
