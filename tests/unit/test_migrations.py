@@ -121,3 +121,41 @@ def test_core_table_columns_match_the_models(migrated, tmp_path, table):
 def test_users_carries_the_whatsapp_columns(migrated):
     columns = {c['name'] for c in inspect(create_engine(migrated)).get_columns('users')}
     assert {'phone', 'whatsapp_linked_at'} <= columns
+
+
+def test_estimate_conversion_is_skipped_when_the_columns_are_already_numeric(tmp_path):
+    """A database built from the models must not break the chain.
+
+    d5e6f7a8b9c0 converts three diversion_estimates columns from text to
+    numeric, cleaning blank strings with btrim() first. A database whose tables
+    came from db.create_all() already has them as numeric, and btrim() on a
+    numeric column is an error rather than a no-op -- so the migration aborted
+    on an otherwise healthy database. It now asks before converting.
+    """
+    from sqlalchemy import Column, MetaData, Numeric, String, Table
+
+    module = importlib.import_module(
+        'migrations.versions.d5e6f7a8b9c0_rename_core_marketplace_models',
+    )
+
+    engine = create_engine('sqlite:///{}'.format(tmp_path / 'shapes.db'))
+    metadata = MetaData()
+    Table(
+        'already_numeric', metadata,
+        Column('amount', Numeric(12, 3)),
+        Column('traditional_cost', Numeric(12, 2)),
+    )
+    Table(
+        'still_text', metadata,
+        Column('amount', String(120)),
+        Column('traditional_cost', String(120)),
+    )
+    metadata.create_all(engine)
+
+    inspector = inspect(engine)
+    for column in ('amount', 'traditional_cost'):
+        assert module._is_string_column(inspector, 'still_text', column) is True
+        assert module._is_string_column(inspector, 'already_numeric', column) is False
+
+    # A column the table does not have is not something to convert either.
+    assert module._is_string_column(inspector, 'already_numeric', 'nope') is False

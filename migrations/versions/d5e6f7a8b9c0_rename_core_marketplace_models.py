@@ -47,6 +47,14 @@ def _has_table(inspector, name):
     return name in inspector.get_table_names()
 
 
+def _is_string_column(inspector, table_name, column_name):
+    """True when the column still holds text, so the conversion has work to do."""
+    for column in inspector.get_columns(table_name):
+        if column.get('name') == column_name:
+            return isinstance(column.get('type'), sa.String)
+    return False
+
+
 def _is_postgres(bind):
     return bind.dialect.name == 'postgresql'
 
@@ -69,14 +77,20 @@ def upgrade():
     if not _is_postgres(bind):
         return
 
-    # Blank strings become NULL first so the ``::numeric`` cast does not choke.
-    for column_name, _new_type, _using_expr, _old_type in ESTIMATE_NUMERIC_COLUMNS:
+    for column_name, new_type, using_expr, old_type in ESTIMATE_NUMERIC_COLUMNS:
+        if not _is_string_column(inspector, 'diversion_estimates', column_name):
+            # Already numeric. A database whose tables were created from the
+            # models rather than by this migration arrives here with nothing to
+            # convert, and btrim() on a numeric column is an error rather than a
+            # no-op, so the whole migration would fail on an otherwise healthy
+            # database.
+            continue
+
+        # Blank strings become NULL first so the ``::numeric`` cast does not choke.
         op.execute(
             "UPDATE diversion_estimates SET {col} = NULL "
             "WHERE {col} IS NOT NULL AND btrim({col}) = ''".format(col=column_name)
         )
-
-    for column_name, new_type, using_expr, old_type in ESTIMATE_NUMERIC_COLUMNS:
         op.alter_column(
             'diversion_estimates',
             column_name,
