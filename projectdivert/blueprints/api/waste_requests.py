@@ -13,6 +13,7 @@ from projectdivert.services.dispatch import _get_latest_match_for_request, _seri
 from projectdivert.services.events import _format_sse_event, _parse_waste_request_last_event_id, _publish_waste_request_event, _subscribe_waste_request_events, _unsubscribe_waste_request_events, _waste_request_replay_events_since
 from projectdivert.services.geo import PostcodeLookupUnavailable
 from projectdivert.services.notifications import _notify_mobile_push_for_waste_event
+from projectdivert.services.reports import DEFAULT_REPORT_LIMIT, collection_report
 from projectdivert.services.waste_requests import INITIAL_STATUS, WasteRequestError, create_waste_request
 from projectdivert.services.utils import _current_jwt_email, _current_jwt_role, _current_jwt_user_id, _parse_datetime_or_error, _to_float_or_none, utcnow
 
@@ -70,6 +71,36 @@ def api_create_waste_request():
         ),
         201,
     )
+
+
+
+@bp.route('/api/v1/reports/collections', methods=['GET'])
+@jwt_required(roles={'customer', 'driver', 'admin'})
+def api_collection_report():
+    """Totals across the collections the caller can see.
+
+    Scoped exactly as the list endpoint is, so a report can never total rows
+    the caller is not allowed to read: a customer sees their own, a driver the
+    ones assigned to them, an admin everything.
+    """
+    role = _current_jwt_role()
+    email = (_current_jwt_email() or '').lower()
+    user_id = _current_jwt_user_id()
+
+    query = WasteRemovalRequest.query
+    if role == 'customer':
+        if not email:
+            return jsonify({'error': 'Token missing email claim'}), 403
+        query = query.filter(WasteRemovalRequest.requester_email == email)
+    elif role == 'driver':
+        query = query.filter(WasteRemovalRequest.assigned_driver_user_id == user_id)
+
+    try:
+        limit = max(1, min(int(request.args.get('limit') or DEFAULT_REPORT_LIMIT), 2000))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'limit must be an integer'}), 400
+
+    return jsonify(collection_report(query, limit=limit))
 
 
 

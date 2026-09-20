@@ -4652,6 +4652,63 @@
         ]
       }
     },
+    "/api/v1/reports/collections": {
+      "get": {
+        "description": "Requires a bearer token with role: `admin`, `customer`, `driver`. Error messages returned by this endpoint: \"Token missing email claim\"; \"limit must be an integer\".",
+        "operationId": "api_collection_report",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Collection report",
+        "tags": [
+          "Waste requests"
+        ]
+      }
+    },
     "/api/v1/waste-requests": {
       "get": {
         "description": "Requires a bearer token with role: `admin`, `customer`, `driver`. Error messages returned by this endpoint: \"Invalid scope\"; \"Token missing email claim\"; \"limit and offset must be integers\".",

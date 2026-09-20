@@ -459,6 +459,8 @@ def _serialize_waste_request(booking):
         'pickup_city': booking.pickup_city,
         'pickup_county': booking.pickup_county,
         'pickup_postcode': booking.pickup_postcode,
+        'pickup_latitude': booking.pickup_latitude,
+        'pickup_longitude': booking.pickup_longitude,
         'scheduled_pickup_at': booking.scheduled_pickup_at.isoformat() if booking.scheduled_pickup_at else None,
         'notes': booking.notes,
         'status': booking.status,
