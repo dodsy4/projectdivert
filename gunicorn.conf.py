@@ -46,3 +46,57 @@ max_requests_jitter = _int_env('GUNICORN_MAX_REQUESTS_JITTER', 200)
 accesslog = '-'
 errorlog = '-'
 loglevel = os.getenv('GUNICORN_LOG_LEVEL', 'info')
+
+
+def _bool_env(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def on_starting(server):
+    """Bring the database up to date once, before any worker is forked.
+
+    Render's pre-deploy command is a paid feature, and its free tier has no
+    shell, so on that plan there is nowhere to run `flask db upgrade` except a
+    developer's laptop -- which means it gets forgotten, and the application
+    then boots against a schema that does not match the code.
+
+    This is the gunicorn arbiter, which runs once per deploy before forking, so
+    the migration cannot race between workers the way the old db.create_all()
+    hook could. Alembic stays the single source of truth: this runs the real
+    migration chain, it does not create tables from the models.
+
+    Off unless MIGRATE_ON_BOOT is set, because it is the wrong behaviour on any
+    platform that can migrate before a release goes live -- there, a deploy
+    should be refused rather than half-applied. It also assumes one instance:
+    with several booting at once they would contend, and while Postgres makes
+    that safe rather than corrupting, it is not something to rely on.
+    """
+    if not _bool_env('MIGRATE_ON_BOOT'):
+        return
+
+    import subprocess
+    import sys
+
+    steps = [['db', 'upgrade']]
+    if _bool_env('SEED_ON_BOOT', True):
+        steps.append(['seed-materials'])
+
+    for step in steps:
+        server.log.info('MIGRATE_ON_BOOT: flask %s', ' '.join(step))
+        result = subprocess.run(
+            [sys.executable, '-m', 'flask'] + step,
+            env=dict(os.environ, FLASK_APP=os.getenv('FLASK_APP', 'wsgi.py')),
+        )
+        if result.returncode != 0:
+            # Refuse to serve rather than answer requests against a schema the
+            # code does not match. The platform will show this as a failed
+            # deploy, which is the point.
+            raise RuntimeError(
+                'flask {} failed with exit code {}; refusing to start.'.format(
+                    ' '.join(step), result.returncode,
+                )
+            )
+    server.log.info('MIGRATE_ON_BOOT: database is up to date.')
