@@ -28,3 +28,10 @@ node_modules/
 .expo/
 dist/
 web-build/
+
+# Local Claude Code tooling. Installed per-developer (e.g. by Neon's onboarding
+# command), not part of the application, and the worktrees are scratch copies of
+# the repo that must never be committed back into it.
+.claude/skills/
+.claude/worktrees/
+skills-lock.json
