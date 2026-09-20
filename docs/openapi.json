@@ -1318,6 +1318,7 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "allow_unrecognised_reference": {},
                   "document_reference": {},
                   "document_type": {},
                   "expires_at": {},
@@ -2671,6 +2672,7 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "allow_unrecognised_reference": {},
                   "document_reference": {},
                   "document_type": {},
                   "expires_at": {},
@@ -4338,6 +4340,7 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "allow_unrecognised_reference": {},
                   "document_reference": {},
                   "document_type": {},
                   "expires_at": {},

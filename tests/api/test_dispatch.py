@@ -677,7 +677,12 @@ def test_driver_compliance_documents_control_dispatch_eligibility_and_admin_over
             json={
                 'document_type': document_type,
                 'file_url': f'https://example.com/driver-docs/{document_type}.pdf',
-                'document_reference': f'{document_type.upper()}-123',
+                # A real-shaped Environment Agency number: a carrier licence is
+                # validated on the way in, so a placeholder is refused.
+                'document_reference': (
+                    'CBDU123456' if document_type == 'carrier_license'
+                    else f'{document_type.upper()}-123'
+                ),
             },
             headers=driver_headers,
         )
@@ -692,7 +697,12 @@ def test_driver_compliance_documents_control_dispatch_eligibility_and_admin_over
             json={
                 'document_type': document_type,
                 'file_url': f'https://example.com/company-docs/{document_type}.pdf',
-                'document_reference': f'{document_type.upper()}-123',
+                # A real-shaped Environment Agency number: a carrier licence is
+                # validated on the way in, so a placeholder is refused.
+                'document_reference': (
+                    'CBDU123456' if document_type == 'carrier_license'
+                    else f'{document_type.upper()}-123'
+                ),
             },
             headers=admin_headers,
         )
