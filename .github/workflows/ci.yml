@@ -104,3 +104,9 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # The demo switcher must be absent from a production build, not just
+      # inert in one. A runtime guard inside the component looks identical in
+      # review but still ships the code, so this reads the built output.
+      - name: Assert no demo-only code in the production bundle
+        run: npm run assert-no-demo-code
