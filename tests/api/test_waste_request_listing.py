@@ -11,14 +11,23 @@ is that a caller cannot widen its own view: a customer asking for
 from datetime import timedelta
 
 from tests.helpers import _auth_header, _create_user
+from projectdivert.models.waste import WasteRemovalDispatchOffer
 from projectdivert.services.utils import utcnow
+from projectdivert.services.waste_requests import INITIAL_STATUS
 
 LIST = '/api/v1/waste-requests'
 ME = '/api/v1/auth/me'
 PASSWORD = 'Sup3rSecret!pass'
 
 
-def _make_request(app_context, email, status='pending', driver_id=None, material='Timber'):
+def _make_request(app_context, email, status=INITIAL_STATUS, driver_id=None,
+                  material='Timber', with_open_offer=False):
+    """A request as the application really creates them.
+
+    This used to default to status 'pending', which nothing creates -- and the
+    available-jobs filter was written against that same wrong value, so the two
+    agreed with each other and not with the product.
+    """
     with app_context.app.app_context():
         booking = app_context.WasteRemovalRequest(
             requester_name='Requester', requester_email=email,
@@ -28,6 +37,16 @@ def _make_request(app_context, email, status='pending', driver_id=None, material
             status=status, assigned_driver_user_id=driver_id,
         )
         app_context.db.session.add(booking)
+        app_context.db.session.flush()
+        if with_open_offer:
+            app_context.db.session.add(WasteRemovalDispatchOffer(
+                waste_removal_request_id=booking.id,
+                provider_name='Provider Alpha', provider_latitude=51.5,
+                provider_longitude=-0.1, distance_miles=3.0,
+                match_radius_miles=25.0, offer_rank=1,
+                offer_token='listing-token-{}'.format(booking.id),
+                status='offered',
+            ))
         app_context.db.session.commit()
         return booking.id
 
@@ -107,7 +126,9 @@ def test_a_driver_can_ask_for_available_jobs(client, app_context):
     with app_context.app.app_context():
         driver_id = app_context.User.query.filter_by(email='driver@example.com').first().id
     _make_request(app_context, 'cust@example.com', status='accepted', driver_id=driver_id)
-    open_job = _make_request(app_context, 'cust@example.com')
+    # An open job is one with an offer still outstanding; without that there is
+    # nothing for the driver to claim and it should not be listed.
+    open_job = _make_request(app_context, 'cust@example.com', with_open_offer=True)
 
     headers = _auth_header(client, 'driver@example.com', PASSWORD)
     body = client.get(LIST + '?scope=available', headers=headers).get_json()
@@ -133,7 +154,7 @@ def test_an_admin_sees_everything(client, app_context):
 
 def test_status_filter(client, app_context):
     _create_user(app_context, 'a@example.com', PASSWORD)
-    _make_request(app_context, 'a@example.com', status='pending')
+    _make_request(app_context, 'a@example.com')
     done = _make_request(app_context, 'a@example.com', status='completed')
 
     headers = _auth_header(client, 'a@example.com', PASSWORD)

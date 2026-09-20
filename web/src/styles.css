@@ -237,3 +237,62 @@ textarea { min-height: 80px; resize: vertical; }
 .stat__value { font-size: 22px; line-height: 1.2; }
 .plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .plain-list li { font-size: 14px; }
+
+/* Demo role switcher. Only ever rendered in a bundle built with
+   VITE_DEMO_MODE, so these rules are inert in a normal build. */
+.demo-switcher {
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  margin-bottom: 12px;
+  display: grid;
+  gap: 8px;
+}
+.demo-switcher__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.demo-switcher__field input {
+  width: 100%;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: inherit;
+}
+.demo-switcher__roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.demo-switcher__role {
+  flex: 1 1 auto;
+  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: inherit;
+  cursor: pointer;
+}
+.demo-switcher__role:hover:not(:disabled) { border-color: var(--accent); }
+.demo-switcher__role.is-current {
+  border-color: var(--accent);
+  color: var(--accent);
+  cursor: default;
+}
+.demo-switcher__role:disabled { opacity: 0.6; }
+.demo-switcher__error { font-size: 12px; color: var(--danger, #b3261e); margin: 0; }
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0;
+  clip: rect(0 0 0 0); clip-path: inset(50%);
+  overflow: hidden; white-space: nowrap;
+}

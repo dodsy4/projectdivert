@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "assert-no-demo-code": "node scripts/assert-no-demo-code.mjs"
   },
   "dependencies": {
     "leaflet": "^1.9.4",

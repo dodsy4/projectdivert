@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Suspense, lazy, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Briefcase,
@@ -15,6 +15,14 @@ import {
 } from 'lucide-react';
 
 import { useAuth } from '../auth/AuthContext.jsx';
+
+// Loaded only when the bundle is built with VITE_DEMO_MODE. Vite replaces that
+// with a literal at build time, so with it unset the ternary collapses, the
+// dynamic import becomes unreachable, and rollup never emits the chunk -- the
+// switcher is absent from the bundle rather than merely inert inside it.
+const DemoRoleSwitcher = import.meta.env.VITE_DEMO_MODE
+  ? lazy(() => import('./DemoRoleSwitcher.jsx'))
+  : null;
 
 const CUSTOMER_NAV = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -80,6 +88,11 @@ export default function Layout({ children }) {
         </nav>
 
         <div className="sidebar__foot">
+          {DemoRoleSwitcher && (
+            <Suspense fallback={null}>
+              <DemoRoleSwitcher />
+            </Suspense>
+          )}
           <div className="sidebar__user">
             <strong>{user?.name || user?.email}</strong>
             <span>{user?.role}</span>

@@ -5476,7 +5476,7 @@
     },
     "/api/v1/waste-requests/{request_id}/dispatch/accept": {
       "post": {
-        "description": "Requires a bearer token with role: `driver`. Error messages returned by this endpoint: \"Dispatch offer is no longer available\"; \"Dispatch offer not found\"; \"Invalid dispatch offer\"; \"Request already matched\"; \"Request is assigned to a different driver\"; \"Token missing valid user id claim\"; \"Waste request not found\"; \"offer_token is required\".",
+        "description": "Requires a bearer token with role: `driver`. Error messages returned by this endpoint: \"Dispatch offer is no longer available\"; \"Dispatch offer not found\"; \"Invalid dispatch offer\"; \"No open dispatch offer for this request\"; \"Request already matched\"; \"Request is assigned to a different driver\"; \"Token missing valid user id claim\"; \"Waste request not found\".",
         "operationId": "api_accept_dispatch_offer",
         "parameters": [
           {
