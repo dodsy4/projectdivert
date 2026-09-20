@@ -7,12 +7,12 @@ from projectdivert.models.waste import WasteRemovalRequest, WasteRemovalVehicleL
 from projectdivert.services.audit import record_audit_event
 from projectdivert.services.auth import _request_access_allowed, _request_driver_mutation_allowed, jwt_required
 from projectdivert.services.compliance import COMPLIANCE_COMPLETION_REQUIRED_TYPES, _compliance_documents_for_request, _compliance_missing_required_document_types, _compliance_summary_for_documents
-from projectdivert.services.dispatch import _create_dispatch_offers_for_request, _get_latest_match_for_request, _serialize_vehicle_location, _serialize_waste_request, _serialize_waste_request_snapshot
+from projectdivert.services.dispatch import _get_latest_match_for_request, _serialize_vehicle_location, _serialize_waste_request, _serialize_waste_request_snapshot
 from projectdivert.services.events import _format_sse_event, _parse_waste_request_last_event_id, _publish_waste_request_event, _subscribe_waste_request_events, _unsubscribe_waste_request_events, _waste_request_replay_events_since
-from projectdivert.services.geo import PostcodeLookupUnavailable, _postcode_coordinates
-from projectdivert.services.notifications import _notify_dispatch_offers, _notify_mobile_push_for_waste_event
+from projectdivert.services.geo import PostcodeLookupUnavailable
+from projectdivert.services.notifications import _notify_mobile_push_for_waste_event
+from projectdivert.services.waste_requests import WasteRequestError, create_waste_request
 from projectdivert.services.utils import _current_jwt_email, _current_jwt_role, _current_jwt_user_id, _parse_datetime_or_error, _to_float_or_none, utcnow
-from projectdivert.services import geo
 
 bp = Blueprint('api_waste_requests', __name__)
 
@@ -23,125 +23,23 @@ bp = Blueprint('api_waste_requests', __name__)
 def api_create_waste_request():
     data = request.get_json(silent=True) or {}
     try:
-        role = _current_jwt_role()
-        required_fields = [
-            'requester_name',
-            'requester_email',
-            'material_type',
-            'waste_amount',
-            'waste_unit',
-            'match_radius_miles',
-            'pickup_address',
-            'pickup_postcode',
-            'scheduled_pickup_at',
-        ]
-        cleaned = {}
-        missing = []
-        for field in required_fields:
-            value = str(data.get(field) or '').strip()
-            cleaned[field] = value
-            if not value:
-                missing.append(field)
-        if missing:
-            return jsonify({'error': 'Missing required field(s)', 'fields': missing}), 400
-
-        requester_email = cleaned['requester_email'].strip().lower()
-        if role == 'customer':
+        payload = dict(data)
+        # A customer may only raise a request as themselves; an admin may name
+        # someone else. This is the one part of creation that is specific to
+        # being called over the token-authenticated API.
+        if _current_jwt_role() == 'customer':
             token_email = _current_jwt_email()
             if not token_email:
                 return jsonify({'error': 'Token missing email claim'}), 403
-            requester_email = token_email
+            payload['requester_email'] = token_email
 
-        material_type = cleaned['material_type']
-        if material_type == 'Other':
-            custom_material_type = str(data.get('custom_material_type') or '').strip()
-            if not custom_material_type:
-                return jsonify({'error': 'custom_material_type is required when material_type is Other'}), 400
-            material_type = custom_material_type[:120]
-
-        waste_amount = _to_float_or_none(cleaned['waste_amount'])
-        if waste_amount is None or waste_amount <= 0:
-            return jsonify({'error': 'waste_amount must be a positive number'}), 400
-
-        match_radius_miles = _to_float_or_none(cleaned['match_radius_miles'])
-        if match_radius_miles is None or match_radius_miles <= 0:
-            return jsonify({'error': 'match_radius_miles must be a positive number'}), 400
-
-        scheduled_pickup_at = _parse_datetime_or_error(cleaned['scheduled_pickup_at'], 'scheduled_pickup_at')
-        if scheduled_pickup_at <= utcnow():
-            return jsonify({'error': 'scheduled_pickup_at must be in the future'}), 400
-
-        pickup_latitude, pickup_longitude = _postcode_coordinates(cleaned['pickup_postcode'])
-
-        booking = WasteRemovalRequest(
-            requester_name=cleaned['requester_name'][:120],
-            requester_email=requester_email[:255],
-            material_type=material_type,
-            waste_amount=waste_amount,
-            waste_unit=cleaned['waste_unit'][:32],
-            pickup_address=cleaned['pickup_address'][:255],
-            pickup_city=(str(data.get('pickup_city') or '').strip()[:120] or None),
-            pickup_county=(str(data.get('pickup_county') or '').strip()[:120] or None),
-            pickup_postcode=cleaned['pickup_postcode'][:32],
-            scheduled_pickup_at=scheduled_pickup_at,
-            notes=(str(data.get('notes') or '').strip() or None),
-            status='pending_match',
-        )
-        db.session.add(booking)
-        db.session.flush()
-
-        provider_candidates, dispatch_offer_rows = _create_dispatch_offers_for_request(
-            booking,
-            pickup_latitude,
-            pickup_longitude,
-            match_radius_miles,
-        )
-        closest_candidate = provider_candidates[0] if provider_candidates else None
-        drive_time_info = None
-        if closest_candidate:
-            drive_time_info = geo._drive_time_between_points(
-                pickup_latitude,
-                pickup_longitude,
-                closest_candidate['provider_latitude'],
-                closest_candidate['provider_longitude'],
-            )
-        if dispatch_offer_rows:
-            db.session.add_all(dispatch_offer_rows)
-
-        db.session.commit()
-        base_url = (current_app.config.get('APP_BASE_URL') or request.url_root.rstrip('/')).rstrip('/')
-        provider_notifications_sent = _notify_dispatch_offers(booking, dispatch_offer_rows, base_url)
-        _publish_waste_request_event(
-            booking.id,
-            'request_created',
-            payload=_serialize_waste_request_snapshot(booking),
-            metadata={
-                'offers_created': len(dispatch_offer_rows),
-                'provider_notifications_sent': provider_notifications_sent,
-            },
-        )
-        _notify_mobile_push_for_waste_event(
-            booking,
-            'request_created',
-            metadata={
-                'offers_created': len(dispatch_offer_rows),
-            },
-        )
-        return (
-            jsonify(
-                {
-                    'request': _serialize_waste_request(booking),
-                    'match': None,
-                    'drive_time': drive_time_info,
-                    'dispatch': {
-                        'offers_created': len(dispatch_offer_rows),
-                        'provider_notifications_sent': provider_notifications_sent,
-                        'closest_candidate': closest_candidate,
-                    },
-                }
-            ),
-            201,
-        )
+        created = create_waste_request(payload)
+    except WasteRequestError as exc:
+        db.session.rollback()
+        body = {'error': str(exc)}
+        if exc.fields:
+            body['fields'] = exc.fields
+        return jsonify(body), 400
     except PostcodeLookupUnavailable as exc:
         # Upstream is down, so this is not the caller's fault and retrying later
         # may well work -- reporting it as a 400 would say the opposite.
@@ -154,6 +52,22 @@ def api_create_waste_request():
         db.session.rollback()
         current_app.logger.exception('API waste request creation failed.')
         return jsonify({'error': 'Failed to create waste request'}), 500
+
+    return (
+        jsonify(
+            {
+                'request': _serialize_waste_request(created.booking),
+                'match': None,
+                'drive_time': created.drive_time,
+                'dispatch': {
+                    'offers_created': created.offers_created,
+                    'provider_notifications_sent': created.provider_notifications_sent,
+                    'closest_candidate': created.closest_candidate,
+                },
+            }
+        ),
+        201,
+    )
 
 
 

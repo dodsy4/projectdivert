@@ -103,7 +103,7 @@
     },
     "/api/v1/admin/auth-audit": {
       "get": {
-        "description": "Requires a bearer token with role: `admin`. Error messages returned by this endpoint: \"Failed to query auth audit events\".",
+        "description": "Requires a bearer token with role: `admin`. Error messages returned by this endpoint: \"Failed to query auth audit events\"; \"event filter is too long\"; \"from must be before to\".",
         "operationId": "api_admin_auth_audit",
         "parameters": [
           {
@@ -173,7 +173,7 @@
     },
     "/api/v1/admin/auth-audit/export": {
       "get": {
-        "description": "Requires a bearer token with role: `admin`. Error messages returned by this endpoint: \"Failed to export auth audit events\".",
+        "description": "Requires a bearer token with role: `admin`. Error messages returned by this endpoint: \"Failed to export auth audit events\"; \"event filter is too long\"; \"from must be before to\".",
         "operationId": "api_admin_auth_audit_export",
         "parameters": [
           {
@@ -329,12 +329,20 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "details": {},
+                  "email": {},
+                  "event": {},
                   "expires_at": {},
                   "expires_in_seconds": {},
                   "identifier_type": {},
                   "identifier_value": {},
+                  "ip": {},
                   "permanent": {},
-                  "reason": {}
+                  "reason": {},
+                  "status_code": {},
+                  "success": {},
+                  "user_agent": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }
@@ -403,6 +411,26 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "details": {},
+                  "email": {},
+                  "event": {},
+                  "ip": {},
+                  "status_code": {},
+                  "success": {},
+                  "user_agent": {},
+                  "user_id": {}
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -649,6 +677,26 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "details": {},
+                  "email": {},
+                  "event": {},
+                  "ip": {},
+                  "status_code": {},
+                  "success": {},
+                  "user_agent": {},
+                  "user_id": {}
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -777,19 +825,23 @@
     },
     "/api/v1/admin/billing/followups/maintenance": {
       "post": {
-        "description": "Requires a bearer token with role: `admin`. Error messages returned by this endpoint: \"Failed to run billing follow-up maintenance\".",
+        "description": "Requires a bearer token with role: `admin`. Error messages returned by this endpoint: \"Failed to run billing follow-up maintenance\"; \"booking is required\"; \"channel must be a supported communication channel\"; \"direction must be a supported communication direction\"; \"message is required\".",
         "operationId": "api_admin_run_billing_followup_maintenance",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "properties": {
+                  "customer_visible": {},
                   "dry_run": {},
                   "limit": {},
                   "log_reminders": {},
+                  "message_template": {},
+                  "outcome": {},
                   "reminder_after_hours": {},
                   "repeat_hours": {},
-                  "search": {}
+                  "search": {},
+                  "subject_template": {}
                 },
                 "type": "object"
               }
@@ -1127,6 +1179,19 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "company": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
           "201": {
             "content": {
               "application/json": {
@@ -1236,7 +1301,7 @@
     },
     "/api/v1/admin/carrier-companies/{carrier_company_id}/compliance/documents": {
       "post": {
-        "description": "Requires a bearer token with role: `admin`. Error messages returned by this endpoint: \"Carrier company not found\"; \"Failed to create company compliance document\".",
+        "description": "Requires a bearer token with role: `admin`. Error messages returned by this endpoint: \"Carrier company not found\"; \"Failed to create company compliance document\"; \"Invalid document_type\"; \"Invalid status\"; \"expires_at must be later than issued_at\"; \"file_url is required\"; \"file_url is too long\"; \"metadata must be an object\".",
         "operationId": "api_admin_create_carrier_company_compliance_document",
         "parameters": [
           {
@@ -1248,7 +1313,42 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "document_reference": {},
+                  "document_type": {},
+                  "expires_at": {},
+                  "file_url": {},
+                  "issued_at": {},
+                  "metadata": {},
+                  "notes": {},
+                  "status": {}
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "carrier_company": {},
+                    "document": {},
+                    "summary": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
           "201": {
             "content": {
               "application/json": {
@@ -1333,10 +1433,14 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "email": {},
                   "expires_at": {},
                   "metadata": {},
                   "notes": {},
-                  "status": {}
+                  "role": {},
+                  "source": {},
+                  "status": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }
@@ -1805,9 +1909,12 @@
                   "auto_assign": {},
                   "auto_resolve_test": {},
                   "dry_run": {},
+                  "incident": {},
+                  "incident_flags": {},
                   "limit": {},
                   "owner_admin_email": {},
                   "owner_admin_user_id": {},
+                  "request": {},
                   "resolve_test_minutes": {}
                 },
                 "type": "object"
@@ -2547,7 +2654,7 @@
     },
     "/api/v1/admin/drivers/{driver_user_id}/compliance/documents": {
       "post": {
-        "description": "Requires a bearer token with role: `admin`. Error messages returned by this endpoint: \"Driver not found\"; \"Failed to create driver compliance document\".",
+        "description": "Requires a bearer token with role: `admin`. Error messages returned by this endpoint: \"Driver not found\"; \"Failed to create driver compliance document\"; \"Invalid document_type\"; \"Invalid status\"; \"Only admins can set non-submitted status\"; \"expires_at must be later than issued_at\"; \"file_url is required\"; \"file_url is too long\"; \"metadata must be an object\".",
         "operationId": "api_admin_create_driver_compliance_document",
         "parameters": [
           {
@@ -2559,7 +2666,42 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "document_reference": {},
+                  "document_type": {},
+                  "expires_at": {},
+                  "file_url": {},
+                  "issued_at": {},
+                  "metadata": {},
+                  "notes": {},
+                  "status": {}
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "document": {},
+                    "driver": {},
+                    "summary": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
           "201": {
             "content": {
               "application/json": {
@@ -2654,10 +2796,14 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "email": {},
                   "expires_at": {},
                   "metadata": {},
                   "notes": {},
-                  "status": {}
+                  "role": {},
+                  "source": {},
+                  "status": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }
@@ -2804,6 +2950,26 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "details": {},
+                  "email": {},
+                  "event": {},
+                  "ip": {},
+                  "status_code": {},
+                  "success": {},
+                  "user_agent": {},
+                  "user_id": {}
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -2943,7 +3109,7 @@
     },
     "/api/v1/admin/waste-requests/{request_id}/billing-followup": {
       "post": {
-        "description": "Requires a bearer token with role: `admin`. Error messages returned by this endpoint: \"Billing follow-up can only remain open or acknowledged while the request is invoice_sent\"; \"Failed to update billing follow-up workflow\"; \"Invalid billing follow-up state\"; \"Waste request not found\".",
+        "description": "Requires a bearer token with role: `admin`. Error messages returned by this endpoint: \"Billing follow-up can only remain open or acknowledged while the request is invoice_sent\"; \"Failed to update billing follow-up workflow\"; \"Invalid billing follow-up state\"; \"Waste request not found\"; \"booking is required\"; \"channel must be a supported communication channel\"; \"direction must be a supported communication direction\"; \"message is required\".",
         "operationId": "api_admin_update_waste_request_billing_followup",
         "parameters": [
           {
@@ -3031,7 +3197,7 @@
     },
     "/api/v1/admin/waste-requests/{request_id}/communications": {
       "post": {
-        "description": "Requires a bearer token with role: `admin`. Error messages returned by this endpoint: \"Failed to create communication log\"; \"Invalid channel\"; \"Invalid direction\"; \"Waste request not found\"; \"message is required\".",
+        "description": "Requires a bearer token with role: `admin`. Error messages returned by this endpoint: \"Failed to create communication log\"; \"Invalid channel\"; \"Invalid direction\"; \"Waste request not found\"; \"booking is required\"; \"channel must be a supported communication channel\"; \"direction must be a supported communication direction\"; \"message is required\".",
         "operationId": "api_admin_create_waste_request_communication",
         "parameters": [
           {
@@ -3066,6 +3232,23 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "communication": {},
+                    "communications": {},
+                    "created": {},
+                    "request": {},
+                    "summary": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
           "201": {
             "content": {
               "application/json": {
@@ -3203,10 +3386,14 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "email": {},
                   "expires_at": {},
                   "metadata": {},
                   "notes": {},
-                  "status": {}
+                  "role": {},
+                  "source": {},
+                  "status": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }
@@ -3294,7 +3481,11 @@
               "schema": {
                 "properties": {
                   "driver_user_id": {},
-                  "reason": {}
+                  "email": {},
+                  "reason": {},
+                  "role": {},
+                  "source": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }
@@ -3463,15 +3654,22 @@
     },
     "/api/v1/auth/login": {
       "post": {
-        "description": "Public endpoint: no bearer token required. Error messages returned by this endpoint: \"Email verification required\"; \"Failed to create session\"; \"Invalid email or password\"; \"Too many failed login attempts. Please try again later.\"; \"email and password are required\".",
+        "description": "Public endpoint: no bearer token required. Error messages returned by this endpoint: \"Access temporarily blocked\"; \"Email verification required\"; \"Failed to create session\"; \"Invalid email or password\"; \"Too many attempts. Please try again later.\"; \"Too many failed login attempts. Please try again later.\"; \"email and password are required\".",
         "operationId": "api_auth_login",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "properties": {
+                  "details": {},
                   "email": {},
-                  "password": {}
+                  "event": {},
+                  "ip": {},
+                  "password": {},
+                  "status_code": {},
+                  "success": {},
+                  "user_agent": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }
@@ -3539,14 +3737,23 @@
     },
     "/api/v1/auth/logout": {
       "post": {
-        "description": "Public endpoint: no bearer token required. Error messages returned by this endpoint: \"Failed to revoke session\"; \"refresh_token is required\".",
+        "description": "Public endpoint: no bearer token required. Error messages returned by this endpoint: \"Failed to revoke session\"; \"Invalid token\"; \"Invalid token type\"; \"Token expired\"; \"Token missing subject\"; \"Too many attempts. Please try again later.\"; \"refresh_token is required\"; \"token is required\".",
         "operationId": "api_auth_logout",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "properties": {
-                  "refresh_token": {}
+                  "details": {},
+                  "email": {},
+                  "event": {},
+                  "ip": {},
+                  "jti": {},
+                  "refresh_token": {},
+                  "status_code": {},
+                  "success": {},
+                  "user_agent": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }
@@ -3638,15 +3845,24 @@
     },
     "/api/v1/auth/password-reset/confirm": {
       "post": {
-        "description": "Public endpoint: no bearer token required. Error messages returned by this endpoint: \"Failed to reset password\".",
+        "description": "Public endpoint: no bearer token required. Error messages returned by this endpoint: \"Failed to reset password\"; \"Invalid token\"; \"Invalid token type\"; \"Token already used\"; \"Token expired\"; \"Token missing subject\"; \"Token not found\"; \"Token revoked\"; \"Too many attempts. Please try again later.\"; \"User not found\"; \"token is required\".",
         "operationId": "api_auth_password_reset_confirm",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "properties": {
+                  "details": {},
+                  "email": {},
+                  "event": {},
+                  "ip": {},
+                  "jti": {},
                   "new_password": {},
-                  "token": {}
+                  "status_code": {},
+                  "success": {},
+                  "token": {},
+                  "user_agent": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }
@@ -3694,14 +3910,21 @@
     },
     "/api/v1/auth/password-reset/request": {
       "post": {
-        "description": "Public endpoint: no bearer token required. Error messages returned by this endpoint: \"A valid email is required\".",
+        "description": "Public endpoint: no bearer token required. Error messages returned by this endpoint: \"A valid email is required\"; \"Too many attempts. Please try again later.\".",
         "operationId": "api_auth_password_reset_request",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "properties": {
-                  "email": {}
+                  "details": {},
+                  "email": {},
+                  "event": {},
+                  "ip": {},
+                  "status_code": {},
+                  "success": {},
+                  "user_agent": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }
@@ -3710,6 +3933,16 @@
           "required": true
         },
         "responses": {
+          "0": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
           "200": {
             "content": {
               "application/json": {
@@ -3739,14 +3972,23 @@
     },
     "/api/v1/auth/refresh": {
       "post": {
-        "description": "Public endpoint: no bearer token required. Error messages returned by this endpoint: \"Failed to refresh session\"; \"refresh_token is required\".",
+        "description": "Public endpoint: no bearer token required. Error messages returned by this endpoint: \"Email verification required\"; \"Failed to refresh session\"; \"Invalid token\"; \"Invalid token type\"; \"Refresh token expired\"; \"Refresh token not found\"; \"Refresh token revoked\"; \"Token expired\"; \"Token missing subject\"; \"Too many attempts. Please try again later.\"; \"User is inactive\"; \"User not found\".",
         "operationId": "api_auth_refresh",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "properties": {
-                  "refresh_token": {}
+                  "details": {},
+                  "email": {},
+                  "event": {},
+                  "ip": {},
+                  "jti": {},
+                  "refresh_token": {},
+                  "status_code": {},
+                  "success": {},
+                  "user_agent": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }
@@ -3794,16 +4036,23 @@
     },
     "/api/v1/auth/signup": {
       "post": {
-        "description": "Public endpoint: no bearer token required. Error messages returned by this endpoint: \"A valid email is required\"; \"An account with this email already exists\"; \"Failed to create account\"; \"name is required\".",
+        "description": "Public endpoint: no bearer token required. Error messages returned by this endpoint: \"A valid email is required\"; \"An account with this email already exists\"; \"Failed to create account\"; \"Too many attempts. Please try again later.\"; \"name is required\".",
         "operationId": "api_auth_signup",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "properties": {
+                  "details": {},
                   "email": {},
+                  "event": {},
+                  "ip": {},
                   "name": {},
-                  "password": {}
+                  "password": {},
+                  "status_code": {},
+                  "success": {},
+                  "user_agent": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }
@@ -3871,14 +4120,23 @@
     },
     "/api/v1/auth/verify/confirm": {
       "post": {
-        "description": "Public endpoint: no bearer token required. Error messages returned by this endpoint: \"Failed to verify email\".",
+        "description": "Public endpoint: no bearer token required. Error messages returned by this endpoint: \"Failed to verify email\"; \"Invalid token\"; \"Invalid token type\"; \"Token already used\"; \"Token expired\"; \"Token missing subject\"; \"Token not found\"; \"Token revoked\"; \"Too many attempts. Please try again later.\"; \"User not found\"; \"token is required\".",
         "operationId": "api_auth_verify_confirm",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "properties": {
-                  "token": {}
+                  "details": {},
+                  "email": {},
+                  "event": {},
+                  "ip": {},
+                  "jti": {},
+                  "status_code": {},
+                  "success": {},
+                  "token": {},
+                  "user_agent": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }
@@ -3926,14 +4184,21 @@
     },
     "/api/v1/auth/verify/request": {
       "post": {
-        "description": "Public endpoint: no bearer token required. Error messages returned by this endpoint: \"A valid email is required\".",
+        "description": "Public endpoint: no bearer token required. Error messages returned by this endpoint: \"A valid email is required\"; \"Too many attempts. Please try again later.\".",
         "operationId": "api_auth_verify_request",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "properties": {
-                  "email": {}
+                  "details": {},
+                  "email": {},
+                  "event": {},
+                  "ip": {},
+                  "status_code": {},
+                  "success": {},
+                  "user_agent": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }
@@ -3942,6 +4207,16 @@
           "required": true
         },
         "responses": {
+          "0": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
           "200": {
             "content": {
               "application/json": {
@@ -4056,9 +4331,44 @@
     },
     "/api/v1/drivers/me/compliance/documents": {
       "post": {
-        "description": "Requires a bearer token with role: `driver`. Error messages returned by this endpoint: \"Driver not found\"; \"Failed to create driver compliance document\".",
+        "description": "Requires a bearer token with role: `driver`. Error messages returned by this endpoint: \"Driver not found\"; \"Failed to create driver compliance document\"; \"Invalid document_type\"; \"Invalid status\"; \"Only admins can set non-submitted status\"; \"expires_at must be later than issued_at\"; \"file_url is required\"; \"file_url is too long\"; \"metadata must be an object\".",
         "operationId": "api_driver_create_own_compliance_document",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "document_reference": {},
+                  "document_type": {},
+                  "expires_at": {},
+                  "file_url": {},
+                  "issued_at": {},
+                  "metadata": {},
+                  "notes": {},
+                  "status": {}
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "document": {},
+                    "driver": {},
+                    "summary": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
           "201": {
             "content": {
               "application/json": {
@@ -4167,7 +4477,13 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "amount_reversed": {},
+                  "charges": {},
+                  "client_secret": {},
                   "data": {},
+                  "id": {},
+                  "latest_charge": {},
+                  "status": {},
                   "type": {}
                 },
                 "type": "object"
@@ -4422,7 +4738,7 @@
         ]
       },
       "post": {
-        "description": "Requires a bearer token with role: `admin`, `customer`. Error messages returned by this endpoint: \"Failed to create waste request\"; \"Missing required field(s)\"; \"Token missing email claim\"; \"custom_material_type is required when material_type is Other\"; \"match_radius_miles must be a positive number\"; \"scheduled_pickup_at must be in the future\"; \"waste_amount must be a positive number\".",
+        "description": "Requires a bearer token with role: `admin`, `customer`. Error messages returned by this endpoint: \"Failed to create waste request\"; \"Missing required field(s)\"; \"Please enter a valid pickup postcode.\"; \"The postcode lookup service is unavailable.\"; \"The postcode lookup service returned an unreadable response.\"; \"Token missing email claim\"; \"custom_material_type is required when material_type is Other\"; \"match_radius_miles must be a positive number\"; \"scheduled_pickup_at must be in the future\"; \"waste_amount must be a positive number\".",
         "operationId": "api_create_waste_request",
         "requestBody": {
           "content": {
@@ -4461,6 +4777,22 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "dispatch": {},
+                    "drive_time": {},
+                    "match": {},
+                    "request": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
           "201": {
             "content": {
               "application/json": {
@@ -4776,6 +5108,21 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "document": {},
+                    "request_id": {},
+                    "summary": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
           "201": {
             "content": {
               "application/json": {
@@ -4845,7 +5192,7 @@
     },
     "/api/v1/waste-requests/{request_id}/compliance/uploads": {
       "post": {
-        "description": "Requires a bearer token with role: `admin`, `driver`. Error messages returned by this endpoint: \"Drivers can only upload collection evidence documents\"; \"Failed to save compliance upload\"; \"Forbidden\"; \"Invalid document_type\"; \"Waste request not found\"; \"file is required\".",
+        "description": "Requires a bearer token with role: `admin`, `driver`. Error messages returned by this endpoint: \"COMPLIANCE_S3_BUCKET is not configured\"; \"Drivers can only upload collection evidence documents\"; \"Failed to save compliance upload\"; \"Forbidden\"; \"Invalid document_type\"; \"Only PDF, PNG, JPG, JPEG, WEBP, HEIC, and HEIF files are supported.\"; \"Proof-of-collection uploads must be image files.\"; \"Uploaded file is too large.\"; \"Waste request not found\"; \"file is required\".",
         "operationId": "api_upload_waste_request_compliance_file",
         "parameters": [
           {
@@ -4879,6 +5226,21 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "document_type": {},
+                    "request_id": {},
+                    "upload": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
           "201": {
             "content": {
               "application/json": {
@@ -4948,7 +5310,7 @@
     },
     "/api/v1/waste-requests/{request_id}/compliance/uploads/sign": {
       "post": {
-        "description": "Requires a bearer token with role: `admin`, `driver`. Error messages returned by this endpoint: \"Drivers can only upload collection evidence documents\"; \"Failed to create signed upload\"; \"Forbidden\"; \"Invalid document_type\"; \"Signed uploads require S3 storage backend\"; \"Waste request not found\"; \"file_name is required\"; \"mime_type is required\".",
+        "description": "Requires a bearer token with role: `admin`, `driver`. Error messages returned by this endpoint: \"COMPLIANCE_S3_BUCKET is not configured\"; \"Drivers can only upload collection evidence documents\"; \"Failed to create signed upload\"; \"Forbidden\"; \"Invalid document_type\"; \"Only PDF, PNG, JPG, JPEG, WEBP, HEIC, and HEIF files are supported.\"; \"Proof-of-collection uploads must be image files.\"; \"Signed uploads require S3 storage backend\"; \"Waste request not found\"; \"boto3 dependency is not installed\"; \"file_name is required\"; \"mime_type is required\".",
         "operationId": "api_sign_waste_request_compliance_upload",
         "parameters": [
           {
@@ -5071,7 +5433,11 @@
             "application/json": {
               "schema": {
                 "properties": {
-                  "offer_token": {}
+                  "email": {},
+                  "offer_token": {},
+                  "role": {},
+                  "source": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }
@@ -5245,6 +5611,19 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "location": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
           "201": {
             "content": {
               "application/json": {
@@ -5428,7 +5807,7 @@
     },
     "/api/v1/waste-requests/{request_id}/payments/charge": {
       "post": {
-        "description": "Requires a bearer token with role: `admin`, `customer`. Error messages returned by this endpoint: \"Failed to create payment charge\"; \"Forbidden\"; \"Payments are disabled by feature flag\"; \"Payments are not configured. Set STRIPE_SECRET_KEY.\"; \"Waste request not found\"; \"amount_minor (or amount) must be a positive value\"; \"currency must be a 3-letter code\".",
+        "description": "Requires a bearer token with role: `admin`, `customer`. Error messages returned by this endpoint: \"Failed to create payment charge\"; \"Forbidden\"; \"Payments are disabled by feature flag\"; \"Payments are not configured. Set STRIPE_SECRET_KEY.\"; \"Stripe is not configured. Set STRIPE_SECRET_KEY.\"; \"Stripe response was invalid.\"; \"Waste request not found\"; \"amount_minor (or amount) must be a positive value\"; \"currency must be a 3-letter code\".",
         "operationId": "api_create_payment_charge",
         "parameters": [
           {
@@ -5447,14 +5826,23 @@
                 "properties": {
                   "amount": {},
                   "amount_minor": {},
+                  "charges": {},
+                  "client_secret": {},
                   "confirm": {},
                   "currency": {},
                   "description": {},
+                  "email": {},
+                  "id": {},
                   "idempotency_key": {},
+                  "latest_charge": {},
                   "payment_method_id": {},
                   "platform_fee_bps": {},
                   "return_url": {},
-                  "stripe_customer_id": {}
+                  "role": {},
+                  "source": {},
+                  "status": {},
+                  "stripe_customer_id": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }
@@ -5463,6 +5851,20 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "charge": {},
+                    "financials": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
           "201": {
             "content": {
               "application/json": {
@@ -5541,7 +5943,7 @@
     },
     "/api/v1/waste-requests/{request_id}/payments/{charge_id}/refund": {
       "post": {
-        "description": "Requires a bearer token with role: `admin`, `customer`. Error messages returned by this endpoint: \"Charge is already fully refunded\"; \"Charge is missing processor references and cannot be refunded\"; \"Failed to create refund\"; \"Forbidden\"; \"Payment charge not found\"; \"Payments are disabled by feature flag\"; \"Payments are not configured. Set STRIPE_SECRET_KEY.\"; \"Waste request not found\"; \"amount_minor exceeds refundable balance\"; \"amount_minor must be positive\".",
+        "description": "Requires a bearer token with role: `admin`, `customer`. Error messages returned by this endpoint: \"Charge is already fully refunded\"; \"Charge is missing processor references and cannot be refunded\"; \"Failed to create refund\"; \"Forbidden\"; \"Payment charge not found\"; \"Payments are disabled by feature flag\"; \"Payments are not configured. Set STRIPE_SECRET_KEY.\"; \"Stripe is not configured. Set STRIPE_SECRET_KEY.\"; \"Stripe response was invalid.\"; \"Waste request not found\"; \"amount_minor exceeds refundable balance\"; \"amount_minor must be positive\".",
         "operationId": "api_create_payment_refund",
         "parameters": [
           {
@@ -5567,8 +5969,12 @@
               "schema": {
                 "properties": {
                   "amount_minor": {},
+                  "email": {},
                   "idempotency_key": {},
-                  "reason": {}
+                  "reason": {},
+                  "role": {},
+                  "source": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }
@@ -5577,6 +5983,21 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "charge": {},
+                    "financials": {},
+                    "refund": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
           "201": {
             "content": {
               "application/json": {
@@ -5666,7 +6087,7 @@
     },
     "/api/v1/waste-requests/{request_id}/payouts": {
       "post": {
-        "description": "Requires a bearer token with role: `admin`. Error messages returned by this endpoint: \"Failed to create driver payout\"; \"No assigned driver for payout\"; \"No eligible succeeded charge found for payout\"; \"No remaining driver payout balance\"; \"Payments are disabled by feature flag\"; \"Payments are not configured. Set STRIPE_SECRET_KEY.\"; \"Waste request not found\"; \"amount_minor exceeds driver payout balance\"; \"amount_minor must be positive\"; \"destination_account_id is required (Stripe connected account id)\".",
+        "description": "Requires a bearer token with role: `admin`. Error messages returned by this endpoint: \"Failed to create driver payout\"; \"No assigned driver for payout\"; \"No eligible succeeded charge found for payout\"; \"No remaining driver payout balance\"; \"Payments are disabled by feature flag\"; \"Payments are not configured. Set STRIPE_SECRET_KEY.\"; \"Stripe is not configured. Set STRIPE_SECRET_KEY.\"; \"Stripe response was invalid.\"; \"Waste request not found\"; \"amount_minor exceeds driver payout balance\"; \"amount_minor must be positive\"; \"destination_account_id is required (Stripe connected account id)\".",
         "operationId": "api_create_driver_payout",
         "parameters": [
           {
@@ -5684,11 +6105,17 @@
               "schema": {
                 "properties": {
                   "amount_minor": {},
+                  "amount_reversed": {},
                   "description": {},
                   "destination_account_id": {},
                   "driver_user_id": {},
+                  "email": {},
                   "idempotency_key": {},
-                  "payment_charge_id": {}
+                  "payment_charge_id": {},
+                  "role": {},
+                  "source": {},
+                  "status": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }
@@ -5697,6 +6124,20 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "financials": {},
+                    "payout": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
           "201": {
             "content": {
               "application/json": {
@@ -5792,7 +6233,12 @@
             "application/json": {
               "schema": {
                 "properties": {
-                  "status": {}
+                  "by_type": {},
+                  "email": {},
+                  "role": {},
+                  "source": {},
+                  "status": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }
@@ -5872,11 +6318,13 @@
         "operationId": "api_whatsapp_inbound",
         "requestBody": {
           "content": {
-            "multipart/form-data": {
+            "application/json": {
               "schema": {
                 "properties": {
-                  "Body": {},
-                  "From": {}
+                  "email": {},
+                  "role": {},
+                  "source": {},
+                  "user_id": {}
                 },
                 "type": "object"
               }

@@ -491,6 +491,32 @@ def _compliance_documents_for_request(request_id):
     )
 
 
+def _compliance_documents_for_requests(request_ids):
+    """Every request's compliance documents, in one query.
+
+    Same ordering as :func:`_compliance_documents_for_request`, so a caller can
+    swap a page of per-row lookups for this without changing what it renders.
+    Returns a dict keyed by request id; ids with no documents are absent.
+    """
+    grouped = {}
+    request_ids = [rid for rid in set(request_ids or ()) if rid is not None]
+    if not request_ids:
+        return grouped
+
+    rows = (
+        WasteComplianceDocument.query
+        .filter(WasteComplianceDocument.waste_removal_request_id.in_(request_ids))
+        .order_by(
+            WasteComplianceDocument.created_at.desc(),
+            WasteComplianceDocument.id.desc(),
+        )
+        .all()
+    )
+    for row in rows:
+        grouped.setdefault(row.waste_removal_request_id, []).append(row)
+    return grouped
+
+
 def _compliance_missing_required_document_types(summary, required_types):
     summary = summary or {}
     by_type = summary.get('by_type') or {}

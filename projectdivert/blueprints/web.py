@@ -1,6 +1,5 @@
 """Web routes."""
 
-import dateutil.parser
 import requests
 from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
 from sqlalchemy import func
@@ -12,14 +11,11 @@ from projectdivert.extensions import db
 from projectdivert.models.catalog import DiversionEstimate, Material, MaterialRequest
 from projectdivert.models.charity import Charity
 from projectdivert.models.user import User
-from projectdivert.models.waste import WasteRemovalRequest
-from projectdivert.services.dispatch import _create_dispatch_offers_for_request
-from projectdivert.services.geo import PostcodeLookupUnavailable, _postcode_coordinates
+from projectdivert.services.geo import PostcodeLookupUnavailable
 from projectdivert.services.lca_glue import assess_diversion_estimate
-from projectdivert.services.notifications import _notify_dispatch_offers
 from projectdivert.services.uploads import MAX_MATERIAL_IMAGES, _decode_material_images, _encode_material_images, _save_material_images, _serialize_material
-from projectdivert.services.utils import _require_form_fields, _require_positive_number, _to_float_or_none, to_utc_naive, utcnow
-from projectdivert.services import geo
+from projectdivert.services.waste_requests import WasteRequestError, create_waste_request
+from projectdivert.services.utils import _require_form_fields, _require_positive_number, utcnow
 from projectdivert.services import notifications
 
 bp = Blueprint('web', __name__)
@@ -743,165 +739,96 @@ def create_waste_removal_request_form():
 
 
 
+def _waste_request_error_message(exc):
+    """Turn a service validation error into something to show a person.
+
+    The service phrases errors for the API, in field names; the form has always
+    spoken prose, and naming the missing fields is more use here than a bare
+    count.
+    """
+    if exc.fields and str(exc) == 'Missing required field(s)':
+        return 'Missing required field(s): {}.'.format(', '.join(exc.fields))
+    message = str(exc)
+    return message if message.endswith('.') else '{}.'.format(message)
+
+
+def _waste_removal_notification_body(created):
+    """The plain-text email sent to the team for a new request."""
+    booking = created.booking
+    closest = created.closest_candidate
+    return (
+        'A new waste removal request was submitted.\n\n'
+        'Request ID: {request_id}\n'
+        'Requester Name: {requester_name}\n'
+        'Requester Email: {requester_email}\n'
+        'Material Type: {material_type}\n'
+        'Waste Amount: {waste_amount} {waste_unit}\n'
+        'Pickup Address: {pickup_address}\n'
+        'Pickup City: {pickup_city}\n'
+        'Pickup County: {pickup_county}\n'
+        'Pickup Postcode: {pickup_postcode}\n'
+        'Scheduled Pickup: {scheduled_pickup}\n'
+        'Match Radius (miles): {match_radius_miles}\n'
+        'Dispatch Offers Created: {offers_created}\n'
+        'Closest Provider Candidate: {closest_provider}\n'
+        'Provider Notifications Sent: {provider_notifications_sent}\n'
+        'Estimated Drive Time: {drive_time}\n'
+        'Notes: {notes}\n'
+        'Status: {status}\n'
+    ).format(
+        request_id=booking.id,
+        requester_name=booking.requester_name,
+        requester_email=booking.requester_email,
+        material_type=booking.material_type,
+        waste_amount=booking.waste_amount,
+        waste_unit=booking.waste_unit,
+        pickup_address=booking.pickup_address,
+        pickup_city=booking.pickup_city or '(not provided)',
+        pickup_county=booking.pickup_county or '(not provided)',
+        pickup_postcode=booking.pickup_postcode,
+        scheduled_pickup=booking.scheduled_pickup_at.strftime('%Y-%m-%d %H:%M'),
+        match_radius_miles=created.match_radius_miles,
+        offers_created=created.offers_created,
+        closest_provider=(
+            '{} ({} miles)'.format(closest['provider_name'], closest['distance_miles'])
+            if closest else 'No provider found within radius'
+        ),
+        provider_notifications_sent=created.provider_notifications_sent,
+        drive_time=(
+            created.drive_time['text'] if created.drive_time
+            else ('Unable to calculate (Google Maps API unavailable)' if closest else 'N/A')
+        ),
+        notes=booking.notes or '(none)',
+        status=booking.status,
+    )
+
+
 @bp.route('/waste-removal/request', methods=['POST'])
 @bp.route('/waste_removal/request', methods=['POST'])
 def create_waste_removal_request_submission():
     error = False
     email_sent = False
     email_configured = False
-    provider_candidates = []
-    closest_candidate = None
-    dispatch_offer_rows = []
-    provider_notifications_sent = 0
-    match_radius_miles = None
-    pickup_latitude = None
-    pickup_longitude = None
-    drive_time_info = None
+    created = None
     try:
-        form = _require_form_fields(
-            request.form,
-            [
-                'requester_name',
-                'requester_email',
-                'material_type',
-                'waste_amount',
-                'waste_unit',
-                'match_radius_miles',
-                'pickup_address',
-                'pickup_postcode',
-                'scheduled_pickup_at',
-            ],
-        )
-
-        material_type = form['material_type']
-        if material_type == 'Other':
-            custom_material_type = request.form.get('custom_material_type', '').strip()
-            if not custom_material_type:
-                raise ValueError('Please enter a material type when selecting Other.')
-            material_type = custom_material_type[:120]
-
-        waste_amount = _to_float_or_none(form['waste_amount'])
-        if waste_amount is None or waste_amount <= 0:
-            raise ValueError('Waste amount must be a positive number.')
-
-        match_radius_miles = _to_float_or_none(form['match_radius_miles'])
-        if match_radius_miles is None or match_radius_miles <= 0:
-            raise ValueError('Provider match radius must be a positive number of miles.')
-
-        try:
-            scheduled_pickup_at = dateutil.parser.parse(form['scheduled_pickup_at'])
-        except (TypeError, ValueError, OverflowError):
-            raise ValueError('Please provide a valid scheduled pickup date and time.')
-
-        scheduled_pickup_at = to_utc_naive(scheduled_pickup_at)
-        if scheduled_pickup_at <= utcnow():
-            raise ValueError('Scheduled pickup time must be in the future.')
-
-        pickup_latitude, pickup_longitude = _postcode_coordinates(form['pickup_postcode'])
-
-        booking = WasteRemovalRequest(
-            requester_name=form['requester_name'][:120],
-            requester_email=form['requester_email'][:255],
-            material_type=material_type,
-            waste_amount=waste_amount,
-            waste_unit=form['waste_unit'][:32],
-            pickup_address=form['pickup_address'][:255],
-            pickup_city=(request.form.get('pickup_city') or '').strip()[:120] or None,
-            pickup_county=(request.form.get('pickup_county') or '').strip()[:120] or None,
-            pickup_postcode=form['pickup_postcode'][:32],
-            scheduled_pickup_at=scheduled_pickup_at,
-            notes=(request.form.get('notes') or '').strip() or None,
-            status='pending_match',
-        )
-        db.session.add(booking)
-        db.session.flush()
-
-        provider_candidates, dispatch_offer_rows = _create_dispatch_offers_for_request(
-            booking,
-            pickup_latitude,
-            pickup_longitude,
-            match_radius_miles,
-        )
-        closest_candidate = provider_candidates[0] if provider_candidates else None
-        if closest_candidate:
-            drive_time_info = geo._drive_time_between_points(
-                pickup_latitude,
-                pickup_longitude,
-                closest_candidate['provider_latitude'],
-                closest_candidate['provider_longitude'],
-            )
-        if dispatch_offer_rows:
-            db.session.add_all(dispatch_offer_rows)
-
-        db.session.commit()
-
-        base_url = (current_app.config.get('APP_BASE_URL') or request.url_root.rstrip('/')).rstrip('/')
-        provider_notifications_sent = _notify_dispatch_offers(booking, dispatch_offer_rows, base_url)
+        created = create_waste_request(dict(request.form))
 
         notification_email = (current_app.config.get('WASTE_REMOVAL_NOTIFICATION_EMAIL') or '').strip()
         email_configured = bool(notification_email)
         if notification_email:
-            local_pickup = scheduled_pickup_at.strftime('%Y-%m-%d %H:%M')
-            subject = 'New waste removal request: {}'.format(material_type)
-            text_body = (
-                'A new waste removal request was submitted.\n\n'
-                'Request ID: {request_id}\n'
-                'Requester Name: {requester_name}\n'
-                'Requester Email: {requester_email}\n'
-                'Material Type: {material_type}\n'
-                'Waste Amount: {waste_amount} {waste_unit}\n'
-                'Pickup Address: {pickup_address}\n'
-                'Pickup City: {pickup_city}\n'
-                'Pickup County: {pickup_county}\n'
-                'Pickup Postcode: {pickup_postcode}\n'
-                'Scheduled Pickup: {scheduled_pickup}\n'
-                'Match Radius (miles): {match_radius_miles}\n'
-                'Dispatch Offers Created: {offers_created}\n'
-                'Closest Provider Candidate: {closest_provider}\n'
-                'Provider Notifications Sent: {provider_notifications_sent}\n'
-                'Estimated Drive Time: {drive_time}\n'
-                'Notes: {notes}\n'
-                'Status: {status}\n'
-            ).format(
-                request_id=booking.id,
-                requester_name=booking.requester_name,
-                requester_email=booking.requester_email,
-                material_type=booking.material_type,
-                waste_amount=booking.waste_amount,
-                waste_unit=booking.waste_unit,
-                pickup_address=booking.pickup_address,
-                pickup_city=booking.pickup_city or '(not provided)',
-                pickup_county=booking.pickup_county or '(not provided)',
-                pickup_postcode=booking.pickup_postcode,
-                scheduled_pickup=local_pickup,
-                match_radius_miles=match_radius_miles,
-                offers_created=len(dispatch_offer_rows),
-                closest_provider=(
-                    '{} ({} miles)'.format(
-                        closest_candidate['provider_name'],
-                        closest_candidate['distance_miles'],
-                    )
-                    if closest_candidate
-                    else 'No provider found within radius'
-                ),
-                provider_notifications_sent=provider_notifications_sent,
-                drive_time=(
-                    drive_time_info['text']
-                    if drive_time_info
-                    else (
-                        'Unable to calculate (Google Maps API unavailable)'
-                        if closest_candidate
-                        else 'N/A'
-                    )
-                ),
-                notes=booking.notes or '(none)',
-                status=booking.status,
+            email_sent = notifications._send_material_request_email(
+                notification_email,
+                'New waste removal request: {}'.format(created.booking.material_type),
+                _waste_removal_notification_body(created),
             )
-            email_sent = notifications._send_material_request_email(notification_email, subject, text_body)
         else:
             current_app.logger.warning(
                 'WASTE_REMOVAL_NOTIFICATION_EMAIL not set; waste removal email notification skipped.'
             )
+    except WasteRequestError as exc:
+        error = True
+        db.session.rollback()
+        flash(_waste_request_error_message(exc))
     except PostcodeLookupUnavailable as exc:
         # Say it is the service and not their postcode, so they retry rather
         # than re-checking a postcode that was correct all along.
@@ -922,20 +849,20 @@ def create_waste_removal_request_submission():
     if error:
         flash('Waste removal request could not be submitted.')
     else:
-        if dispatch_offer_rows:
+        if created.offers_created:
             flash(
                 'Waste removal request submitted. Notified {} closest providers; awaiting first acceptance.'.format(
-                    len(dispatch_offer_rows),
+                    created.offers_created,
                 )
             )
         else:
             flash(
                 'Waste removal request submitted. No provider found within {} miles yet.'.format(
-                    round(match_radius_miles or 0, 2),
+                    round(created.match_radius_miles or 0, 2),
                 )
             )
-        if provider_notifications_sent:
-            flash('Provider notifications sent: {}.'.format(provider_notifications_sent))
+        if created.provider_notifications_sent:
+            flash('Provider notifications sent: {}.'.format(created.provider_notifications_sent))
         if email_sent:
             flash('Request details emailed to the team.')
         elif email_configured:
