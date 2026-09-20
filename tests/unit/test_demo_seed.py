@@ -7,6 +7,7 @@ without a collection that has already completed.
 
 import pytest
 
+from projectdivert.models.auth import AuthLifecycleToken
 from projectdivert.services import demo_seed
 from projectdivert.services.demo_seed import (
     DEMO_CUSTOMER_EMAIL,
@@ -165,3 +166,63 @@ def test_the_cli_reports_what_it_made(app_context):
     assert result.exit_code == 0, result.output
     assert DEMO_DRIVER_EMAIL in result.output
     assert 'completed' in result.output
+
+
+def test_reset_works_after_the_accounts_have_been_used(client, app_context):
+    """The reason to reset is that a demo has been run, so that must work.
+
+    Signing in writes session and audit rows that carry a foreign key to the
+    account. Clearing the accounts without clearing those first fails on the
+    constraint -- so this reset is only ever exercised in the state the earlier
+    version of it could not handle.
+    """
+    with app_context.app.app_context():
+        seed_demo(password='DemoPassword123!')
+
+    for email in (DEMO_CUSTOMER_EMAIL, DEMO_DRIVER_EMAIL):
+        assert client.post(
+            '/api/v1/auth/login',
+            json={'email': email, 'password': 'DemoPassword123!'},
+        ).status_code == 200
+
+    with app_context.app.app_context():
+        summary = seed_demo(password='DemoPassword123!', reset=True)
+
+        assert len(summary['collections']) > 0
+        assert app_context.User.query.filter_by(
+            email=DEMO_DRIVER_EMAIL).count() == 1
+        # Nothing may be left pointing at an account that no longer exists.
+        assert AuthLifecycleToken.query.count() == 0
+
+
+def test_clearing_keeps_real_rows_that_merely_name_a_demo_user(app_context):
+    """A real collection the demo driver touched is data, not demo data.
+
+    Those columns only record who acted. Deleting the row would destroy real
+    work, so the reference is cleared and the row kept.
+    """
+    from datetime import timedelta
+
+    from projectdivert.services.utils import utcnow
+
+    with app_context.app.app_context():
+        seed_demo(password='DemoPassword123!')
+        driver = app_context.User.query.filter_by(email=DEMO_DRIVER_EMAIL).first()
+
+        real = app_context.WasteRemovalRequest(
+            requester_name='A Real Customer', requester_email='real@example.com',
+            material_type='Glass', waste_amount=1.0, waste_unit='Tonnes',
+            pickup_address='1 Real Road', pickup_postcode='SW1A1AA',
+            scheduled_pickup_at=utcnow() + timedelta(days=1), status='matched',
+            assigned_driver_user_id=driver.id,
+        )
+        app_context.db.session.add(real)
+        app_context.db.session.commit()
+        real_id = real.id
+
+        clear_demo_data()
+
+        kept = app_context.db.session.get(
+            app_context.WasteRemovalRequest, real_id)
+        assert kept is not None
+        assert kept.assigned_driver_user_id is None

@@ -23,11 +23,22 @@ from projectdivert.models.compliance import (
     DriverComplianceDocument,
     WasteComplianceDocument,
 )
+from projectdivert.models.audit import AuditEvent, AuthAuditEvent
+from projectdivert.models.auth import AuthLifecycleToken, AuthSecurityBlocklist
+from projectdivert.models.mobile import MobilePushSubscription
+from projectdivert.models.payments import (
+    WasteDriverPayout,
+    WastePaymentCharge,
+    WastePaymentRefund,
+)
 from projectdivert.models.user import User
 from projectdivert.models.waste import (
+    DispatchIncidentEvent,
     WasteRemovalDispatchOffer,
     WasteRemovalMatch,
     WasteRemovalRequest,
+    WasteRemovalVehicleLocation,
+    WasteRequestCommunicationLog,
 )
 from projectdivert.services.utils import _is_truthy, utcnow
 
@@ -264,37 +275,121 @@ def _seed_collection(spec, customer, driver, admin, company):
     return booking
 
 
+#: Everything that hangs off a waste request, as (model, foreign key column).
+#: A row here belongs to the request, so clearing a demo request clears it too.
+_REQUEST_CHILDREN = (
+    (WasteComplianceDocument, 'waste_removal_request_id'),
+    (WasteRequestCommunicationLog, 'waste_removal_request_id'),
+    (WasteRemovalDispatchOffer, 'waste_removal_request_id'),
+    (WasteRemovalMatch, 'waste_removal_request_id'),
+    (WasteRemovalVehicleLocation, 'waste_removal_request_id'),
+    (DispatchIncidentEvent, 'waste_removal_request_id'),
+    (WastePaymentRefund, 'waste_removal_request_id'),
+    (WastePaymentCharge, 'waste_removal_request_id'),
+    (WasteDriverPayout, 'waste_removal_request_id'),
+)
+
+#: Rows that belong to a demo account rather than merely mentioning one: the
+#: account's own sessions, devices and documents. These go with the account.
+_USER_OWNED = (
+    (AuthLifecycleToken, 'user_id'),
+    (AuthAuditEvent, 'user_id'),
+    (MobilePushSubscription, 'user_id'),
+    (DriverComplianceDocument, 'driver_user_id'),
+)
+
+#: Columns that only record who did something. The row may belong to real data
+#: -- a genuine collection the demo driver was assigned to, an audit entry
+#: naming the demo admin -- so the reference is cleared and the row is kept.
+#: Every one of these columns is nullable; that is what makes this safe.
+_USER_REFERENCES = (
+    (WasteRemovalRequest, 'assigned_driver_user_id'),
+    (WasteRemovalRequest, 'incident_owner_admin_user_id'),
+    (WasteRemovalRequest, 'billing_updated_by_user_id'),
+    (WasteRemovalRequest, 'billing_followup_updated_by_user_id'),
+    (WasteComplianceDocument, 'uploaded_by_user_id'),
+    (WasteComplianceDocument, 'verified_by_user_id'),
+    (CompanyComplianceDocument, 'uploaded_by_user_id'),
+    (CompanyComplianceDocument, 'verified_by_user_id'),
+    (DriverComplianceDocument, 'verified_by_user_id'),
+    (DriverComplianceDocument, 'uploaded_by_user_id'),
+    (WasteRequestCommunicationLog, 'created_by_user_id'),
+    (DispatchIncidentEvent, 'actor_user_id'),
+    (AuditEvent, 'actor_user_id'),
+    (AuthSecurityBlocklist, 'created_by_user_id'),
+    (WastePaymentCharge, 'customer_user_id'),
+)
+
+
+def _delete_where_in(model, column_name, ids):
+    if not ids:
+        return 0
+    column = getattr(model, column_name)
+    return (
+        model.query.filter(column.in_(ids))
+        .delete(synchronize_session=False)
+    )
+
+
 def clear_demo_data():
     """Remove everything a previous seed created. Touches nothing else.
 
     Demo rows are recognised by the reserved .test email domain, so this cannot
     reach a real customer's collections even if it is pointed at a database
     holding them.
+
+    A demo leaves more behind than the seed created. Signing in writes session
+    and audit rows, driving writes locations, and every one of those has a
+    foreign key to the account. Deleting the accounts without clearing them
+    first fails on the constraint -- which is exactly when reset is wanted, so
+    this walks the references rather than only the rows the seed wrote.
+
+    References are treated by what they mean. A row that belongs to a demo
+    request or a demo account is deleted with it. A column that merely records
+    who acted is set to NULL, because the row it sits on may be real data the
+    demo driver happened to touch, and deleting that would be destroying
+    something this promised not to reach.
     """
     removed = {'requests': 0, 'users': 0}
 
-    bookings = WasteRemovalRequest.query.filter_by(
-        requester_email=DEMO_CUSTOMER_EMAIL,
-    ).all()
-    for booking in bookings:
-        for model in (WasteComplianceDocument, WasteRemovalDispatchOffer,
-                      WasteRemovalMatch):
-            model.query.filter_by(waste_removal_request_id=booking.id).delete()
-        db.session.delete(booking)
-        removed['requests'] += 1
+    request_ids = [
+        row.id for row in WasteRemovalRequest.query
+        .filter_by(requester_email=DEMO_CUSTOMER_EMAIL)
+        .with_entities(WasteRemovalRequest.id)
+        .all()
+    ]
+    user_ids = [
+        row.id for row in User.query
+        .filter(User.email.in_([email for email, _role, _name in DEMO_ACCOUNTS]))
+        .with_entities(User.id)
+        .all()
+    ]
+
+    for model, column_name in _REQUEST_CHILDREN:
+        _delete_where_in(model, column_name, request_ids)
+
+    removed['requests'] = _delete_where_in(
+        WasteRemovalRequest, 'id', request_ids,
+    )
 
     company = CarrierCompany.query.filter_by(name=DEMO_CARRIER_COMPANY).first()
     if company is not None:
         CompanyComplianceDocument.query.filter_by(
-            carrier_company_id=company.id).delete()
+            carrier_company_id=company.id).delete(synchronize_session=False)
 
-    for email, _role, _name in DEMO_ACCOUNTS:
-        user = User.query.filter_by(email=email).first()
-        if user is None:
-            continue
-        DriverComplianceDocument.query.filter_by(driver_user_id=user.id).delete()
-        db.session.delete(user)
-        removed['users'] += 1
+    for model, column_name in _USER_OWNED:
+        _delete_where_in(model, column_name, user_ids)
+
+    # Clear the pointers before the accounts go, so nothing is left referring
+    # to a user id that no longer exists.
+    for model, column_name in _USER_REFERENCES:
+        if not user_ids:
+            break
+        column = getattr(model, column_name)
+        (model.query.filter(column.in_(user_ids))
+         .update({column_name: None}, synchronize_session=False))
+
+    removed['users'] = _delete_where_in(User, 'id', user_ids)
 
     if company is not None:
         db.session.delete(company)
