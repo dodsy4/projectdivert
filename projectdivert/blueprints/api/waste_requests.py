@@ -3,7 +3,9 @@
 import queue
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 from projectdivert.extensions import db
-from projectdivert.models.waste import WasteRemovalRequest, WasteRemovalVehicleLocation
+from sqlalchemy import select
+
+from projectdivert.models.waste import WasteRemovalDispatchOffer, WasteRemovalRequest, WasteRemovalVehicleLocation
 from projectdivert.services.audit import record_audit_event
 from projectdivert.services.auth import _request_access_allowed, _request_driver_mutation_allowed, jwt_required
 from projectdivert.services.compliance import COMPLIANCE_COMPLETION_REQUIRED_TYPES, _compliance_documents_for_request, _compliance_missing_required_document_types, _compliance_summary_for_documents
@@ -11,7 +13,7 @@ from projectdivert.services.dispatch import _get_latest_match_for_request, _seri
 from projectdivert.services.events import _format_sse_event, _parse_waste_request_last_event_id, _publish_waste_request_event, _subscribe_waste_request_events, _unsubscribe_waste_request_events, _waste_request_replay_events_since
 from projectdivert.services.geo import PostcodeLookupUnavailable
 from projectdivert.services.notifications import _notify_mobile_push_for_waste_event
-from projectdivert.services.waste_requests import WasteRequestError, create_waste_request
+from projectdivert.services.waste_requests import INITIAL_STATUS, WasteRequestError, create_waste_request
 from projectdivert.services.utils import _current_jwt_email, _current_jwt_role, _current_jwt_user_id, _parse_datetime_or_error, _to_float_or_none, utcnow
 
 bp = Blueprint('api_waste_requests', __name__)
@@ -289,6 +291,25 @@ def api_get_latest_vehicle_location(request_id):
     )
 
 
+def _claimable_requests(query):
+    """Narrow a request query to jobs a driver could actually pick up.
+
+    Two conditions, and both were missing. The status filter said 'pending',
+    which no request has ever been created with -- the initial status is
+    'pending_match', so the available list was unconditionally empty. And a
+    request with no open offer cannot be claimed at all, so listing one only
+    produces a button that fails.
+    """
+    return query.filter(
+        WasteRemovalRequest.status == INITIAL_STATUS,
+        WasteRemovalRequest.assigned_driver_user_id.is_(None),
+        WasteRemovalRequest.id.in_(
+            select(WasteRemovalDispatchOffer.waste_removal_request_id)
+            .where(WasteRemovalDispatchOffer.status == 'offered')
+        ),
+    )
+
+
 #: How the list endpoint scopes rows, per role. A customer can only ever see
 #: their own requests regardless of what they ask for.
 _LIST_SCOPES = ('mine', 'assigned', 'available', 'all')
@@ -325,10 +346,7 @@ def api_list_waste_requests():
         if scope == 'assigned':
             query = query.filter(WasteRemovalRequest.assigned_driver_user_id == user_id)
         else:
-            query = query.filter(
-                WasteRemovalRequest.status == 'pending',
-                WasteRemovalRequest.assigned_driver_user_id.is_(None),
-            )
+            query = _claimable_requests(query)
     else:
         scope = scope or 'all'
         if scope == 'mine':
@@ -336,10 +354,7 @@ def api_list_waste_requests():
         elif scope == 'assigned':
             query = query.filter(WasteRemovalRequest.assigned_driver_user_id == user_id)
         elif scope == 'available':
-            query = query.filter(
-                WasteRemovalRequest.status == 'pending',
-                WasteRemovalRequest.assigned_driver_user_id.is_(None),
-            )
+            query = _claimable_requests(query)
 
     status = (request.args.get('status') or '').strip()
     if status:
