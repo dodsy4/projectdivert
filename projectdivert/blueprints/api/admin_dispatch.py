@@ -890,15 +890,32 @@ def api_accept_dispatch_offer(request_id):
 
     payload = request.get_json(silent=True) or {}
     offer_token = str(payload.get('offer_token') or '').strip()
-    if not offer_token:
-        return jsonify({'error': 'offer_token is required'}), 400
 
-    offer = WasteRemovalDispatchOffer.query.filter_by(
-        waste_removal_request_id=booking.id,
-        offer_token=offer_token,
-    ).first()
-    if not offer:
-        return jsonify({'error': 'Dispatch offer not found'}), 404
+    if offer_token:
+        # A provider following the link from their notification email, which
+        # identifies the specific offer that was sent to them.
+        offer = WasteRemovalDispatchOffer.query.filter_by(
+            waste_removal_request_id=booking.id,
+            offer_token=offer_token,
+        ).first()
+        if not offer:
+            return jsonify({'error': 'Dispatch offer not found'}), 404
+    else:
+        # A driver claiming from the job board, where there is no token to
+        # quote -- the board lists the request, not the offer. Take the best
+        # ranked offer still open. Requiring a token here made the claim button
+        # in the web dashboard fail with a 400 every time.
+        offer = (
+            WasteRemovalDispatchOffer.query
+            .filter_by(waste_removal_request_id=booking.id, status='offered')
+            .order_by(
+                WasteRemovalDispatchOffer.offer_rank.asc(),
+                WasteRemovalDispatchOffer.id.asc(),
+            )
+            .first()
+        )
+        if not offer:
+            return jsonify({'error': 'No open dispatch offer for this request'}), 409
 
     driver_user_id = _current_jwt_user_id()
     if driver_user_id is None:
