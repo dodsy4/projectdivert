@@ -1,9 +1,11 @@
 """Waste, driver and carrier-company compliance documents."""
 
+import re
+
 from projectdivert.extensions import db
 from projectdivert.models.compliance import CarrierCompany, CompanyComplianceDocument, DriverComplianceDocument, WasteComplianceDocument
 from projectdivert.models.user import User
-from projectdivert.services.utils import _parse_datetime_or_error, _to_int_or_none, utcnow
+from projectdivert.services.utils import _is_truthy, _parse_datetime_or_error, _to_int_or_none, utcnow
 
 
 def _driver_dispatch_eligibility_error(driver_user_id):
@@ -16,6 +18,56 @@ def _driver_dispatch_eligibility_error(driver_user_id):
         return '', []
 
     return 'Driver compliance review incomplete for dispatch', status['missing_document_types']
+
+
+#: Environment Agency waste carrier registration numbers. Upper and lower tier
+#: registrations carry a letter suffix (CBDU / CBDL); the older ABW and ABT
+#: series appear on registrations predating the current scheme.
+#:
+#: The agency has changed this format before and may again, which is why an
+#: unrecognised number can still be recorded deliberately rather than refused --
+#: a real licence the pattern has not caught up with must not block a driver
+#: from being onboarded.
+WASTE_CARRIER_REFERENCE_PATTERN = re.compile(r'^(CBD|CBT|ABW|ABT)[UL]?\d{4,10}$')
+
+WASTE_CARRIER_REFERENCE_HINT = (
+    'Environment Agency waste carrier numbers look like CBDU123456. '
+    'Send allow_unrecognised_reference to record it anyway.'
+)
+
+
+def normalize_waste_carrier_reference(value):
+    """Upper-case, and strip the spaces and dashes people type into the field."""
+    return re.sub(r'[\s-]+', '', str(value or '')).upper()
+
+
+def waste_carrier_reference_looks_valid(value):
+    """Whether a reference matches the Environment Agency registration format."""
+    return bool(WASTE_CARRIER_REFERENCE_PATTERN.match(
+        normalize_waste_carrier_reference(value),
+    ))
+
+
+def _checked_carrier_reference(document_type, document_reference, payload):
+    """Validate and tidy a waste carrier number, for the document type that is one.
+
+    A carrier licence whose number is a typo is worse than one with no number at
+    all: it looks verifiable, so the admin reviewing it has no reason to doubt
+    it. Other document types keep whatever reference they were given.
+    """
+    if document_type != 'carrier_license' or not document_reference:
+        return document_reference
+
+    if waste_carrier_reference_looks_valid(document_reference):
+        return normalize_waste_carrier_reference(document_reference)[:120]
+
+    if _is_truthy(payload.get('allow_unrecognised_reference')):
+        return document_reference
+
+    raise ValueError(
+        'document_reference does not look like a waste carrier registration. '
+        + WASTE_CARRIER_REFERENCE_HINT
+    )
 
 
 COMPLIANCE_DOCUMENT_TYPES = {
@@ -349,6 +401,7 @@ def _build_driver_compliance_document(driver_user_id, payload, actor_user_id, ac
     notes = notes[:2000] if notes else None
     document_reference = str(payload.get('document_reference') or '').strip()
     document_reference = document_reference[:120] if document_reference else None
+    document_reference = _checked_carrier_reference(document_type, document_reference, payload)
 
     issued_at = None
     expires_at = None
@@ -402,6 +455,7 @@ def _build_company_compliance_document(carrier_company_id, payload, actor_user_i
     notes = notes[:2000] if notes else None
     document_reference = str(payload.get('document_reference') or '').strip()
     document_reference = document_reference[:120] if document_reference else None
+    document_reference = _checked_carrier_reference(document_type, document_reference, payload)
 
     issued_at = None
     expires_at = None

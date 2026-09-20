@@ -97,7 +97,10 @@ def _seed_driver_dispatch_compliance(app_context, driver_email, verifier_email=N
                     document_type=document_type,
                     status='verified',
                     file_url=f'https://example.com/driver-compliance/{driver.id}/{document_type}.pdf',
-                    document_reference=f'{document_type.upper()}-{driver.id}',
+                    document_reference=(
+                        'CBDU{:06d}'.format(driver.id) if document_type == 'carrier_license'
+                        else f'{document_type.upper()}-{driver.id}'
+                    ),
                     verified_at=now,
                     expires_at=expires_at,
                     metadata_json={'seeded': True},
