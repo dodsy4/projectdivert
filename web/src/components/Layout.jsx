@@ -3,8 +3,10 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Briefcase,
   ClipboardList,
+  BarChart3,
   LayoutDashboard,
   LogOut,
+  Map,
   Menu,
   PlusCircle,
   Truck,
@@ -27,12 +29,19 @@ const DRIVER_NAV = [
 
 const ADMIN_NAV = [...CUSTOMER_NAV, ...DRIVER_NAV];
 
+// Available to every role: both views are scoped server-side, so a driver sees
+// their own jobs and a customer their own collections.
+const SHARED_NAV = [
+  { to: '/map', icon: Map, label: 'Map' },
+  { to: '/reports', icon: BarChart3, label: 'Reports' },
+];
+
 const PROFILE_NAV = { to: '/profile', icon: User, label: 'Profile' };
 
 function navFor(role) {
-  if (role === 'driver') return [...DRIVER_NAV, PROFILE_NAV];
-  if (role === 'admin') return [...ADMIN_NAV, PROFILE_NAV];
-  return [...CUSTOMER_NAV, PROFILE_NAV];
+  if (role === 'driver') return [...DRIVER_NAV, ...SHARED_NAV, PROFILE_NAV];
+  if (role === 'admin') return [...ADMIN_NAV, ...SHARED_NAV, PROFILE_NAV];
+  return [...CUSTOMER_NAV, ...SHARED_NAV, PROFILE_NAV];
 }
 
 export default function Layout({ children }) {

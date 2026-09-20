@@ -320,7 +320,9 @@ def test_certificate_figure_matches_the_lca_engine(client, app_context):
     request_id = _make_request(app_context, status='completed', material='Timber',
                                amount=2.0, unit='tonnes')
     with app_context.app.app_context():
-        from projectdivert.blueprints.certificates import _assess
+        # Lifted into the service layer so the reports endpoint totals the
+        # same figures the certificate shows.
+        from projectdivert.services.carbon import assess_collection_carbon as _assess
 
         booking = app_context.db.session.get(app_context.WasteRemovalRequest, request_id)
         result, context = _assess(booking)

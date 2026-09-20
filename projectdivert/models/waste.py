@@ -17,6 +17,12 @@ class WasteRemovalRequest(db.Model):
     pickup_city = db.Column(db.String(120))
     pickup_county = db.Column(db.String(120))
     pickup_postcode = db.Column(db.String(32), nullable=False)
+    # Geocoded from the postcode when the request is created. It was computed
+    # to choose providers and then discarded, which left nothing to plot a
+    # collection at. Nullable because rows created before this existed have no
+    # coordinates, and because a postcode lookup can fail.
+    pickup_latitude = db.Column(db.Float)
+    pickup_longitude = db.Column(db.Float)
     scheduled_pickup_at = db.Column(db.DateTime, nullable=False)
     notes = db.Column(db.Text)
     status = db.Column(db.String(32), nullable=False, default='pending')

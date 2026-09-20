@@ -172,4 +172,9 @@ export const acceptOffer = (id, token) =>
 export const setStatus = (id, status) =>
   api.post(`/api/v1/waste-requests/${id}/status`, { status });
 
+export const collectionReport = (params = {}) => {
+  const query = new URLSearchParams(params).toString();
+  return api.get(`/api/v1/reports/collections${query ? `?${query}` : ''}`);
+};
+
 export const certificateUrl = (id) => `${BASE_URL}/certificate/${id}`;

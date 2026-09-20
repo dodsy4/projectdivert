@@ -5,9 +5,11 @@ import { useAuth } from './auth/AuthContext.jsx';
 import AvailableJobsPage from './pages/AvailableJobsPage.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
+import MapPage from './pages/MapPage.jsx';
 import MyJobsPage from './pages/MyJobsPage.jsx';
 import NewRequestPage from './pages/NewRequestPage.jsx';
 import ProfilePage from './pages/ProfilePage.jsx';
+import ReportsPage from './pages/ReportsPage.jsx';
 import RequestsPage from './pages/RequestsPage.jsx';
 
 /** Where each role lands after signing in. */
@@ -44,6 +46,10 @@ export default function App() {
 
         {user.role !== 'customer' && <Route path="/jobs" element={<AvailableJobsPage />} />}
         {user.role !== 'customer' && <Route path="/my-jobs" element={<MyJobsPage />} />}
+
+        {/* Both are scoped server-side, so each role sees only its own work. */}
+        <Route path="/map" element={<MapPage />} />
+        <Route path="/reports" element={<ReportsPage />} />
 
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="*" element={<Navigate to={home} replace />} />

@@ -57,6 +57,55 @@ def seed_materials():
     ))
 
 
+@click.command('backfill-pickup-coordinates')
+@click.option('--limit', default=500, show_default=True,
+              help='Most requests to geocode in one run.')
+@click.option('--dry-run', is_flag=True, help='Report what would be done.')
+@with_appcontext
+def backfill_pickup_coordinates(limit, dry_run):
+    """Geocode the pickup postcode of requests created before it was stored.
+
+    Separate from the migration on purpose: geocoding is a network call to an
+    external service, and a migration is the wrong place for something that can
+    fail halfway through. Safe to re-run -- it only looks at rows still
+    missing coordinates, and lookups are cached.
+    """
+    from projectdivert.extensions import db
+    from projectdivert.models.waste import WasteRemovalRequest
+    from projectdivert.services.geo import PostcodeLookupUnavailable, _postcode_coordinates
+
+    rows = (
+        WasteRemovalRequest.query
+        .filter(WasteRemovalRequest.pickup_latitude.is_(None))
+        .order_by(WasteRemovalRequest.id.asc())
+        .limit(limit)
+        .all()
+    )
+    click.echo('{} request(s) without coordinates.'.format(len(rows)))
+    if dry_run or not rows:
+        return
+
+    filled = failed = 0
+    for booking in rows:
+        try:
+            latitude, longitude = _postcode_coordinates(booking.pickup_postcode)
+        except PostcodeLookupUnavailable as exc:
+            # The service is down; stop rather than marking the rest failed.
+            click.echo('Stopping: {}'.format(exc))
+            break
+        except ValueError:
+            failed += 1
+            click.echo('  #{} unusable postcode: {!r}'.format(
+                booking.id, booking.pickup_postcode))
+            continue
+        booking.pickup_latitude = latitude
+        booking.pickup_longitude = longitude
+        filled += 1
+
+    db.session.commit()
+    click.echo('Filled {}, could not geocode {}.'.format(filled, failed))
+
+
 @click.command('seed-demo')
 @click.option('--password', default='DemoPassword123!', show_default=True,
               help='Password for every demo account.')
@@ -298,6 +347,7 @@ COMMANDS = (
     seed_reference_data,
     seed_materials,
     seed_demo_command,
+    backfill_pickup_coordinates,
     auth_token_cleanup,
     ops_health_digest,
     dispatch_incident_maintenance,

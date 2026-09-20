@@ -182,6 +182,8 @@ def create_waste_request(payload, *, base_url=None, notify=True):
         pickup_city=(str(payload.get('pickup_city') or '').strip()[:120] or None),
         pickup_county=(str(payload.get('pickup_county') or '').strip()[:120] or None),
         pickup_postcode=cleaned['pickup_postcode'][:32],
+        pickup_latitude=pickup_latitude,
+        pickup_longitude=pickup_longitude,
         scheduled_pickup_at=scheduled_pickup_at,
         notes=(str(payload.get('notes') or '').strip() or None),
         status=INITIAL_STATUS,
