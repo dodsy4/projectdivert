@@ -57,6 +57,41 @@ def seed_materials():
     ))
 
 
+@click.command('seed-demo')
+@click.option('--password', default='DemoPassword123!', show_default=True,
+              help='Password for every demo account.')
+@click.option('--reset', is_flag=True,
+              help='Remove the previous demo data first.')
+@with_appcontext
+def seed_demo_command(password, reset):
+    """Create demo accounts and a scenario part-way through, for demonstrating."""
+    from projectdivert.services.demo_seed import seed_demo
+
+    try:
+        summary = seed_demo(password=password, reset=reset)
+    except PermissionError as exc:
+        raise click.ClickException(str(exc))
+
+    click.echo('Demo accounts (password: {}):'.format(summary['password']))
+    for account in summary['accounts']:
+        click.echo('  {:<40} {:<9} {}'.format(
+            account['email'], account['role'],
+            'created' if account['created'] else 'updated',
+        ))
+
+    if summary['collections']:
+        click.echo('\nCollections seeded:')
+        for row in summary['collections']:
+            click.echo('  #{:<5} {:<14} {}'.format(
+                row['id'], row['status'], row['material_type']))
+        click.echo('\nThe completed one has a carbon certificate at '
+                   '/certificate/<id>.')
+    else:
+        click.echo('\n{} demo collection(s) already present; left alone. '
+                   'Use --reset to rebuild them.'.format(
+                       summary['existing_collections']))
+
+
 @click.command('auth-token-cleanup')
 @click.option(
     '--retention-days',
@@ -262,6 +297,7 @@ def enqueue_job(job_name, sync, dry_run):
 COMMANDS = (
     seed_reference_data,
     seed_materials,
+    seed_demo_command,
     auth_token_cleanup,
     ops_health_digest,
     dispatch_incident_maintenance,
