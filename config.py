@@ -167,6 +167,10 @@ REDIS_URL = _clean_env_url(os.getenv('REDIS_URL', '')) or ''
 RQ_REDIS_URL = _clean_env_url(os.getenv('RQ_REDIS_URL', '')) or ''
 RQ_JOB_TIMEOUT = _int_env('RQ_JOB_TIMEOUT', 600)
 
+# Demo seeding. `flask seed-demo` creates accounts with a known password, so it
+# refuses to run outside debug/testing unless this says otherwise.
+ALLOW_DEMO_SEED = _bool_env('ALLOW_DEMO_SEED', False)
+
 # Ops health monitoring
 OPS_HEALTH_AUTH_WINDOW_MINUTES = _int_env('OPS_HEALTH_AUTH_WINDOW_MINUTES', 60)
 OPS_HEALTH_DISPATCH_LIMIT = _int_env('OPS_HEALTH_DISPATCH_LIMIT', 500)
