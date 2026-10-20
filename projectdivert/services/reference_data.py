@@ -109,9 +109,45 @@ def _seed_reference_model_from_frame(model, frame, row_builder, force=False):
     return {'inserted': len(objects), 'existing': existing, 'skipped': False}
 
 
+# sites.xlsx holds real client site records. It is gitignored as confidential,
+# so it is absent from every fresh checkout and every deploy built from the
+# repository. Seeding treats it as optional: when it is missing, the site table
+# is left exactly as it is and everything else is still seeded. The other source
+# files ship with the repository, so if one of those is missing that is a real
+# fault and the seed still stops.
+SITES_REFERENCE_FILE = 'sites.xlsx'
+
+
+def _read_optional_site_frame():
+    try:
+        return pd.read_excel(SITES_REFERENCE_FILE)
+    except FileNotFoundError:
+        logger.warning(
+            'Reference seed: %s not found; leaving site_reference unchanged.',
+            SITES_REFERENCE_FILE,
+        )
+        return None
+
+
+def _seed_site_reference(site_frame, force=False):
+    if site_frame is None:
+        return {
+            'inserted': 0,
+            'existing': SiteReference.query.count(),
+            'skipped': True,
+            'missing_file': SITES_REFERENCE_FILE,
+        }
+    return _seed_reference_model_from_frame(
+        SiteReference,
+        site_frame,
+        lambda index, row: SiteReference(source_row_index=int(index), row_data=_clean_reference_row(row)),
+        force=force,
+    )
+
+
 def _seed_reference_data_from_files(force=False):
     supplier_frame = pd.read_csv('data/df3.csv')
-    site_frame = pd.read_excel('sites.xlsx')
+    site_frame = _read_optional_site_frame()
     divert_output_frame = pd.read_csv('divert_db.csv')
     reuse_frame = _normalize_material_column(pd.read_csv('reuse_offset.csv'))
     recycle_frame = _normalize_material_column(pd.read_excel('recycle_offset.csv'))
@@ -124,12 +160,7 @@ def _seed_reference_data_from_files(force=False):
             _build_supplier_reference_row,
             force=force,
         ),
-        'site_reference': _seed_reference_model_from_frame(
-            SiteReference,
-            site_frame,
-            lambda index, row: SiteReference(source_row_index=int(index), row_data=_clean_reference_row(row)),
-            force=force,
-        ),
+        'site_reference': _seed_site_reference(site_frame, force=force),
         'divert_output_reference': _seed_reference_model_from_frame(
             DivertOutputReference,
             divert_output_frame,
