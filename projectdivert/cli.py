@@ -34,6 +34,14 @@ def seed_reference_data(force):
                 table_summary['skipped'],
             )
         )
+        if table_summary.get('missing_file'):
+            click.echo(
+                '  {} not found, so {} was left unchanged. It holds client data and is '
+                'not kept in the repository; this is expected.'.format(
+                    table_summary['missing_file'],
+                    table_name,
+                )
+            )
 
 
 
